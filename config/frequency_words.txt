@@ -26,6 +26,9 @@ DJI
 黑神话
 冯骥
 
+影之刃零
+梁其伟
+
 哪吒
 饺子
 杨宇
@@ -34,8 +37,8 @@ DJI
 
 三体
 流浪地球
-郭帆
 刘慈欣
+郭帆
 
 申奥
 
@@ -65,6 +68,7 @@ deepmind
 
 chatgpt
 openai
+sora
 
 claude
 Anthropic
