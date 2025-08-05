@@ -628,6 +628,21 @@ platforms:
 |           **龙            |  10  | 2025.7.29 |      支持一下      |
 
 <details>
+<summary><strong>👉 微信推送通知的折中方案</strong></summary>
+<br>
+
+> 由于该方案是基于企业微信的插件机制，推送样式也十分不同，所以相关实现我暂时不准备纳入当前项目
+
+- fork 这位兄台的项目 https://github.com/jayzqj/TrendRadar
+- 完成上方的企业微信推送设置 
+- 按照下面图片操作
+<img src="_image/wework.png"  title="github"/>
+
+- 配置好后，手机上的企业微信 app 删除掉也没事
+
+</details>
+
+<details>
 <summary><strong>👉 自荐</strong></summary>
 <br>
 
