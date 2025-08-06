@@ -76,9 +76,10 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 
 **💡 提示：** 想要**实时更新**的网页版？进入你的仓库 Settings → Pages，启用 GitHub Pages。比如我这里[TrendRadar](https://sansan0.github.io/TrendRadar/)。
 
-<p align="center">
-  <img src="_image/2025-06-14.jpg" alt="飞书推送效果" width="400"/>
-</p>
+
+| Github Pages效果 | 飞书推送效果 |
+|:---:|:---:|
+| ![Github Pages效果](_image/github-pages.png) | ![飞书推送效果](_image/feishu.jpg) |
 
 <details>
 <summary><strong>👉 点击查看推送格式说明</strong></summary>
