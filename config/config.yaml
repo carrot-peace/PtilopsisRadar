@@ -46,6 +46,8 @@ weight:
   frequency_weight: 0.3 # 频次权重
   hotness_weight: 0.1 # 热度权重
 
+# 增加无聊的小知识
+# 这里的 name 你可以定义任意名称，只具有显示作用，不会影响数据的处理
 platforms:
   - id: "toutiao"
     name: "今日头条"
