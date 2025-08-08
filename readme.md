@@ -117,6 +117,23 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 
 ## 📝 更新日志
 
+<details>
+<summary><strong>👉 项目相关推荐</strong></summary>
+<br>
+
+> 附项目相关的两篇文章，欢迎留言交流
+
+- [2个月破 1000 star，我的GitHub项目推广实战经验](https://mp.weixin.qq.com/s/jzn0vLiQFX408opcfpPPxQ)
+- [基于本项目，如何开展公众号或者新闻资讯类文章写作](https://mp.weixin.qq.com/s/8ghyfDAtQZjLrnWTQabYOQ)
+
+>**AI 开发：**
+- 如果你有小众需求，完全可以基于我的项目自行开发，零编程基础的也可以试试
+- 我所有的开源项目或多或少都使用了自己写的**AI辅助软件**来提升开发效率，这款工具已开源
+- **核心功能**：迅速筛选项目代码喂给AI，你只需要补充个人需求即可
+- **项目地址**：[https://github.com/sansan0/ai-code-context-helper](https://github.com/sansan0/ai-code-context-helper)
+
+</details>
+
 >**升级说明：** 
 - **小版本更新**：直接在 GitHub 网页编辑器中，用本项目的 `main.py` 代码替换你 fork 仓库中的对应文件 
 - **大版本升级**：从 v1.x 升级到 v2.0 建议删除现有 fork 后重新 fork，这样更省力且避免配置冲突
@@ -642,28 +659,12 @@ platforms:
 - fork 这位兄台的项目 https://github.com/jayzqj/TrendRadar
 - 完成上方的企业微信推送设置 
 - 按照下面图片操作
-<img src="_image/wework.png"  title="github"/>
-
 - 配置好后，手机上的企业微信 app 删除掉也没事
 
-</details>
-
-<details>
-<summary><strong>👉 自荐</strong></summary>
-<br>
-
-> 附项目相关的两篇文章，欢迎留言交流
-
-- [2个月破 1000 star，我的GitHub项目推广实战经验](https://mp.weixin.qq.com/s/jzn0vLiQFX408opcfpPPxQ)
-- [基于本项目，如何开展公众号或者新闻资讯类文章写作](https://mp.weixin.qq.com/s/8ghyfDAtQZjLrnWTQabYOQ)
-
->**AI 开发：**
-- 如果你有小众需求，完全可以基于我的项目自行开发，零编程基础的也可以试试
-- 我所有的开源项目或多或少都使用了自己写的**AI辅助软件**来提升开发效率，这款工具已开源
-- **核心功能**：迅速筛选项目代码喂给AI，你只需要补充个人需求即可
-- **项目地址**：[https://github.com/sansan0/ai-code-context-helper](https://github.com/sansan0/ai-code-context-helper)
+<img src="_image/wework.png"  title="github"/>
 
 </details>
+
 
 <details>
 <summary><strong>👉 "手机推送通知系列"之新项目挖坑预告</strong></summary>
