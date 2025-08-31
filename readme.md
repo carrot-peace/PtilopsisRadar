@@ -101,8 +101,6 @@
 
 **静默推送模式**：
 
-支持时间窗口控制，避免非工作时间的消息打扰：
-
 - **时间范围控制**：设定推送时间窗口（如 9:00-18:00），仅在指定时间内推送
 - **适用场景**：
   - 时间内每次执行都推送
@@ -174,28 +172,10 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 
 ## 📝 更新日志
 
-<details>
-<summary><strong>👉 项目相关推荐</strong></summary>
-<br>
-
-> 附项目相关的两篇文章，欢迎留言交流
-
-- [2个月破 1000 star，我的GitHub项目推广实战经验](https://mp.weixin.qq.com/s/jzn0vLiQFX408opcfpPPxQ)
-- [基于本项目，如何开展公众号或者新闻资讯类文章写作](https://mp.weixin.qq.com/s/8ghyfDAtQZjLrnWTQabYOQ)
-
->**AI 开发：**
-- 如果你有小众需求，完全可以基于我的项目自行开发，零编程基础的也可以试试
-- 我所有的开源项目或多或少都使用了自己写的**AI辅助软件**来提升开发效率，这款工具已开源
-- **核心功能**：迅速筛选项目代码喂给AI，你只需要补充个人需求即可
-- **项目地址**：[https://github.com/sansan0/ai-code-context-helper](https://github.com/sansan0/ai-code-context-helper)
-
-</details>
-
 >**升级说明：** 
-- **注意**：请通过以下方式更新项目，不要通过 Sync fork 等方式更新
-- **小版本更新**：直接在 GitHub 网页编辑器中，用本项目的 `main.py` 代码替换你 fork 仓库中的对应文件 
+- **注意**：请通过以下方式更新项目(或根据**更新提示**升级)，不要通过 Sync fork 更新
+- **小版本更新**：一般情况，直接在 GitHub 网页编辑器中，用本项目的 `main.py` 代码替换你 fork 仓库中的对应文件 
 - **大版本升级**：从 v1.x 升级到 v2.0 建议删除现有 fork 后重新 fork，这样更省力且避免配置冲突
-- **或者**：根据更新日志的特别说明升级
 
 ### 2025/08/30 - v2.1.0
 
@@ -215,9 +195,8 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 - **推送频率可选**：时间段内支持单次推送或多次推送
 
 **更新提示**：
-- 本功能默认关闭，需手动开启
-- 在 config.yaml 中开启静默推送模式 
-- 同时更新 main.py 和 config.yaml
+- 本功能默认关闭，需手动在 config.yaml 中开启静默推送模式
+- 升级需同时更新 main.py 和 config.yaml 两个文件
 
 <details>
 <summary><strong>👉 历史更新</strong></summary>
@@ -479,21 +458,26 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
       - `TELEGRAM_CHAT_ID`：填入第 2 步获得的 Chat ID
    </details>
 
-3. **配置关键词和设置**:
+3. **主要配置**:
 
-    - **关键词配置**: 修改 `config/frequency_words.txt` 文件，添加你关心的关键词
-    - **运行模式配置**: 在 `config/config.yaml` 中修改 `report.mode` 设置：
+    - **推送设置：** : 在 [config/config.yaml](config/config.yaml) 中进行，可根据里面的描述文字操作，这里不重复了
+    - 比如: 在 `config/config.yaml` 中修改 `report.mode` 设置：
+
       | 模式 | 推送时机 | 显示内容 | 适用场景 |
         |------|----------|----------|----------|
         | **当日汇总模式**<br/>`daily` | 按时推送 | 当日所有匹配新闻<br/>+ 新增新闻区域 | 日报总结<br/>全面了解当日热点趋势 |
         | **当前榜单模式**<br/>`current` | 按时推送 | 当前榜单匹配新闻<br/>+ 新增新闻区域 | 实时热点追踪<br/>了解当前最火的内容 |
         | **增量监控模式**<br/>`incremental` | 有新增才推送 | 新出现的匹配频率词新闻 | 避免重复信息干扰<br/>高频监控场景 |
-   
+
+    - **关键词配置**: 修改 [config/frequency_words.txt](config/frequency_words.txt) 文件，添加你关心的关键词
+    
     <details>
     <summary><strong>👉 frequency_words.txt 配置教程</strong></summary>
     <br>
 
     在 `frequency_words.txt` 文件中配置监控的关键词，支持三种语法和词组功能。
+
+    关键词越靠前，新闻的优先级越高，你可以根据自己的关注度调整关键词顺序
 
     ### 📋 基础语法说明
 
@@ -640,14 +624,9 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
     </details>
 
 
-4. **自动运行**:
+   
+    
 
-   - 项目已包含`.github/workflows/crawler.yml`配置文件，默认每小时运行一次
-   - 你也可以在 GitHub 仓库的 Actions 页面手动触发运行
-
-5. **查看结果**:
-   - 运行结果将自动保存在仓库的`output`目录中
-   - 同时通过配置的机器人发送通知到你的群组
 
 <details>
 <summary><strong>👉 自定义监控平台</strong></summary>
@@ -729,7 +708,24 @@ platforms:
 </div>
 
 <details>
-<summary><strong>👉 微信推送通知的折中方案</strong></summary>
+<summary><strong>👉 项目相关推荐</strong></summary>
+<br>
+
+> 附项目相关的两篇文章，欢迎留言交流
+
+- [2个月破 1000 star，我的GitHub项目推广实战经验](https://mp.weixin.qq.com/s/jzn0vLiQFX408opcfpPPxQ)
+- [基于本项目，如何开展公众号或者新闻资讯类文章写作](https://mp.weixin.qq.com/s/8ghyfDAtQZjLrnWTQabYOQ)
+
+>**AI 开发：**
+- 如果你有小众需求，完全可以基于我的项目自行开发，零编程基础的也可以试试
+- 我所有的开源项目或多或少都使用了自己写的**AI辅助软件**来提升开发效率，这款工具已开源
+- **核心功能**：迅速筛选项目代码喂给AI，你只需要补充个人需求即可
+- **项目地址**：[https://github.com/sansan0/ai-code-context-helper](https://github.com/sansan0/ai-code-context-helper)
+
+</details>
+
+<details>
+<summary><strong>👉 微信推送通知方案</strong></summary>
 <br>
 
 > 由于该方案是基于企业微信的插件机制，推送样式也十分不同，所以相关实现我暂时不准备纳入当前项目
