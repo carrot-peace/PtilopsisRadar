@@ -25,7 +25,7 @@
 > 遇到问题提 issues，或【硅基茶水间】公众号留言
 
 <details>
-<summary>👉 点击查看致谢名单 (当前 <strong>🔥14🔥</strong> 位)</summary>
+<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥15🔥</strong> 位)</summary>
 
 ### 数据支持
 
@@ -45,6 +45,7 @@
 
 |           点赞人            |  金额  |  日期  |             备注             |
 | :-------------------------: | :----: | :----: | :-----------------------: |
+|           *X            |  1.11  | 2025.9.3  |           |
 |           *飙            |  20  | 2025.8.31  |  来自老童谢谢         |
 |           *下            |  1  | 2025.8.30  |           |
 |           2*D            |  88  | 2025.8.13 下午 |           |
@@ -57,20 +58,12 @@
 |           *梦            |  0.1  | 2025.7.30 |            |
 |           **龙            |  10  | 2025.7.29 |      支持一下      |
 
+
+</details>
+
+
 <details>
-<summary><strong>👉 "手机推送通知系列" 挖坑(暂时鸽)</strong></summary>
-<br>
-
-截图中只支持一个渠道，大家有什么好的建议和想法可以公众号留言，完善好后开源
-这个暂时没有人来和我讨论，我先鸽为敬嘿嘿
-
-<img src="_image/next.jpg" width="300" title="github"/>
-
-</details>
-
-
-</details>
-
+<summary>👉 <strong>核心功能</strong></summary>
 
 ## ✨ 核心功能
 
@@ -132,7 +125,9 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 
 **典型场景：** 股市投资监控、品牌舆情追踪、行业动态关注、生活资讯获取
 
-| Github Pages效果 | 飞书推送效果 |
+</details>
+
+| Github Pages 网页效果(手机端也适配) | 飞书推送效果 |
 |:---:|:---:|
 | ![Github Pages效果](_image/github-pages.png) | ![飞书推送效果](_image/feishu.jpg) |
 
