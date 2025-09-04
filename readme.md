@@ -7,7 +7,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.1.0-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v2.1.1-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
 
 [![企业微信通知](https://img.shields.io/badge/企业微信-通知支持-00D4AA?style=flat-square)](https://work.weixin.qq.com/)
 [![Telegram通知](https://img.shields.io/badge/Telegram-通知支持-00D4AA?style=flat-square)](https://telegram.org/)
@@ -172,7 +172,6 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 - **小版本更新**：一般情况，直接在 GitHub 网页编辑器中，用本项目的 `main.py` 代码替换你 fork 仓库中的对应文件 
 - **大版本升级**：从 v1.x 升级到 v2.0 建议删除现有 fork 后重新 fork，这样更省力且避免配置冲突
 
-### 2025/08/30 - v2.1.0
 
 > 感谢各位朋友的支持与厚爱，特别感谢：
 > 
@@ -184,6 +183,16 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 > 
 > 下一次**新功能**，大概会是 ai 分析功能(大概(●'◡'●)
 
+### 2025/09/04 - v2.1.1
+
+- 修复docker在某些架构中无法正常运行的问题
+
+
+<details>
+<summary><strong>👉 历史更新</strong></summary>
+
+### 2025/08/30 - v2.1.0
+
 **核心改进**：
 - **推送逻辑优化**：从"每次执行都推送"改为"时间窗口内可控推送"
 - **时间窗口控制**：可设定推送时间范围，避免非工作时间打扰
@@ -192,9 +201,6 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 **更新提示**：
 - 本功能默认关闭，需手动在 config.yaml 中开启静默推送模式
 - 升级需同时更新 main.py 和 config.yaml 两个文件
-
-<details>
-<summary><strong>👉 历史更新</strong></summary>
 
 ### 2025/08/27 - v2.0.4
 
