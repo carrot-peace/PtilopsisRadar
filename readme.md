@@ -663,6 +663,9 @@ platforms:
 docker run -d --name trend-radar \
   -v ./config:/app/config:ro \
   -v ./output:/app/output \
+  -e CRON_SCHEDULE="*/30 * * * *" \
+  -e RUN_MODE="cron" \
+  -e IMMEDIATE_RUN="true" \
   wantcat/trendradar:latest
 
 # 或者配置环境变量启用推送通知
@@ -675,15 +678,33 @@ docker run -d --name trend-radar \
   -e TELEGRAM_BOT_TOKEN="你的telegram_bot_token" \
   -e TELEGRAM_CHAT_ID="你的telegram_chat_id" \
   -e CRON_SCHEDULE="*/30 * * * *" \
+  -e RUN_MODE="cron" \
+  -e IMMEDIATE_RUN="true" \
   wantcat/trendradar:latest
 ```
 
 **注意**：快速体验模式需要先准备配置文件：
+
+**Linux/macOS 系统：**
 ```bash
 # 创建配置目录并下载配置文件
 mkdir -p config output
 wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/config.yaml -P config/
 wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequency_words.txt -P config/
+```
+或者**手动创建**：
+1. 在当前目录下创建两个文件夹：`config` 和 `output`
+2. 下载配置文件到对应位置：
+   - 访问 https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/config.yaml → 右键"另存为" → 保存到 `config\config.yaml`
+   - 访问 https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequency_words.txt → 右键"另存为" → 保存到 `config\frequency_words.txt`
+
+完成后的目录结构应该是：
+```
+当前目录/
+├── config/
+│   ├── config.yaml
+│   └── frequency_words.txt
+└── output/
 ```
 
 #### 方式二：使用 docker-compose（推荐）
