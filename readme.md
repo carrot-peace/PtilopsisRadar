@@ -231,14 +231,19 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 > 
 > 下一次**新功能**，大概会是 ai 分析功能(大概(●'◡'●)
 
+### 2025/09/13 - v2.1.2
+
+- 解决钉钉的推送容量限制导致的新闻推送失败问题(采用分批推送)
+
+
+<details>
+<summary><strong>👉 历史更新</strong></summary>
+
 ### 2025/09/04 - v2.1.1
 
 - 修复docker在某些架构中无法正常运行的问题
 - 正式发布官方 Docker 镜像 wantcat/trendradar，支持多架构
 - 优化 Docker 部署流程，无需本地构建即可快速使用
-
-<details>
-<summary><strong>👉 历史更新</strong></summary>
 
 ### 2025/08/30 - v2.1.0
 
