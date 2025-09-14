@@ -7,7 +7,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.1.1-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v2.1.2-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
 
 [![企业微信通知](https://img.shields.io/badge/企业微信-通知支持-00D4AA?style=flat-square)](https://work.weixin.qq.com/)
 [![Telegram通知](https://img.shields.io/badge/Telegram-通知支持-00D4AA?style=flat-square)](https://telegram.org/)
@@ -721,7 +721,7 @@ docker run -d --name trend-radar \
   -e IMMEDIATE_RUN="true" \
   wantcat/trendradar:latest
 
-# 或者配置环境变量启用推送通知
+# 或者启用手机应用推送通知
 docker run -d --name trend-radar \
   -v ./config:/app/config:ro \
   -v ./output:/app/output \
@@ -765,7 +765,7 @@ wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequenc
 1. **创建项目目录和配置**:
    ```bash
    # 创建目录结构
-   mkdir -p trendradar/{config,output}
+   mkdir -p trendradar/{config,docker}
    cd trendradar
    
    # 下载配置文件模板
@@ -776,6 +776,17 @@ wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequenc
    wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/docker/.env
    wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/docker/docker-compose.yml
    ```
+
+完成后的目录结构应该是：
+```
+当前目录/
+├── config/
+│   ├── config.yaml
+│   └── frequency_words.txt
+└── docker/
+    ├── .env
+    └── docker-compose.yml
+```
 
 2. **配置文件说明**:
    - `config/config.yaml` - 应用主配置（报告模式、推送设置等）
