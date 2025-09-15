@@ -25,7 +25,7 @@
 > 遇到问题提 issues，或【硅基茶水间】公众号留言
 
 <details>
-<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥16🔥</strong> 位)</summary>
+<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥17🔥</strong> 位)</summary>
 
 ### 数据支持
 
@@ -45,6 +45,7 @@
 
 |           点赞人            |  金额  |  日期  |             备注             |
 | :-------------------------: | :----: | :----: | :-----------------------: |
+|           T*T            |  2  | 2025.9.15  |  点赞         |
 |           *家            |  10  | 2025.9.10  |           |
 |           *X            |  1.11  | 2025.9.3  |           |
 |           *飙            |  20  | 2025.8.31  |  来自老童谢谢         |
@@ -62,9 +63,6 @@
 
 </details>
 
-
-<details>
-<summary>👉 <strong>核心功能</strong></summary>
 
 ## ✨ 核心功能
 
@@ -148,7 +146,6 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 
 **典型场景：** 股市投资监控、品牌舆情追踪、行业动态关注、生活资讯获取
 
-</details>
 
 | Github Pages 网页效果(手机端也适配) | 飞书推送效果 |
 |:---:|:---:|
@@ -679,9 +676,7 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
     </details>
 
 
-   
-    
-
+     
 
 <details>
 <summary><strong>👉 自定义监控平台</strong></summary>
@@ -945,9 +940,7 @@ weight:
 
 </div>
 
-<details>
-<summary><strong>👉 项目相关推荐</strong></summary>
-<br>
+### 项目相关推荐
 
 > 附项目相关的两篇文章，欢迎留言交流
 
@@ -958,9 +951,18 @@ weight:
 - 如果你有小众需求，完全可以基于我的项目自行开发，零编程基础的也可以试试
 - 我所有的开源项目或多或少都使用了自己写的**AI辅助软件**来提升开发效率，这款工具已开源
 - **核心功能**：迅速筛选项目代码喂给AI，你只需要补充个人需求即可
-- **项目地址**：[https://github.com/sansan0/ai-code-context-helper](https://github.com/sansan0/ai-code-context-helper)
+- **项目地址**：https://github.com/sansan0/ai-code-context-helper
 
-</details>
+### 其余项目
+
+> 📍 毛主席足迹地图 - 交互式动态展示1893-1976年完整轨迹。欢迎诸位同志贡献数据
+
+- https://github.com/sansan0/mao-map
+
+> 哔哩哔哩(bilibili)评论区数据可视化分析软件
+
+- https://github.com/sansan0/bilibili-comment-analyzer
+
 
 <details>
 <summary><strong>👉 微信推送通知方案</strong></summary>
