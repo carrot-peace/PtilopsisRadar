@@ -4,6 +4,8 @@
 
 🚀 最快<strong>30秒</strong>部署的热点助手 —— 告别无效刷屏，只看真正关心的新闻资讯
 
+<a href="https://trendshift.io/repositories/14726" target="_blank"><img src="https://trendshift.io/api/badge/repositories/14726" alt="sansan0%2FTrendRadar | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
@@ -20,12 +22,12 @@
 </div>
 
 
-> 本项目以轻量，易部署为目标，主要处理 issues
+> 本项目以轻量，易部署为目标
 >
-> 遇到问题提 issues，或【硅基茶水间】公众号留言
+> 遇到问题提 issues，或【硅基茶水间】公众号相关文章下留言
 
 <details>
-<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥19🔥</strong> 位)</summary>
+<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥20🔥</strong> 位)</summary>
 
 ### 数据支持
 
@@ -45,6 +47,7 @@
 
 |           点赞人            |  金额  |  日期  |             备注             |
 | :-------------------------: | :----: | :----: | :-----------------------: |
+|           z*u            |  2  | 2025.9.19  |           |
 |           **昊            |  5  | 2025.9.17  |           |
 |           *号            |  1  | 2025.9.15  |           |
 |           T*T            |  2  | 2025.9.15  |  点赞         |
