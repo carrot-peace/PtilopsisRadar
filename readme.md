@@ -24,20 +24,19 @@
 
 
 > 本项目以轻量，易部署为目标
-> 
-> 遇到问题可选以下 2 种方式求助【[两者区别](#问题答疑与1元点赞)】
 
-- **详细问题** → 选择 【[GitHub Issues](https://github.com/sansan0/TrendRadar/issues)】，准备好截图和日志等 
-- **快速咨询** → 选择【[硅基茶水间](#问题答疑与1元点赞)】公众号文章留言或私信，尽量说清核心问题
+- **详细问题** → 选择 [GitHub Issues](https://github.com/sansan0/TrendRadar/issues)，准备好截图和日志等 
+- **快速咨询** → 选择[硅基茶水间](#问题答疑与1元点赞)公众号文章留言或私信，尽量说清核心问题
 
 <details>
 <summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥24🔥</strong> 位)</summary>
+<br>
 
-### 感谢
+> 开源路上，感谢有你
 
-- **fork 并为项目点 star** 的观众们，你们的认可是项目继续前进的动力
-- **关注公众号并积极互动** 的读者们，你们的留言和点赞让内容更有温度
-- **给予资金点赞支持** 的朋友们，你们的慷慨让项目得以持续发展
+- **fork 并为项目点 star** 的观众们，你们的每一个 star 都是对开源精神最好的支持
+- **关注公众号并积极互动** 的读者们，你们的留言和点赞让内容更有温度，问题反馈让项目更加完善
+- **给予资金点赞支持** 的朋友们，你们的慷慨已化身为键盘旁的零食饮料，陪伴着项目的每一次迭代
 
 ### 数据支持
 
@@ -45,7 +44,7 @@
 
 ### 推广助力
 
-> 感谢以下平台和个人的推荐(按时间排列)，以及各微信群，qq群等给到这个项目帮助的人
+> 感谢以下平台和个人的推荐(按时间排列)
 
 - [小众软件](https://mp.weixin.qq.com/s/fvutkJ_NPUelSW9OGK39aA) - 开源软件推荐平台
 - [LinuxDo 社区](https://linux.do/) - 技术爱好者的聚集地
@@ -99,7 +98,7 @@
 - 今日头条
 - 微博
 
-默认监控 11 个主流平台，如想额外增加其它平台，可自行增加
+默认监控 11 个主流平台，也可自行增加额外的平台
 
 <details>
 <summary><strong>👉 自定义监控平台</strong></summary>
@@ -426,10 +425,6 @@ weight:
 
 支持**企业微信**(+ 微信推送方案)、**飞书**、**钉钉**、**Telegram**、**邮件**，消息直达手机和邮箱
 
-- **邮件推送**：支持 QQ邮箱、Gmail、Outlook、163邮箱等主流邮箱服务
-- **智能识别**：自动识别邮箱服务商，也可以手动配置 SMTP 服务器
-- **HTML 格式**：精美的 HTML 邮件格式，与网页版效果一致
-
 ### **多端适配**
 - **GitHub Pages**：自动生成精美网页报告，PC/移动端适配
 - **Docker部署**：支持多架构容器化运行
@@ -465,8 +460,6 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 - **提示**：不要通过 **Sync fork** 更新本项目, 建议查看【历史更新】，明确具体的【升级方式】和【功能内容】
 - **小版本更新**：从 v2.x 升级到 v2.y, 用本项目的 `main.py` 代码替换你 fork 仓库中的对应文件 
 - **大版本升级**：从 v1.x 升级到 v2.y, 建议删除现有 fork 后重新 fork，这样更省力且避免配置冲突
-
-> 挖坑：下一次**新功能**，大概会是 ai 分析功能(●'◡'●)
 
 ### 2025/09/26 - v2.3.2
 
@@ -830,28 +823,37 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
     - **推送设置**：在 [config/config.yaml](config/config.yaml) 中配置推送模式和通知选项
     - **关键词设置**：在 [config/frequency_words.txt](config/frequency_words.txt) 中添加你关心的关键词
 
-    **注意**：建议只调整文档中明确说明的配置项，其他选项主要供开发和测试使用。
+    **注意**：建议只调整文档中明确说明的配置项，其他选项主要供作者开发时测试使用
     
 
 
 <details>
 <summary><strong>👉 Docker 部署</strong></summary>
 
-### 🐳 Docker 部署
-
 #### 方式一：快速体验（一行命令）
 
+**Linux/macOS 系统：**
 ```bash
-# 直接运行，使用默认配置（仅体验功能，无推送通知）
-docker run -d --name trend-radar \
-  -v ./config:/app/config:ro \
-  -v ./output:/app/output \
-  -e CRON_SCHEDULE="*/30 * * * *" \
-  -e RUN_MODE="cron" \
-  -e IMMEDIATE_RUN="true" \
-  wantcat/trendradar:latest
+# 创建配置目录并下载配置文件
+mkdir -p config output
+wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/config.yaml -P config/
+wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequency_words.txt -P config/
+```
+或者**手动创建**：
+1. 在当前目录创建 `config` 文件夹
+2. 下载配置文件：
+   - 访问 https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/config.yaml → 右键"另存为" → 保存到 `config\config.yaml`
+   - 访问 https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequency_words.txt → 右键"另存为" → 保存到 `config\frequency_words.txt`
 
-# 或者启用手机应用推送通知或邮件通知
+完成后的目录结构应该是：
+```
+当前目录/
+└── config/
+    ├── config.yaml
+    └── frequency_words.txt
+```
+
+```bash
 docker run -d --name trend-radar \
   -v ./config:/app/config:ro \
   -v ./output:/app/output \
@@ -867,30 +869,6 @@ docker run -d --name trend-radar \
   -e RUN_MODE="cron" \
   -e IMMEDIATE_RUN="true" \
   wantcat/trendradar:latest
-```
-
-**注意**：快速体验模式需要先准备配置文件：
-
-**Linux/macOS 系统：**
-```bash
-# 创建配置目录并下载配置文件
-mkdir -p config output
-wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/config.yaml -P config/
-wget https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequency_words.txt -P config/
-```
-或者**手动创建**：
-1. 在当前目录下创建两个文件夹：`config` 和 `output`
-2. 下载配置文件到对应位置：
-   - 访问 https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/config.yaml → 右键"另存为" → 保存到 `config\config.yaml`
-   - 访问 https://raw.githubusercontent.com/sansan0/TrendRadar/master/config/frequency_words.txt → 右键"另存为" → 保存到 `config\frequency_words.txt`
-
-完成后的目录结构应该是：
-```
-当前目录/
-├── config/
-│   ├── config.yaml
-│   └── frequency_words.txt
-└── output/
 ```
 
 #### 方式二：使用 docker-compose（推荐）
@@ -1033,7 +1011,7 @@ docker exec -it trend-radar ls -la /app/config/
 
 ## ☕问题答疑与1元点赞
 
-> 心意到就行，收到的**点赞**用于提高开发者开源的积极性。你们的**点赞**已记录于最顶部的**致谢名单**
+> 心意到就行，收到的**点赞**用于提高开发者开源的积极性。**点赞**已收录于**致谢名单**
 
 |公众号关注 |微信点赞 | 支付宝点赞 |
 |:---:|:---:|:---:| 
