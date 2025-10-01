@@ -1,6 +1,8 @@
-<div align="center">
+<div align="center" id="trendradar">
 
-# 🎯TrendRadar
+<a href="https://github.com/sansan0/TrendRadar" title="TrendRadar">
+  <img src="/_image/banner.jpg" alt="TrendRadar Banner" width="50%">
+</a>
 
 🚀 最快<strong>30秒</strong>部署的热点助手 —— 告别无效刷屏，只看真正关心的新闻资讯
 
@@ -24,19 +26,15 @@
 
 
 > 本项目以轻量，易部署为目标
+>
+> 开源路上，感谢有你，国庆快乐~😉
 
-- **详细问题** → 选择 [GitHub Issues](https://github.com/sansan0/TrendRadar/issues)，准备好截图和日志等 
-- **快速咨询** → 选择[硅基茶水间](#问题答疑与1元点赞)公众号文章留言或私信，尽量说清核心问题
+- **为项目点 star** 的观众们，你们的每一个 star 都是对开源精神最好的支持
+- **关注公众号并积极互动** 的读者们，你们的留言，点赞和分享让内容更有温度，问题反馈让项目更加完善
+- **给予资金点赞支持** 的朋友们，你们的慷慨已化身为键盘旁的零食饮料，陪伴着项目的每一次迭代
 
 <details>
 <summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥24🔥</strong> 位)</summary>
-<br>
-
-> 开源路上，感谢有你
-
-- **fork 并为项目点 star** 的观众们，你们的每一个 star 都是对开源精神最好的支持
-- **关注公众号并积极互动** 的读者们，你们的留言和点赞让内容更有温度，问题反馈让项目更加完善
-- **给予资金点赞支持** 的朋友们，你们的慷慨已化身为键盘旁的零食饮料，陪伴着项目的每一次迭代
 
 ### 数据支持
 
@@ -1013,14 +1011,12 @@ docker exec -it trend-radar ls -la /app/config/
 
 > 心意到就行，收到的**点赞**用于提高开发者开源的积极性。**点赞**已收录于**致谢名单**
 
+- **GitHub Issues**：适合针对性强的解答。提问时请提供完整信息（截图、错误日志、系统环境等）。
+- **公众号交流**：适合快速咨询和使用疑问。可以在文章下留言或私信交流。
+
 |公众号关注 |微信点赞 | 支付宝点赞 |
 |:---:|:---:|:---:| 
-| <img src="_image/weixin.png" width="300" title="硅基茶水间"/> | <img src="https://cdn-1258574687.cos.ap-shanghai.myqcloud.com/img/%2F2025%2F07%2F17%2F2ae0a88d98079f7e876c2b4dc85233c6-9e8025.JPG" width="300" title="微信支付"/> | <img src="https://cdn-1258574687.cos.ap-shanghai.myqcloud.com/img/%2F2025%2F07%2F17%2Fed4f20ab8e35be51f8e84c94e6e239b4-fe4947.JPG" width="300" title="支付宝支付"/> |
-
-| 答疑方式 | 适用场景 | 响应时间 | 详细程度 | 社区参与度 | 如何提问 |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| **GitHub Issues** | 部署配置问题<br/>功能异常 | 1-2天内 | 针对性强 | **公开讨论**<br/>其他用户可参与<br/>问题记录可搜索 | 📋 **提供完整信息**：<br/>• 尽量截图<br/>• 错误日志<br/>• 系统环境等等 |
-| **公众号交流** | 快速咨询<br/>使用疑问<br/>功能了解 | 几小时 | 简要指导 | 可以文章下留言<br/>也可以私信交流 | 💡 **抓住问题核心**：<br/>• 一句话描述问题<br/>• 说明想要的效果 |
+| <img src="_image/weixin.png" width="300" title="硅基茶水间"/> | <img src="https://cdn-1258574687.cos.ap-shanghai.myqcloud.com/img/%2F2025%2F07%2F17%2F2ae0a88d98079f7e876c2b4dc85233c6-9e8025.JPG" width="300" title="微信支付"/> | <img src="https://cdn-1258574687.cos.ap-shanghai.myqcloud.com/img/%2F2025%2F07%2F17%2F1ed4f20ab8e35be51f8e84c94e6e239b4-fe4947.JPG" width="300" title="支付宝支付"/> |
 
 ### 项目相关
 
@@ -1062,49 +1058,56 @@ docker exec -it trend-radar ls -la /app/config/
 
 </details>
 
-<details>
-<summary><strong>👉 本项目流程图</strong></summary>
+### 本项目流程图
 
 ```mermaid
 flowchart TD
-    A[👤 用户开始] --> B[🍴 Fork 项目]
-    B --> C[⚙️ 选择通知方式]
+    A[👤 用户开始] --> B{🚀 选择部署方式}
     
-    C --> D1[📱 企业微信群机器人<br/>最简单快速]
-    C --> D2[💬 飞书机器人<br/>显示效果最佳]
-    C --> D3[🔔 钉钉机器人<br/>]
-    C --> D4[📟 Telegram Bot<br/>]
+    B -->|云端部署| C1[🍴 Fork 项目到 GitHub]
+    B -->|本地部署| C2[🐳 Docker 部署]
     
-    D1 --> E[🔑 配置 GitHub Secrets<br/>填入机器人 Webhook 地址]
-    D2 --> E
-    D3 --> E  
-    D4 --> E
+    C1 --> D[⚙️ 配置通知渠道<br/>可同时配置多个]
+    C2 --> D
     
-    E --> F[📝 编辑关键词配置<br/>config/frequency_words.txt<br/>添加你关心的词汇]
-    F --> G[🎯 选择运行模式<br/>config/config.yaml<br/>daily/current/incremental]
+    D --> E[选择通知方式：<br/>📱企业微信 💬飞书 🔔钉钉<br/>📟Telegram 📧邮件]
     
-    G --> H[✅ 配置完成]
-    H --> I[🤖 系统根据设定时间自动运行]
+    E --> F[🔑 填写通知参数<br/>GitHub Secrets 或环境变量]
     
-    I --> J[📊 爬取各大平台热点]
-    J --> K[🔍 根据关键词筛选]
-    K --> L[📱 推送到你的手机]
+    F --> G[📝 配置关键词<br/>config/frequency_words.txt<br/>普通词/必须词+/过滤词!]
     
-    L --> M[📈 查看推送结果]
-    M --> N{满意效果?}
-    N -->|不满意| F
-    N -->|满意| O[🎉 持续接收精准推送]
+    G --> H[🎯 选择运行模式<br/>config/config.yaml]
     
-    style A fill:#e1f5fe
+    H --> H1[📋 daily - 当日汇总<br/>定时推送所有匹配新闻]
+    H --> H2[📰 current - 当前榜单<br/>定时推送最新榜单]
+    H --> H3[📈 incremental - 增量监控<br/>仅推送新增内容]
+    
+    H1 --> I[可选：静默推送设置<br/>⏰ 时间窗口控制]
+    H2 --> I
+    H3 --> I
+    
+    I --> J[✅ 配置完成]
+    
+    J --> K[🤖 系统自动运行]
+    
+    K --> L[🕷️ 爬取11+平台热点]
+    L --> M[🔍 关键词筛选]
+    M --> N[⚖️ 权重算法排序<br/>排名60% + 频次30% + 热度10%]
+    N --> O[📊 生成报告<br/>HTML网页 + 推送消息]
+    O --> P[📱 多渠道推送通知]
+    
+    P --> Q[🎉 持续接收精准推送<br/>告别信息过载]
+    
+    style A fill:#e3f2fd
     style B fill:#f3e5f5
-    style E fill:#fff3e0
-    style F fill:#e8f5e8
-    style G fill:#e8f5e8
-    style L fill:#ffebee
-    style O fill:#e8f5e8
+    style D fill:#fff3e0
+    style F fill:#fff9c4
+    style G fill:#e8f5e9
+    style H fill:#e0f2f1
+    style I fill:#fce4ec
+    style O fill:#e1bee7
+    style Q fill:#c8e6c9
 ```
-
-</details>
 
 [![Star History Chart](https://api.star-history.com/svg?repos=sansan0/TrendRadar&type=Date)](https://www.star-history.com/#sansan0/TrendRadar&Date)
 
@@ -1116,8 +1119,6 @@ GPL-3.0 License
 ---
 
 <div align="center">
-
-**⭐ 如果这个工具对你有帮助，请给项目点个 Star 支持开发！**
 
 [🔝 回到顶部](#trendradar)
 
