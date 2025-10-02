@@ -11,13 +11,15 @@
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.3.2-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v2.4.0-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
 
 [![企业微信通知](https://img.shields.io/badge/企业微信-通知-00D4AA?style=flat-square)](https://work.weixin.qq.com/)
 [![Telegram通知](https://img.shields.io/badge/Telegram-通知-00D4AA?style=flat-square)](https://telegram.org/)
 [![dingtalk通知](https://img.shields.io/badge/钉钉-通知-00D4AA?style=flat-square)](#)
 [![飞书通知](https://img.shields.io/badge/飞书-通知-00D4AA?style=flat-square)](https://www.feishu.cn/)
-[![邮件通知](https://img.shields.io/badge/Email-通知-00D4AA?style=flat-square)](mailto:) 
+[![邮件通知](https://img.shields.io/badge/Email-通知-00D4AA?style=flat-square)](#) 
+[![ntfy通知](https://img.shields.io/badge/ntfy-通知-00D4AA?style=flat-square)](https://github.com/binwiederhier/ntfy)
+
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-自动化-2088FF?style=flat-square&logo=github-actions&logoColor=white)](https://github.com/sansan0/TrendRadar)
 [![GitHub Pages](https://img.shields.io/badge/GitHub_Pages-部署-4285F4?style=flat-square&logo=github&logoColor=white)](https://sansan0.github.io/TrendRadar)
 [![Docker](https://img.shields.io/badge/Docker-部署-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/)
@@ -34,7 +36,7 @@
 - **给予资金点赞支持** 的朋友们，你们的慷慨已化身为键盘旁的零食饮料，陪伴着项目的每一次迭代
 
 <details>
-<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥24🔥</strong> 位)</summary>
+<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥25🔥</strong> 位)</summary>
 
 ### 数据支持
 
@@ -54,6 +56,7 @@
 
 |           点赞人            |  金额  |  日期  |             备注             |
 | :-------------------------: | :----: | :----: | :-----------------------: |
+|           **培           |  5.2  | 2025.10.2  |  github-yzyf1312:开源万岁         |
 |           *椿           |  3  | 2025.9.23  |  加油，很不错         |
 |           *🍍           |  10  | 2025.9.21  |           |
 |           E*f           |  1  | 2025.9.20  |           |
@@ -421,7 +424,7 @@ weight:
 
 ### **多渠道实时推送**
 
-支持**企业微信**(+ 微信推送方案)、**飞书**、**钉钉**、**Telegram**、**邮件**，消息直达手机和邮箱
+支持**企业微信**(+ 微信推送方案)、**飞书**、**钉钉**、**Telegram**、**邮件**、**ntfy**，消息直达手机和邮箱
 
 ### **多端适配**
 - **GitHub Pages**：自动生成精美网页报告，PC/移动端适配
@@ -459,15 +462,31 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 - **小版本更新**：从 v2.x 升级到 v2.y, 用本项目的 `main.py` 代码替换你 fork 仓库中的对应文件 
 - **大版本升级**：从 v1.x 升级到 v2.y, 建议删除现有 fork 后重新 fork，这样更省力且避免配置冲突
 
+### 2025/10/2 - v2.4.0
+
+**新增 ntfy 推送通知**
+
+- **核心功能**：
+  - 支持 ntfy.sh 公共服务和自托管服务器
+
+- **使用场景**：
+  - 适合追求隐私的用户（支持自托管）
+  - 跨平台推送（iOS、Android、Desktop、Web）
+  - 无需注册账号（公共服务器）
+  - 开源免费（MIT 协议）
+
+- **更新提示**：
+  - 建议使用【大版本更新】
+
+<details>
+<summary><strong>👉 历史更新</strong></summary>
+
 ### 2025/09/26 - v2.3.2
 
 - 修正了邮件通知配置检查被遗漏的问题（[#88](https://github.com/sansan0/TrendRadar/issues/88)）
 
 **修复说明**：
 - 解决了即使正确配置邮件通知，系统仍提示"未配置任何webhook"的问题
-
-<details>
-<summary><strong>👉 历史更新</strong></summary>
 
 ### 2025/09/22 - v2.3.1
 
@@ -816,6 +835,117 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
 
    </details>
 
+   <details>
+   <summary> <strong>👉 ntfy 推送</strong>（开源免费，支持自托管）</summary>
+   <br>
+
+   **两种使用方式：**
+
+   ### 方式一：免费使用（推荐新手） 🆓
+
+   **特点**：
+   - ✅ 无需注册账号，立即使用
+   - ✅ 每天 250 条消息（足够 90% 用户）
+   - ✅ Topic 名称即"密码"（需选择不易猜测的名称）
+   - ⚠️ 消息未加密，不适合敏感信息, 但适合我们这个项目的不敏感信息
+
+   **快速开始：**
+
+   1. **下载 ntfy 应用**：
+      - Android：[Google Play](https://play.google.com/store/apps/details?id=io.heckel.ntfy) / [F-Droid](https://f-droid.org/en/packages/io.heckel.ntfy/)
+      - iOS：[App Store](https://apps.apple.com/us/app/ntfy/id1625396347)
+      - 桌面：访问 [ntfy.sh](https://ntfy.sh)
+
+   2. **订阅主题**（选择一个难猜的名称）：
+      ```
+      建议格式：trendradar-{你的名字缩写}-{随机数字}
+   
+      ✅ 好例子：trendradar-zs-8492
+      ❌ 坏例子：news、alerts（太容易被猜到）
+      ```
+
+   3. **配置 GitHub Secret**：
+      - `NTFY_TOPIC`：填写你刚才订阅的主题名称
+      - `NTFY_SERVER_URL`：留空（默认使用 ntfy.sh）
+      - `NTFY_TOKEN`：留空
+
+   4. **测试**：
+      ```bash
+      curl -d "测试消息" ntfy.sh/你的主题名称
+      ```
+
+   ---
+
+   ### 方式二：自托管（完全隐私控制） 🔒
+
+   **适合人群**：有服务器、追求完全隐私、技术能力强
+
+   **优势**：
+   - ✅ 完全开源（Apache 2.0 + GPLv2）
+   - ✅ 数据完全自主控制
+   - ✅ 无任何限制
+   - ✅ 零费用
+
+   **Docker 一键部署**：
+   ```bash
+   docker run -d \
+     --name ntfy \
+     -p 80:80 \
+     -v /var/cache/ntfy:/var/cache/ntfy \
+     binwiederhier/ntfy \
+     serve --cache-file /var/cache/ntfy/cache.db
+   ```
+
+   **配置 TrendRadar**：
+   ```yaml
+   NTFY_SERVER_URL: https://ntfy.yourdomain.com
+   NTFY_TOPIC: trendradar-alerts  # 自托管可用简单名称
+   NTFY_TOKEN: tk_your_token  # 可选：启用访问控制
+   ```
+
+   **在应用中订阅**：
+   - 点击"Use another server"
+   - 输入你的服务器地址
+   - 输入主题名称
+   - （可选）输入登录凭据
+
+   ---
+
+   **常见问题：**
+
+   <details>
+   <summary><strong>Q1: 免费版够用吗？</strong></summary>
+
+   每天 250 条消息对大多数用户足够。按 30 分钟抓取一次计算，每天约 48 次推送，完全够用。
+   </details>
+
+   <details>
+   <summary><strong>Q2: Topic 名称真的安全吗？</strong></summary>
+
+   如果你选择随机的、足够长的名称（如 `trendradar-zs-8492-news`），暴力破解几乎不可能：
+   - ntfy 有严格的速率限制（1 秒 1 次请求）
+   - 64 个字符选择（A-Z, a-z, 0-9, _, -）
+   - 10 位随机字符串有 64^10 种可能性（需要数年才能破解）
+   </details>
+
+   ---
+
+   **推荐选择：**
+
+   | 用户类型 | 推荐方案 | 理由 |
+   |---------|---------|------|
+   | 普通用户 | 方式一（免费） | 简单快速，够用 |
+   | 技术用户 | 方式二（自托管） | 完全控制，无限制 |
+   | 高频用户 | 方式三（付费） | 这个自己去官网看吧 |
+
+   **相关链接：**
+   - [ntfy 官方文档](https://docs.ntfy.sh/)
+   - [自托管教程](https://docs.ntfy.sh/install/)
+   - [GitHub 仓库](https://github.com/binwiederhier/ntfy)
+
+   </details>
+
+
 3. **配置说明：**:
 
     - **推送设置**：在 [config/config.yaml](config/config.yaml) 中配置推送模式和通知选项
@@ -1020,10 +1150,11 @@ docker exec -it trend-radar ls -la /app/config/
 
 ### 项目相关
 
-> **3 篇文章**：
+> **4 篇文章**：
 
 - [可在该文章下方留言，方便项目作者用手机答疑](https://mp.weixin.qq.com/s/KYEPfTPVzZNWFclZh4am_g)
 - [2个月破 1000 star，我的GitHub项目推广实战经验](https://mp.weixin.qq.com/s/jzn0vLiQFX408opcfpPPxQ)
+- [github fork 运行本项目的注意事项 ](https://mp.weixin.qq.com/s/C8evK-U7onG1sTTdwdW2zg)
 - [基于本项目，如何开展公众号或者新闻资讯类文章写作](https://mp.weixin.qq.com/s/8ghyfDAtQZjLrnWTQabYOQ)
 
 >**AI 开发**：
