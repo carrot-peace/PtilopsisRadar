@@ -20,7 +20,7 @@ import requests
 import yaml
 
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 
 
 # === SMTP邮件配置 ===
@@ -3738,9 +3738,9 @@ def send_to_ntfy(
     headers = {
         "Content-Type": "text/plain; charset=utf-8",
         "Markdown": "yes",
-        "Title": f"TrendRadar Report - {report_type_en}",
+        "Title": report_type_en,
         "Priority": "default",
-        "Tags": "newspaper,📰",
+        "Tags": "news",
     }
 
     if token:
@@ -3761,27 +3761,37 @@ def send_to_ntfy(
         report_data, "ntfy", update_info, max_bytes=3800, mode=mode
     )
 
-    print(f"ntfy消息分为 {len(batches)} 批次发送 [{report_type}]")
+    total_batches = len(batches)
+    print(f"ntfy消息分为 {total_batches} 批次发送 [{report_type}]")
 
-    # 逐批发送
+    # 反转批次顺序，使得在ntfy客户端显示时顺序正确
+    # ntfy显示最新消息在上面，所以我们从最后一批开始推送
+    reversed_batches = list(reversed(batches))
+    
+    print(f"ntfy将按反向顺序推送（最后批次先推送），确保客户端显示顺序正确")
+
+    # 逐批发送（反向顺序）
     success_count = 0
-    for i, batch_content in enumerate(batches, 1):
+    for idx, batch_content in enumerate(reversed_batches, 1):
+        # 计算正确的批次编号（用户视角的编号）
+        actual_batch_num = total_batches - idx + 1
+        
         batch_size = len(batch_content.encode("utf-8"))
         print(
-            f"发送ntfy第 {i}/{len(batches)} 批次，大小：{batch_size} 字节 [{report_type}]"
+            f"发送ntfy第 {actual_batch_num}/{total_batches} 批次（推送顺序: {idx}/{total_batches}），大小：{batch_size} 字节 [{report_type}]"
         )
 
         # 检查消息大小，确保不超过4KB
         if batch_size > 4096:
-            print(f"警告：ntfy第 {i} 批次消息过大（{batch_size} 字节），可能被拒绝")
+            print(f"警告：ntfy第 {actual_batch_num} 批次消息过大（{batch_size} 字节），可能被拒绝")
 
-        # 添加批次标识
+        # 添加批次标识（使用正确的批次编号）
         current_headers = headers.copy()
-        if len(batches) > 1:
-            batch_header = f"**[第 {i}/{len(batches)} 批次]**\n\n"
+        if total_batches > 1:
+            batch_header = f"**[第 {actual_batch_num}/{total_batches} 批次]**\n\n"
             batch_content = batch_header + batch_content
             current_headers["Title"] = (
-                f"TrendRadar Report - {report_type_en} ({i}/{len(batches)})"
+                f"{report_type_en} ({actual_batch_num}/{total_batches})"
             )
 
         try:
@@ -3794,15 +3804,15 @@ def send_to_ntfy(
             )
 
             if response.status_code == 200:
-                print(f"ntfy第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
+                print(f"ntfy第 {actual_batch_num}/{total_batches} 批次发送成功 [{report_type}]")
                 success_count += 1
-                if i < len(batches):
+                if idx < total_batches:
                     # 公共服务器建议 2-3 秒，自托管可以更短
                     interval = 2 if "ntfy.sh" in server_url else 1
                     time.sleep(interval)
             elif response.status_code == 429:
                 print(
-                    f"ntfy第 {i}/{len(batches)} 批次速率限制 [{report_type}]，等待后重试"
+                    f"ntfy第 {actual_batch_num}/{total_batches} 批次速率限制 [{report_type}]，等待后重试"
                 )
                 time.sleep(10)  # 等待10秒后重试
                 # 重试一次
@@ -3814,19 +3824,19 @@ def send_to_ntfy(
                     timeout=30,
                 )
                 if retry_response.status_code == 200:
-                    print(f"ntfy第 {i}/{len(batches)} 批次重试成功 [{report_type}]")
+                    print(f"ntfy第 {actual_batch_num}/{total_batches} 批次重试成功 [{report_type}]")
                     success_count += 1
                 else:
                     print(
-                        f"ntfy第 {i}/{len(batches)} 批次重试失败，状态码：{retry_response.status_code}"
+                        f"ntfy第 {actual_batch_num}/{total_batches} 批次重试失败，状态码：{retry_response.status_code}"
                     )
             elif response.status_code == 413:
                 print(
-                    f"ntfy第 {i}/{len(batches)} 批次消息过大被拒绝 [{report_type}]，消息大小：{batch_size} 字节"
+                    f"ntfy第 {actual_batch_num}/{total_batches} 批次消息过大被拒绝 [{report_type}]，消息大小：{batch_size} 字节"
                 )
             else:
                 print(
-                    f"ntfy第 {i}/{len(batches)} 批次发送失败 [{report_type}]，状态码：{response.status_code}"
+                    f"ntfy第 {actual_batch_num}/{total_batches} 批次发送失败 [{report_type}]，状态码：{response.status_code}"
                 )
                 try:
                     error_detail = response.text[:200]  # 只显示前200字符的错误信息
@@ -3835,20 +3845,20 @@ def send_to_ntfy(
                     pass
 
         except requests.exceptions.ConnectTimeout:
-            print(f"ntfy第 {i}/{len(batches)} 批次连接超时 [{report_type}]")
+            print(f"ntfy第 {actual_batch_num}/{total_batches} 批次连接超时 [{report_type}]")
         except requests.exceptions.ReadTimeout:
-            print(f"ntfy第 {i}/{len(batches)} 批次读取超时 [{report_type}]")
+            print(f"ntfy第 {actual_batch_num}/{total_batches} 批次读取超时 [{report_type}]")
         except requests.exceptions.ConnectionError as e:
-            print(f"ntfy第 {i}/{len(batches)} 批次连接错误 [{report_type}]：{e}")
+            print(f"ntfy第 {actual_batch_num}/{total_batches} 批次连接错误 [{report_type}]：{e}")
         except Exception as e:
-            print(f"ntfy第 {i}/{len(batches)} 批次发送异常 [{report_type}]：{e}")
+            print(f"ntfy第 {actual_batch_num}/{total_batches} 批次发送异常 [{report_type}]：{e}")
 
     # 判断整体发送是否成功
-    if success_count == len(batches):
-        print(f"ntfy所有 {len(batches)} 批次发送完成 [{report_type}]")
+    if success_count == total_batches:
+        print(f"ntfy所有 {total_batches} 批次发送完成 [{report_type}]")
         return True
     elif success_count > 0:
-        print(f"ntfy部分发送成功：{success_count}/{len(batches)} 批次 [{report_type}]")
+        print(f"ntfy部分发送成功：{success_count}/{total_batches} 批次 [{report_type}]")
         return True  # 部分成功也视为成功
     else:
         print(f"ntfy发送完全失败 [{report_type}]")
