@@ -466,10 +466,11 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 
 ### 2025/10/8 - v2.4.2
 
-- 修复 ntfy 推送编码问题
-- 修复配置文件缺失问题
-- 优化 ntfy 推送效果
-- 增加 github page 图片分段导出功能
+- **更新内容**：
+    - 修复 ntfy 推送编码问题
+    - 修复配置文件缺失问题
+    - 优化 ntfy 推送效果
+    - 增加 github page 图片分段导出功能
 
 - **更新提示**：
   - 建议使用【大版本更新】
@@ -708,8 +709,49 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    **GitHub Secret 配置：**
    - 名称：`FEISHU_WEBHOOK_URL`
    - 值：你的飞书机器人 Webhook 地址
+   <br>
 
-   **机器人设置步骤：**
+   有两个方案，**方案一**配置简单（适合个人接收信息），**方案二**配置复杂（适合群组接收消息）
+
+   其中方案一，由 [ziventian](https://github.com/sansan0/TrendRadar/issues/97)发现并提供建议，在这里感谢他 
+
+   **方案一：**
+
+   1. 电脑浏览器打开 https://botbuilder.feishu.cn/home/my-command
+
+   2. 点击"新建机器人指令" 
+
+   3. 点击"选择触发器"，往下滑动，点击"Webhook 触发"
+
+   4. 此时你会看到"Webhook 地址"，把这个链接先复制到本地记事本暂存，继续接下来的操作
+
+   5. "参数"里面放上下面的内容，然后点击"完成"
+
+   ```json
+   {
+     "message_type": "text",
+     "content": {
+       "total_titles": "{{内容}}",
+       "timestamp": "{{内容}}",
+       "report_type": "{{内容}}",
+       "text": "{{内容}}"
+     }
+   }
+   ```
+
+   6. 点击"选择操作" > "通过官方机器人发消息"
+
+   7. 消息标题填写"TrendRadar 热点监控"
+
+   8. 最关键的部分来了，点击 + 按钮，选择"Webhook 触发"，然后按照下面的图片摆放
+
+   ![飞书机器人配置示例](_image/image.png)
+
+   9. 配置完成后，将第 4 步复制的 Webhook 地址配置到 GitHub Secrets 中的 `FEISHU_WEBHOOK_URL`
+
+   <br>
+
+   **方案二：**
 
    1. 电脑浏览器打开 https://botbuilder.feishu.cn/home/my-app
 
@@ -744,6 +786,7 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    ![飞书机器人配置示例](_image/image.png)
 
    10. 配置完成后，将第 5 步复制的 Webhook 地址配置到 GitHub Secrets 中的 `FEISHU_WEBHOOK_URL`
+
    </details>
 
    <details>
