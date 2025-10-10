@@ -711,9 +711,9 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    - 值：你的飞书机器人 Webhook 地址
    <br>
 
-   有两个方案，**方案一**配置简单（适合个人接收信息），**方案二**配置复杂（适合群组接收消息）
+   有两个方案，**方案一**配置简单，**方案二**配置复杂(老方法)
 
-   其中方案一，由 [ziventian](https://github.com/sansan0/TrendRadar/issues/97)发现并提供建议，在这里感谢他 
+   其中方案一，由 **ziventian**发现并提供建议，在这里感谢他，默认是个人推送，也可以配置群组推送操作[#97](https://github.com/sansan0/TrendRadar/issues/97) 
 
    **方案一：**
 
