@@ -6,50 +6,55 @@ WORKDIR /app
 ARG TARGETARCH
 ENV SUPERCRONIC_VERSION=v0.2.34
 
+# supercronic + locale
 RUN set -ex && \
     apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
+    apt-get install -y --no-install-recommends curl ca-certificates locales && \
+    sed -i -e 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen && \
+    sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
+    locale-gen && \
+    # 根据架构选择并下载 supercronic
     case ${TARGETARCH} in \
     amd64) \
-    export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-amd64; \
-    export SUPERCRONIC_SHA1SUM=e8631edc1775000d119b70fd40339a7238eece14; \
-    export SUPERCRONIC=supercronic-linux-amd64; \
-    ;; \
+        export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-amd64; \
+        export SUPERCRONIC_SHA1SUM=e8631edc1775000d119b70fd40339a7238eece14; \
+        export SUPERCRONIC=supercronic-linux-amd64; \
+        ;; \
     arm64) \
-    export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-arm64; \
-    export SUPERCRONIC_SHA1SUM=4ab6343b52bf9da592e8b4bb7ae6eb5a8e21b71e; \
-    export SUPERCRONIC=supercronic-linux-arm64; \
-    ;; \
+        export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-arm64; \
+        export SUPERCRONIC_SHA1SUM=4ab6343b52bf9da592e8b4bb7ae6eb5a8e21b71e; \
+        export SUPERCRONIC=supercronic-linux-arm64; \
+        ;; \
     arm) \
-    export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-arm; \
-    export SUPERCRONIC_SHA1SUM=4ba4cd0da62082056b6def085fa9377d965fbe01; \
-    export SUPERCRONIC=supercronic-linux-arm; \
-    ;; \
+        export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-arm; \
+        export SUPERCRONIC_SHA1SUM=4ba4cd0da62082056b6def085fa9377d965fbe01; \
+        export SUPERCRONIC=supercronic-linux-arm; \
+        ;; \
     386) \
-    export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-386; \
-    export SUPERCRONIC_SHA1SUM=80b4fff03a8d7bf2f24a1771f37640337855e949; \
-    export SUPERCRONIC=supercronic-linux-386; \
-    ;; \
+        export SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-386; \
+        export SUPERCRONIC_SHA1SUM=80b4fff03a8d7bf2f24a1771f37640337855e949; \
+        export SUPERCRONIC=supercronic-linux-386; \
+        ;; \
     *) \
-    echo "Unsupported architecture: ${TARGETARCH}"; \
-    exit 1; \
-    ;; \
+        echo "Unsupported architecture: ${TARGETARCH}"; \
+        exit 1; \
+        ;; \
     esac && \
     echo "Downloading supercronic for ${TARGETARCH} from ${SUPERCRONIC_URL}" && \
     # 添加重试机制和超时设置
     for i in 1 2 3 4 5; do \
-    echo "Download attempt $i/5"; \
-    if curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 120 -o "$SUPERCRONIC" "$SUPERCRONIC_URL"; then \
-    echo "Download successful"; \
-    break; \
-    else \
-    echo "Download attempt $i failed, exit code: $?"; \
-    if [ $i -eq 5 ]; then \
-    echo "All download attempts failed"; \
-    exit 1; \
-    fi; \
-    sleep $((i * 2)); \
-    fi; \
+        echo "Download attempt $i/5"; \
+        if curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 120 -o "$SUPERCRONIC" "$SUPERCRONIC_URL"; then \
+            echo "Download successful"; \
+            break; \
+        else \
+            echo "Download attempt $i failed, exit code: $?"; \
+            if [ $i -eq 5 ]; then \
+                echo "All download attempts failed"; \
+                exit 1; \
+            fi; \
+            sleep $((i * 2)); \
+        fi; \
     done && \
     echo "${SUPERCRONIC_SHA1SUM}  ${SUPERCRONIC}" | sha1sum -c - && \
     chmod +x "$SUPERCRONIC" && \
@@ -57,6 +62,7 @@ RUN set -ex && \
     ln -s "/usr/local/bin/${SUPERCRONIC}" /usr/local/bin/supercronic && \
     # 验证安装
     supercronic -version && \
+    # 清理（保留 locales，只删除 curl）
     apt-get remove -y curl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -77,6 +83,10 @@ RUN sed -i 's/\r$//' /entrypoint.sh.tmp && \
 
 ENV PYTHONUNBUFFERED=1 \
     CONFIG_PATH=/app/config/config.yaml \
-    FREQUENCY_WORDS_PATH=/app/config/frequency_words.txt
+    FREQUENCY_WORDS_PATH=/app/config/frequency_words.txt \
+    LANG=zh_CN.UTF-8 \
+    LANGUAGE=zh_CN:zh:en_US:en \
+    LC_ALL=zh_CN.UTF-8 \
+    PYTHONIOENCODING=utf-8
 
 ENTRYPOINT ["/entrypoint.sh"]
