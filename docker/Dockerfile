@@ -6,10 +6,17 @@ WORKDIR /app
 ARG TARGETARCH
 ENV SUPERCRONIC_VERSION=v0.2.34
 
-# supercronic + locale
+# supercronic + locale + 编译依赖
 RUN set -ex && \
     apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates locales && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        locales \
+        gcc \
+        python3-dev \
+        libffi-dev \
+        build-essential && \
     sed -i -e 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen && \
     sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
     locale-gen && \
@@ -41,7 +48,6 @@ RUN set -ex && \
         ;; \
     esac && \
     echo "Downloading supercronic for ${TARGETARCH} from ${SUPERCRONIC_URL}" && \
-    # 添加重试机制和超时设置
     for i in 1 2 3 4 5; do \
         echo "Download attempt $i/5"; \
         if curl --fail --silent --show-error --location --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 120 -o "$SUPERCRONIC" "$SUPERCRONIC_URL"; then \
@@ -60,10 +66,9 @@ RUN set -ex && \
     chmod +x "$SUPERCRONIC" && \
     mv "$SUPERCRONIC" "/usr/local/bin/${SUPERCRONIC}" && \
     ln -s "/usr/local/bin/${SUPERCRONIC}" /usr/local/bin/supercronic && \
-    # 验证安装
     supercronic -version && \
-    # 清理（保留 locales，只删除 curl）
-    apt-get remove -y curl && \
+    apt-get remove -y curl gcc python3-dev libffi-dev build-essential && \
+    apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
