@@ -1,3 +1,5 @@
+> 点击跳转 [AI 分析部署专区](#-ai-智能分析部署) 使用 **AI 功能** 的最佳前提是已使用本项目至少推送一天(积累新闻数据)
+
 <div align="center" id="trendradar">
 
 <a href="https://github.com/sansan0/TrendRadar" title="TrendRadar">
@@ -1307,7 +1309,7 @@ Cherry Studio 提供 GUI 配置界面，可快速部署。
 
 **详细教程**：[README-MCP-FAQ.md](README-MCP-FAQ.md)
 
->如果还有配置部署方面的问题，后续我会根据反馈出个**图文教程**，届时会更新到我的公众号上
+> 如果有部署问题，请带上截图反馈，后续我会根据反馈出个**图文教程**，争取编程零基础、文科生都能配置，届时会更新到我的公众号上
 
 ## ☕问题答疑与1元点赞
 
