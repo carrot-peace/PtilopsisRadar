@@ -155,11 +155,10 @@ async def get_news_by_date(
 async def analyze_topic_trend(
     topic: str,
     analysis_type: str = "trend",
-    time_range: str = "7d",
+    date_range: Optional[Dict[str, str]] = None,
     granularity: str = "day",
     threshold: float = 3.0,
     time_window: int = 24,
-    lookback_days: int = 7,
     lookahead_hours: int = 6,
     confidence_threshold: float = 0.7
 ) -> str:
@@ -173,20 +172,27 @@ async def analyze_topic_trend(
             - "lifecycle": 生命周期分析（从出现到消失的完整周期）
             - "viral": 异常热度检测（识别突然爆火的话题）
             - "predict": 话题预测（预测未来可能的热点）
-        time_range: 时间范围（trend模式），默认"7d"（7d/24h/1w/1m/2m）
+        date_range: 日期范围（trend和lifecycle模式），可选
+                    - **格式**: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+                    - **示例**: {"start": "2025-10-18", "end": "2025-10-25"}
+                    - **说明**: AI需要根据用户的自然语言（如"最近7天"）自动计算日期范围
+                    - **默认**: 不指定时默认分析最近7天
         granularity: 时间粒度（trend模式），默认"day"（仅支持 day，因为底层数据按天聚合）
         threshold: 热度突增倍数阈值（viral模式），默认3.0
         time_window: 检测时间窗口小时数（viral模式），默认24
-        lookback_days: 回溯天数（lifecycle模式），默认7
         lookahead_hours: 预测未来小时数（predict模式），默认6
         confidence_threshold: 置信度阈值（predict模式），默认0.7
 
     Returns:
         JSON格式的趋势分析结果
 
+    **AI使用说明：**
+    当用户使用相对时间表达时（如"最近7天"、"过去一周"、"上个月"），
+    AI需要自动计算对应的日期范围并传递给 date_range 参数。
+
     Examples:
-        - analyze_topic_trend(topic="人工智能", analysis_type="trend", time_range="7d")
-        - analyze_topic_trend(topic="特斯拉", analysis_type="lifecycle", lookback_days=7)
+        - analyze_topic_trend(topic="人工智能", analysis_type="trend", date_range={"start": "2025-10-18", "end": "2025-10-25"})
+        - analyze_topic_trend(topic="特斯拉", analysis_type="lifecycle", date_range={"start": "2025-10-18", "end": "2025-10-25"})
         - analyze_topic_trend(topic="比特币", analysis_type="viral", threshold=3.0)
         - analyze_topic_trend(topic="ChatGPT", analysis_type="predict", lookahead_hours=6)
     """
@@ -194,11 +200,10 @@ async def analyze_topic_trend(
     result = tools['analytics'].analyze_topic_trend_unified(
         topic=topic,
         analysis_type=analysis_type,
-        time_range=time_range,
+        date_range=date_range,
         granularity=granularity,
         threshold=threshold,
         time_window=time_window,
-        lookback_days=lookback_days,
         lookahead_hours=lookahead_hours,
         confidence_threshold=confidence_threshold
     )
@@ -222,7 +227,10 @@ async def analyze_data_insights(
             - "platform_activity": 平台活跃度统计（统计各平台发布频率和活跃时间）
             - "keyword_cooccur": 关键词共现分析（分析关键词同时出现的模式）
         topic: 话题关键词（可选，platform_compare模式适用）
-        date_range: 日期范围，格式: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+        date_range: **【对象类型】** 日期范围（可选）
+                    - **格式**: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+                    - **示例**: {"start": "2025-01-01", "end": "2025-01-07"}
+                    - **重要**: 必须是对象格式，不能传递整数
         min_frequency: 最小共现频次（keyword_cooccur模式），默认3
         top_n: 返回TOP N结果（keyword_cooccur模式），默认20
 
@@ -231,7 +239,7 @@ async def analyze_data_insights(
 
     Examples:
         - analyze_data_insights(insight_type="platform_compare", topic="人工智能")
-        - analyze_data_insights(insight_type="platform_activity", date_range={...})
+        - analyze_data_insights(insight_type="platform_activity", date_range={"start": "2025-01-01", "end": "2025-01-07"})
         - analyze_data_insights(insight_type="keyword_cooccur", min_frequency=5, top_n=15)
     """
     tools = _get_tools()
@@ -258,12 +266,15 @@ async def analyze_sentiment(
     分析新闻的情感倾向和热度趋势
 
     Args:
-        keywords: 关键词列表，如 ["AI", "人工智能"]
-        date_range: 日期范围（天数），如 7 表示最近7天，默认3天
+        topic: 话题关键词（可选）
         platforms: 平台ID列表，如 ['zhihu', 'weibo', 'douyin']
                    - 不指定时：使用 config.yaml 中配置的所有平台
                    - 支持的平台来自 config/config.yaml 的 platforms 配置
                    - 每个平台都有对应的name字段（如"知乎"、"微博"），方便AI识别
+        date_range: **【对象类型】** 日期范围（可选）
+                    - **格式**: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+                    - **示例**: {"start": "2025-01-01", "end": "2025-01-07"}
+                    - **重要**: 必须是对象格式，不能传递整数
         limit: 返回新闻数量，默认50，最大100
                注意：本工具会对新闻标题进行去重（同一标题在不同平台只保留一次），
                因此实际返回数量可能少于请求的 limit 值
@@ -301,7 +312,7 @@ async def find_similar_news(
     查找与指定新闻标题相似的其他新闻
 
     Args:
-        title: 新闻标题（完整或部分）
+        reference_title: 新闻标题（完整或部分）
         threshold: 相似度阈值，0-1之间，默认0.6
                    注意：阈值越高匹配越严格，返回结果越少
         limit: 返回条数限制，默认50，最大100
@@ -336,7 +347,10 @@ async def generate_summary_report(
 
     Args:
         report_type: 报告类型（daily/weekly）
-        date_range: 自定义日期范围（可选）
+        date_range: **【对象类型】** 自定义日期范围（可选）
+                    - **格式**: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+                    - **示例**: {"start": "2025-01-01", "end": "2025-01-07"}
+                    - **重要**: 必须是对象格式，不能传递整数
 
     Returns:
         JSON格式的摘要报告，包含Markdown格式内容
@@ -371,15 +385,24 @@ async def search_news(
             - "keyword": 精确关键词匹配（默认，适合搜索特定话题）
             - "fuzzy": 模糊内容匹配（适合搜索内容片段，会过滤相似度低于阈值的结果）
             - "entity": 实体名称搜索（适合搜索人物/地点/机构）
-        threshold: 相似度阈值（仅fuzzy模式有效），0-1之间，默认0.6
-                   注意：阈值越高匹配越严格，返回结果越少
+        date_range: 日期范围（可选）
+                    - **格式**: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+                    - **示例**: {"start": "2025-01-01", "end": "2025-01-07"}
+                    - **说明**: AI需要根据用户的自然语言（如"最近7天"）自动计算日期范围
+                    - **默认**: 不指定时默认查询今天的新闻
+                    - **注意**: start和end可以相同（表示单日查询）
         platforms: 平台ID列表，如 ['zhihu', 'weibo', 'douyin']
                    - 不指定时：使用 config.yaml 中配置的所有平台
                    - 支持的平台来自 config/config.yaml 的 platforms 配置
                    - 每个平台都有对应的name字段（如"知乎"、"微博"），方便AI识别
-        lookback_days: 回溯天数，默认7天，最大30天
         limit: 返回条数限制，默认50，最大1000
                注意：实际返回数量取决于搜索匹配结果（特别是 fuzzy 模式下会过滤低相似度结果）
+        sort_by: 排序方式，可选值：
+            - "relevance": 按相关度排序（默认）
+            - "weight": 按新闻权重排序
+            - "date": 按日期排序
+        threshold: 相似度阈值（仅fuzzy模式有效），0-1之间，默认0.6
+                   注意：阈值越高匹配越严格，返回结果越少
         include_url: 是否包含URL链接，默认False（节省token）
 
     Returns:
@@ -389,6 +412,19 @@ async def search_news(
     - 本工具返回完整的搜索结果列表
     - **默认展示方式**：展示全部返回的新闻，无需总结或筛选
     - 仅在用户明确要求"总结"或"挑重点"时才进行筛选
+
+    **AI使用说明：**
+    当用户使用相对时间表达时（如"最近7天"、"过去一周"、"最近半个月"），
+    AI需要自动计算对应的日期范围。计算规则：
+    - "最近7天" → {"start": "今天-6天", "end": "今天"}
+    - "过去一周" → {"start": "今天-6天", "end": "今天"}
+    - "最近30天" → {"start": "今天-29天", "end": "今天"}
+
+    Examples:
+        - 今天的新闻: search_news(query="人工智能")
+        - 最近7天: search_news(query="人工智能", date_range={"start": "2025-10-18", "end": "2025-10-25"})
+        - 精确日期: search_news(query="人工智能", date_range={"start": "2025-01-01", "end": "2025-01-07"})
+        - 模糊搜索: search_news(query="特斯拉降价", search_mode="fuzzy", threshold=0.4)
     """
     tools = _get_tools()
     result = tools['search'].search_news_unified(
@@ -407,7 +443,7 @@ async def search_news(
 @mcp.tool
 async def search_related_news_history(
     reference_text: str,
-    time_range: str = "yesterday",
+    time_preset: str = "yesterday",
     threshold: float = 0.4,
     limit: int = 50,
     include_url: bool = False
@@ -416,12 +452,15 @@ async def search_related_news_history(
     基于种子新闻，在历史数据中搜索相关新闻
 
     Args:
-        seed_news_title: 种子新闻标题（完整或部分）
-        lookback_days: 向前查找的天数范围，默认7天，最大30天
+        reference_text: 参考新闻标题（完整或部分）
+        time_preset: 时间范围预设值，可选：
+            - "yesterday": 昨天
+            - "last_week": 上周 (7天)
+            - "last_month": 上个月 (30天)
+            - "custom": 自定义日期范围（需要提供 start_date 和 end_date）
         threshold: 相关性阈值，0-1之间，默认0.4
                    注意：综合相似度计算（70%关键词重合 + 30%文本相似度）
                    阈值越高匹配越严格，返回结果越少
-        platforms: 平台ID列表。不指定则搜索所有平台
         limit: 返回条数限制，默认50，最大100
                注意：实际返回数量取决于相关性匹配结果，可能少于请求值
         include_url: 是否包含URL链接，默认False（节省token）
@@ -437,7 +476,7 @@ async def search_related_news_history(
     tools = _get_tools()
     result = tools['search'].search_related_news_history(
         reference_text=reference_text,
-        time_range=time_range,
+        time_preset=time_preset,
         threshold=threshold,
         limit=limit,
         include_url=include_url

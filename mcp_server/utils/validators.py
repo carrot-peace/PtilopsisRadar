@@ -179,6 +179,33 @@ def validate_date_range(date_range: Optional[dict]) -> Optional[tuple]:
             suggestion=f"start: {start_str}, end: {end_str}"
         )
 
+    # 检查日期是否在未来
+    today = datetime.now().date()
+    if start_date.date() > today or end_date.date() > today:
+        # 获取可用日期范围提示
+        try:
+            from ..services.data_service import DataService
+            data_service = DataService()
+            earliest, latest = data_service.get_available_date_range()
+
+            if earliest and latest:
+                available_range = f"{earliest.strftime('%Y-%m-%d')} 至 {latest.strftime('%Y-%m-%d')}"
+            else:
+                available_range = "无可用数据"
+        except Exception:
+            available_range = "未知（请检查 output 目录）"
+
+        future_dates = []
+        if start_date.date() > today:
+            future_dates.append(start_str)
+        if end_date.date() > today and end_str != start_str:
+            future_dates.append(end_str)
+
+        raise InvalidParameterError(
+            f"不允许查询未来日期: {', '.join(future_dates)}（当前日期: {today.strftime('%Y-%m-%d')}）",
+            suggestion=f"当前可用数据范围: {available_range}"
+        )
+
     return (start_date, end_date)
 
 

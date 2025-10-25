@@ -13,7 +13,8 @@
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v3.0.3-green.svg?style=flat-square)](https://github.com/sansan0/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v3.0.3-blue.svg)](https://github.com/sansan0/TrendRadar)
+[![MCP](https://img.shields.io/badge/MCP-v1.0.1-green.svg)](https://github.com/sansan0/TrendRadar)
 
 [![企业微信通知](https://img.shields.io/badge/企业微信-通知-00D4AA?style=flat-square)](https://work.weixin.qq.com/)
 [![Telegram通知](https://img.shields.io/badge/Telegram-通知-00D4AA?style=flat-square)](https://telegram.org/)
@@ -505,9 +506,20 @@ GitHub 一键 Fork 即可使用，无需编程基础。
 - **大版本升级**：从 v1.x 升级到 v2.y, 建议删除现有 fork 后重新 fork，这样更省力且避免配置冲突
 
 
+### 2025/10/26 - mcp-v1.0.1
+
+  **MCP 模块更新:**
+  - 修复日期查询参数传递错误
+  - 统一所有工具的时间参数格式
+
+
 ### 2025/10/23 - v3.0.3
 
 - 扩大 ntfy 错误信息显示范围
+
+
+<details>
+<summary><strong>👉 历史更新</strong></summary>
 
 
 ### 2025/10/21 - v3.0.2
@@ -534,9 +546,6 @@ GitHub 一键 Fork 即可使用，无需编程基础。
   - 这是独立的 AI 分析功能，不影响现有的推送功能
   - 可选择性使用，无需升级现有部署
 
-
-<details>
-<summary><strong>👉 历史更新</strong></summary>
 
 ### 2025/10/15 - v2.4.4
 
@@ -1317,6 +1326,10 @@ Cherry Studio 提供 GUI 配置界面，可快速部署。
 "分析'比特币'最近一周的热度趋势"
 "看看'iPhone'话题是昙花一现还是持续热点"
 ```
+
+**效果图**：
+
+<img src="/_image/ai.png" alt="mcp 使用效果图">
 
 **详细教程**：[README-MCP-FAQ.md](README-MCP-FAQ.md)
 

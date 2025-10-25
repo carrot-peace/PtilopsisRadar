@@ -495,6 +495,46 @@ class DataService:
 
         return result
 
+    def get_available_date_range(self) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """
+        扫描 output 目录，返回实际可用的日期范围
+
+        Returns:
+            (最早日期, 最新日期) 元组，如果没有数据则返回 (None, None)
+
+        Examples:
+            >>> service = DataService()
+            >>> earliest, latest = service.get_available_date_range()
+            >>> print(f"可用日期范围：{earliest} 至 {latest}")
+        """
+        output_dir = self.parser.project_root / "output"
+
+        if not output_dir.exists():
+            return (None, None)
+
+        available_dates = []
+
+        # 遍历日期文件夹
+        for date_folder in output_dir.iterdir():
+            if date_folder.is_dir() and not date_folder.name.startswith('.'):
+                # 解析日期（格式: YYYY年MM月DD日）
+                try:
+                    date_match = re.match(r'(\d{4})年(\d{2})月(\d{2})日', date_folder.name)
+                    if date_match:
+                        folder_date = datetime(
+                            int(date_match.group(1)),
+                            int(date_match.group(2)),
+                            int(date_match.group(3))
+                        )
+                        available_dates.append(folder_date)
+                except Exception:
+                    pass
+
+        if not available_dates:
+            return (None, None)
+
+        return (min(available_dates), max(available_dates))
+
     def get_system_status(self) -> Dict:
         """
         获取系统运行状态

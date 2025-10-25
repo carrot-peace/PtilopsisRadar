@@ -55,8 +55,11 @@ class SearchTools:
                 - "keyword": 精确关键词匹配（默认）
                 - "fuzzy": 模糊内容匹配（使用相似度算法）
                 - "entity": 实体名称搜索（自动按权重排序）
-            date_range: 日期范围，格式: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
-                       不指定则默认查询今天
+            date_range: 日期范围（可选）
+                       - **格式**: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+                       - **示例**: {"start": "2025-01-01", "end": "2025-01-07"}
+                       - **默认**: 不指定时默认查询今天
+                       - **注意**: start和end可以相同（表示单日查询）
             platforms: 平台过滤列表，如 ['zhihu', 'weibo']
             limit: 返回条数限制，默认50
             sort_by: 排序方式，可选值：
@@ -73,7 +76,7 @@ class SearchTools:
             - search_news_unified(query="人工智能", search_mode="keyword")
             - search_news_unified(query="特斯拉降价", search_mode="fuzzy", threshold=0.4)
             - search_news_unified(query="马斯克", search_mode="entity", limit=20)
-            - search_news_unified(query="iPhone 16发布", search_mode="keyword")
+            - search_news_unified(query="iPhone 16", date_range={"start": "2025-01-01", "end": "2025-01-07"})
         """
         try:
             # 参数验证
@@ -100,8 +103,22 @@ class SearchTools:
                 date_range_tuple = validate_date_range(date_range)
                 start_date, end_date = date_range_tuple
             else:
-                # 默认今天
-                start_date = end_date = datetime.now()
+                # 不指定日期时，使用最新可用数据日期（而非 datetime.now()）
+                earliest, latest = self.data_service.get_available_date_range()
+
+                if latest is None:
+                    # 没有任何可用数据
+                    return {
+                        "success": False,
+                        "error": {
+                            "code": "NO_DATA_AVAILABLE",
+                            "message": "output 目录下没有可用的新闻数据",
+                            "suggestion": "请先运行爬虫生成数据，或检查 output 目录"
+                        }
+                    }
+
+                # 使用最新可用日期
+                start_date = end_date = latest
 
             # 收集所有匹配的新闻
             all_matches = []
@@ -137,16 +154,34 @@ class SearchTools:
                 current_date += timedelta(days=1)
 
             if not all_matches:
-                time_desc = "今天" if start_date == end_date else f"{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
-                return {
+                # 获取可用日期范围用于错误提示
+                earliest, latest = self.data_service.get_available_date_range()
+
+                # 判断时间范围描述
+                if start_date.date() == datetime.now().date() and start_date == end_date:
+                    time_desc = "今天"
+                elif start_date == end_date:
+                    time_desc = start_date.strftime("%Y-%m-%d")
+                else:
+                    time_desc = f"{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
+
+                # 构建错误消息
+                if earliest and latest:
+                    available_desc = f"{earliest.strftime('%Y-%m-%d')} 至 {latest.strftime('%Y-%m-%d')}"
+                    message = f"未找到匹配的新闻（查询范围: {time_desc}，可用数据: {available_desc}）"
+                else:
+                    message = f"未找到匹配的新闻（{time_desc}）"
+
+                result = {
                     "success": True,
                     "results": [],
                     "total": 0,
                     "query": query,
                     "search_mode": search_mode,
                     "time_range": time_desc,
-                    "message": f"未找到匹配的新闻（{time_desc}）"
+                    "message": message
                 }
+                return result
 
             # 统一排序逻辑
             if sort_by == "relevance":
@@ -160,8 +195,10 @@ class SearchTools:
             # 限制返回数量
             results = all_matches[:limit]
 
-            # 构建时间范围描述
-            if start_date == end_date:
+            # 构建时间范围描述（正确判断是否为今天）
+            if start_date.date() == datetime.now().date() and start_date == end_date:
+                time_range_desc = "今天"
+            elif start_date == end_date:
                 time_range_desc = start_date.strftime("%Y-%m-%d")
             else:
                 time_range_desc = f"{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
@@ -457,7 +494,7 @@ class SearchTools:
     def search_related_news_history(
         self,
         reference_text: str,
-        time_range: str = "yesterday",
+        time_preset: str = "yesterday",
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         threshold: float = 0.4,
@@ -469,13 +506,13 @@ class SearchTools:
 
         Args:
             reference_text: 参考新闻标题或内容
-            time_range: 时间范围预设值，可选：
+            time_preset: 时间范围预设值，可选：
                 - "yesterday": 昨天
                 - "last_week": 上周 (7天)
                 - "last_month": 上个月 (30天)
                 - "custom": 自定义日期范围（需要提供 start_date 和 end_date）
-            start_date: 自定义开始日期（仅当 time_range="custom" 时有效）
-            end_date: 自定义结束日期（仅当 time_range="custom" 时有效）
+            start_date: 自定义开始日期（仅当 time_preset="custom" 时有效）
+            end_date: 自定义结束日期（仅当 time_preset="custom" 时有效）
             threshold: 相似度阈值 (0-1之间)，默认0.4
             limit: 返回条数限制，默认50
             include_url: 是否包含URL链接，默认False（节省token）
@@ -487,7 +524,7 @@ class SearchTools:
             >>> tools = SearchTools()
             >>> result = tools.search_related_news_history(
             ...     reference_text="人工智能技术突破",
-            ...     time_range="last_week",
+            ...     time_preset="last_week",
             ...     threshold=0.4,
             ...     limit=50
             ... )
@@ -503,16 +540,16 @@ class SearchTools:
             # 确定查询日期范围
             today = datetime.now()
 
-            if time_range == "yesterday":
+            if time_preset == "yesterday":
                 search_start = today - timedelta(days=1)
                 search_end = today - timedelta(days=1)
-            elif time_range == "last_week":
+            elif time_preset == "last_week":
                 search_start = today - timedelta(days=7)
                 search_end = today - timedelta(days=1)
-            elif time_range == "last_month":
+            elif time_preset == "last_month":
                 search_start = today - timedelta(days=30)
                 search_end = today - timedelta(days=1)
-            elif time_range == "custom":
+            elif time_preset == "custom":
                 if not start_date or not end_date:
                     raise InvalidParameterError(
                         "自定义时间范围需要提供 start_date 和 end_date",
@@ -522,7 +559,7 @@ class SearchTools:
                 search_end = end_date
             else:
                 raise InvalidParameterError(
-                    f"不支持的时间范围: {time_range}",
+                    f"不支持的时间范围: {time_preset}",
                     suggestion="请使用 'yesterday', 'last_week', 'last_month' 或 'custom'"
                 )
 
@@ -600,7 +637,7 @@ class SearchTools:
                     "results": [],
                     "total": 0,
                     "query": reference_text,
-                    "time_range": time_range,
+                    "time_preset": time_preset,
                     "date_range": {
                         "start": search_start.strftime("%Y-%m-%d"),
                         "end": search_end.strftime("%Y-%m-%d")
@@ -627,7 +664,7 @@ class SearchTools:
                     "threshold": threshold,
                     "reference_text": reference_text,
                     "reference_keywords": reference_keywords,
-                    "time_range": time_range,
+                    "time_preset": time_preset,
                     "date_range": {
                         "start": search_start.strftime("%Y-%m-%d"),
                         "end": search_end.strftime("%Y-%m-%d")
