@@ -18,4 +18,4 @@ echo "[地址] http://localhost:3333/mcp"
 echo "[提示] 按 Ctrl+C 停止服务"
 echo ""
 
-uv run python mcp_server/server.py --transport http --host 0.0.0.0 --port 3333
+uv run python -m mcp_server.server --transport http --host 0.0.0.0 --port 3333
