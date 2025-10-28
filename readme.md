@@ -787,6 +787,11 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
 
    可以同时配置多个平台，系统会向所有配置的平台发送通知。
 
+   效果类似下图，一个 name 对应一个 secret，保存完就行，你重新编辑看不到 secret 是正常情况。 
+
+   <img src="_image/secrets.png" alt="GitHub Secrets"/>
+
+
    <details>
    <summary> <strong>👉 企业微信机器人</strong>（配置最简单最迅速）</summary>
    <br>
@@ -963,7 +968,7 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    **GitHub Secret 配置：**
    - 名称：`EMAIL_FROM` - 发件人邮箱地址
    - 名称：`EMAIL_PASSWORD` - 邮箱密码或授权码
-   - 名称：`EMAIL_TO` - 收件人邮箱地址（多个收件人用英文逗号分隔）
+   - 名称：`EMAIL_TO` - 收件人邮箱地址（多个收件人用英文逗号分隔）也可以和 EMAIL_FROM 一样，自己发送给自己
    - 名称：`EMAIL_SMTP_SERVER` - SMTP服务器地址（可选，留空则自动识别）
    - 名称：`EMAIL_SMTP_PORT` - SMTP端口（可选，留空则自动识别）
 
@@ -985,11 +990,13 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    2. 开启 SMTP 服务
    3. 设置客户端授权码
    4. `EMAIL_PASSWORD` 填写授权码
+   <br>
 
    **高级配置**：
    如果自动识别失败，可手动配置 SMTP：
    - `EMAIL_SMTP_SERVER`：如 smtp.gmail.com
    - `EMAIL_SMTP_PORT`：如 587（TLS）或 465（SSL）
+   <br>
 
    **多收件人设置**：
    - EMAIL_TO="user1@example.com,user2@example.com,user3@example.com"
@@ -1113,9 +1120,18 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
 
     - **推送设置**：在 [config/config.yaml](config/config.yaml) 中配置推送模式和通知选项
     - **关键词设置**：在 [config/frequency_words.txt](config/frequency_words.txt) 中添加你关心的关键词
+    - **推送频率调整**：在 [.github/workflows/crawler.yml](.github/workflows/crawler.yml) 请谨慎调整，别贪心
 
     **注意**：建议只调整文档中明确说明的配置项，其他选项主要供作者开发时测试使用
     
+4. **手动测试新闻推送**：
+
+    我这里是拿我的项目举例，你要去你**fork**的项目做测试
+
+    1. **进入 Actions**：https://github.com/sansan0/TrendRadar/actions
+    2. 找到 "Hot News Crawler" 的点进去，如果看不到该字样，那么参照[#109](https://github.com/sansan0/TrendRadar/issues/109)解决
+    3. 点击 "Run workflow" 按钮运行，等待 1 分钟左右数据到你手机上
+
 
 
 <details>
