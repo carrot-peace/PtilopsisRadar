@@ -1,5 +1,3 @@
-> 点击跳转 [AI 分析部署专区](#-ai-智能分析部署) 使用 **AI 功能** 的最佳前提是已使用本项目至少运行一天(积累新闻数据)
-
 <div align="center" id="trendradar">
 
 <a href="https://github.com/sansan0/TrendRadar" title="TrendRadar">
@@ -32,15 +30,27 @@
 </div>
 
 
-> 本项目以轻量，易部署为目标。开源路上，感谢有你~😉
+> 本项目以轻量，易部署为目标
 
-- 感谢**耐心反馈 bug** 的贡献者,你们的每一条反馈让项目更加完善;  
-- 感谢**为项目点 star** 的观众们,你们的每一个 star 都是对开源精神最好的支持;  
-- 感谢**关注[公众号](#问题答疑与1元点赞)并积极互动** 的读者们,你们的**留言**、**点赞**、**分享**和**推荐**让内容更有温度;  
-- 感谢**给予资金支持** 的朋友们,你们的慷慨已化身为键盘旁的零食饮料,陪伴着项目的每一次迭代。
+## 📑 快速导航
+
+<div align="center">
+
+| [🎯 核心功能](#-核心功能) | [🚀 快速开始](#-快速开始) | [🐳 Docker部署](#-docker-部署) | [🤖 AI分析专区](#-ai-智能分析部署) |
+|:---:|:---:|:---:|:---:|
+| [📝 更新日志](#-更新日志) | [🔌 MCP客户端](#-mcp-客户端) | [❓ 答疑与常见问题](#问题答疑与1元点赞) | [⭐ 项目相关](#项目相关) |
+
+</div>
+
+- 感谢**耐心反馈 bug** 的贡献者，你们的每一条反馈让项目更加完善😉;  
+- 感谢**为项目点 star** 的观众们，**fork** 你所欲也，**star** 我所欲也，两者得兼😍是对开源精神最好的支持;  
+- 感谢**关注[公众号](#问题答疑与1元点赞)** 的读者们，你们的留言、点赞、分享和推荐等积极互动让内容更有温度😎。  
 
 <details>
 <summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥42🔥</strong> 位)</summary>
+<br>
+
+> 感谢**给予资金支持** 的朋友们,你们的慷慨已化身为键盘旁的零食饮料,陪伴着项目的每一次迭代
 
 ### 数据支持
 
@@ -775,7 +785,7 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
 </details>
 
 
-## 🚀 使用方式
+## 🚀 快速开始
 
 1. **Fork 本项目**到你的 GitHub 账户
 
@@ -1133,9 +1143,7 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
     3. 点击 "Run workflow" 按钮运行，等待 1 分钟左右数据到你手机上
 
 
-
-<details>
-<summary><strong>👉 Docker 部署</strong></summary>
+## 🐳 Docker 部署
 
 #### 方式一：快速体验（一行命令）
 
@@ -1313,51 +1321,327 @@ docker exec -it trend-radar /bin/bash
 docker exec -it trend-radar ls -la /app/config/
 ```
 
-</details>
-
 
 ## 🤖 AI 智能分析部署
 
-TrendRadar v3.0.0 新增了基于 **MCP (Model Context Protocol)** 的 AI 分析功能，让你可以通过自然语言与新闻数据对话，进行深度分析。部署的话在 5 分钟左右。最复杂的部分我都用一键双击操作替你们解决好了。
-
-> 我发现大家都很善于靠自己解决未知的问题，这种勇气是值得鼓励和赞许的，但如果你卡住了好久，也可以在 issues 或者在公众号底部留言提问，这样我既能帮你，也能帮到更多其他探索中的小伙伴。
+TrendRadar v3.0.0 新增了基于 **MCP (Model Context Protocol)** 的 AI 分析功能，让你可以通过自然语言与新闻数据对话，进行深度分析。使用 **AI 功能** 的最佳前提是已使用本项目至少运行一天(积累新闻数据)
 
 ### 1. 快速部署
 
-Cherry Studio 提供 GUI 配置界面，可快速部署。
+> **图文部署教程**现已更新到我的[公众号](#问题答疑与1元点赞)，回复 "mcp" 即可
 
-**详细教程**：[README-Cherry-Studio.md](README-Cherry-Studio.md)
+Cherry Studio 提供 GUI 配置界面， 5 分钟快速部署， 复杂的部分是一键安装的。
 
+**详细部署教程**：[README-Cherry-Studio.md](README-Cherry-Studio.md)
 
 ### 2. 学习与 AI 对话的姿势
 
-> 注意：实际不建议一次性问多个问题。如果你选择的 ai 模型连按顺序调用都无法做到，建议换一个。
+> 实际不建议一次性问多个问题。如果你选择的 ai 模型连下图的按顺序调用都无法做到，建议换一个。
 
+**详细对话教程**：[README-MCP-FAQ.md](README-MCP-FAQ.md)
+
+**提问效果**：
+
+<img src="/_image/ai2.png" alt="mcp 使用效果图2" width="600">
+
+
+## 🔌 MCP 客户端
+
+TrendRadar MCP 服务支持标准的 Model Context Protocol (MCP) 协议，可以接入各种支持 MCP 的 AI 客户端进行智能分析。
+
+### 支持的客户端
+
+**注意事项**：
+- 将 `/path/to/TrendRadar` 替换为你的项目实际路径
+- Windows 路径使用双反斜杠：`C:\\Users\\YourName\\TrendRadar`
+- 保存后记得重启
+
+<details>
+<summary><b>👉 Claude Desktop</b></summary>
+
+#### 配置文件方式
+
+编辑 Claude Desktop 的 MCP 配置文件：
+
+**Windows**：
+`%APPDATA%\Claude\claude_desktop_config.json`
+
+**Mac**：
+`~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**配置内容**：
+```json
+{
+  "mcpServers": {
+    "trendradar": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/TrendRadar",
+        "run",
+        "python",
+        "-m",
+        "mcp_server.server"
+      ],
+      "env": {},
+      "disabled": false,
+      "alwaysAllow": []
+    }
+  }
+}
 ```
- 我想了解'ai'这个话题，请依次完成以下步骤，并【展示每个步骤的完整结果】：
 
-1. 搜索今天的相关新闻
+</details>
 
-2. 分析最近一周的热度趋势
+<details>
+<summary><b>👉 Cursor</b></summary>
 
-3. 对比各平台的关注度
+#### 方式一：HTTP 模式（推荐）
 
-4. 分析最近一周的情感倾向
+1. **启动 HTTP 服务**：
+   ```bash
+   # Windows
+   start-http.bat
+   
+   # Mac/Linux
+   ./start-http.sh
+   ```
 
-  【重要】：请将4个步骤的结果全部展示出来，不要只展示最后一步。
+2. **配置 Cursor**：
+
+   **项目级配置**（推荐）：
+   在项目根目录创建 `.cursor/mcp.json`：
+   ```json
+   {
+     "mcpServers": {
+       "trendradar": {
+         "url": "http://localhost:3333/mcp",
+         "description": "TrendRadar 新闻热点聚合分析"
+       }
+     }
+   }
+   ```
+
+   **全局配置**：
+   在用户目录创建 `~/.cursor/mcp.json`（同样内容）
+
+3. **使用步骤**：
+   - 保存配置文件后重启 Cursor
+   - 在聊天界面的 "Available Tools" 中查看已连接的工具
+   - 开始使用：`搜索今天的"AI"相关新闻`
+
+#### 方式二：STDIO 模式
+
+创建 `.cursor/mcp.json`：
+```json
+{
+  "mcpServers": {
+    "trendradar": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/TrendRadar",
+        "run",
+        "python",
+        "-m",
+        "mcp_server.server"
+      ]
+    }
+  }
+}
 ```
 
-**效果图**：
+</details>
 
-<img src="/_image/ai2.png" alt="mcp 使用效果图2">
+<details>
+<summary><b>👉 VSCode (Cline/Continue)</b></summary>
 
-**详细教程**：[README-MCP-FAQ.md](README-MCP-FAQ.md)
+#### Cline 配置
 
-> **图文教程**现已更新到我的公众号，回复 "mcp" 即可
+在 Cline 的 MCP 设置中添加：
+
+**HTTP 模式**（推荐）：
+```json
+{
+  "trendradar": {
+    "url": "http://localhost:3333/mcp",
+    "type": "streamableHttp",
+    "autoApprove": [],
+    "disabled": false
+  }
+}
+```
+
+**STDIO 模式**：
+```json
+{
+  "trendradar": {
+    "command": "uv",
+    "args": [
+      "--directory",
+      "/path/to/TrendRadar",
+      "run",
+      "python",
+      "-m",
+      "mcp_server.server"
+    ],
+    "type": "stdio",
+    "disabled": false
+  }
+}
+```
+
+#### Continue 配置
+
+编辑 `~/.continue/config.json`：
+```json
+{
+  "experimental": {
+    "modelContextProtocolServers": [
+      {
+        "transport": {
+          "type": "stdio",
+          "command": "uv",
+          "args": [
+            "--directory",
+            "/path/to/TrendRadar",
+            "run",
+            "python",
+            "-m",
+            "mcp_server.server"
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+**使用示例**：
+```
+分析最近7天"特斯拉"的热度变化趋势
+生成今天的热点摘要报告
+搜索"比特币"相关新闻并分析情感倾向
+```
+
+</details>
+
+<details>
+<summary><b>👉 Claude Code CLI</b></summary>
+
+#### HTTP 模式配置
+
+```bash
+# 1. 启动 HTTP 服务
+# Windows: start-http.bat
+# Mac/Linux: ./start-http.sh
+
+# 2. 添加 MCP 服务器
+claude mcp add --transport http trendradar http://localhost:3333/mcp
+
+# 3. 验证连接（确保服务已启动）
+claude mcp list
+```
+
+#### 使用示例
+
+```bash
+# 查询新闻
+claude "搜索今天知乎的热点新闻，前10条"
+
+# 趋势分析
+claude "分析'人工智能'这个话题最近一周的热度趋势"
+
+# 数据对比
+claude "对比知乎和微博平台对'比特币'的关注度"
+```
+
+</details>
+
+<details>
+<summary><b>👉 MCP Inspector</b>（调试工具）</summary>
+<br>
+
+MCP Inspector 是官方调试工具，用于测试 MCP 连接：
+
+#### 使用步骤
+
+1. **启动 TrendRadar HTTP 服务**：
+   ```bash
+   # Windows
+   start-http.bat
+   
+   # Mac/Linux
+   ./start-http.sh
+   ```
+
+2. **启动 MCP Inspector**：
+   ```bash
+   npx @modelcontextprotocol/inspector
+   ```
+
+3. **在浏览器中连接**：
+   - 访问：`http://localhost:3333/mcp`
+   - 测试 "Ping Server" 功能验证连接
+   - 检查 "List Tools" 是否返回 13 个工具：
+     - 基础查询：get_latest_news, get_news_by_date, get_trending_topics
+     - 智能检索：search_news, search_related_news_history
+     - 高级分析：analyze_topic_trend, analyze_data_insights, analyze_sentiment, find_similar_news, generate_summary_report
+     - 系统管理：get_current_config, get_system_status, trigger_crawl
+
+</details>
+
+<details>
+<summary><b>👉 其他支持 MCP 的客户端</b></summary>
+<br>
+
+任何支持 Model Context Protocol 的客户端都可以连接 TrendRadar：
+
+#### HTTP 模式（推荐）
+
+**服务地址**：`http://localhost:3333/mcp`
+
+**基本配置模板**：
+```json
+{
+  "name": "trendradar",
+  "url": "http://localhost:3333/mcp",
+  "type": "http",
+  "description": "新闻热点聚合分析"
+}
+```
+
+#### STDIO 模式
+
+**基本配置模板**：
+```json
+{
+  "name": "trendradar",
+  "command": "uv",
+  "args": [
+    "--directory",
+    "/path/to/TrendRadar",
+    "run",
+    "python",
+    "-m",
+    "mcp_server.server"
+  ],
+  "type": "stdio"
+}
+```
+
+**注意事项**：
+- 替换 `/path/to/TrendRadar` 为实际项目路径
+- Windows 路径使用反斜杠转义：`C:\\Users\\...`
+- 确保已完成项目依赖安装（运行过 setup 脚本）
+
+</details>
+
 
 ## ☕问题答疑与1元点赞
 
-> 心意到就行，收到的**点赞**用于提高开发者开源的积极性。**点赞**已收录于**致谢名单**
+> 心意到就行，收到的**点赞**用于提高开发者开源的积极性。**点赞**已收录于**致谢名单**  
+> 我发现大家都很善于靠自己解决未知的问题，这种尝试值得鼓励，但如果你卡了太久，建议在issues提问或者在公众号文章底部留言。这样我既能帮到**你**，也能帮到**更多探索中的小伙伴**~~
 
 - **GitHub Issues**：适合针对性强的解答。提问时请提供完整信息（截图、错误日志、系统环境等）。
 - **公众号交流**：适合快速咨询。建议优先在相关文章下的公共留言区交流，如私信，请文明礼貌用语😉
@@ -1366,6 +1650,86 @@ Cherry Studio 提供 GUI 配置界面，可快速部署。
 |公众号关注 |微信点赞 | 支付宝点赞 |
 |:---:|:---:|:---:| 
 | <img src="_image/weixin.png" width="300" title="硅基茶水间"/> | <img src="https://cdn-1258574687.cos.ap-shanghai.myqcloud.com/img/%2F2025%2F07%2F17%2F2ae0a88d98079f7e876c2b4dc85233c6-9e8025.JPG" width="300" title="微信支付"/> | <img src="https://cdn-1258574687.cos.ap-shanghai.myqcloud.com/img/%2F2025%2F07%2F17%2F1ed4f20ab8e35be51f8e84c94e6e239b4-fe4947.JPG" width="300" title="支付宝支付"/> |
+
+### 常见问题
+
+<details>
+<summary><b>👉 Q1: HTTP 服务无法启动？</b></summary>
+<br>
+
+**检查步骤**：
+1. 确认端口 3333 未被占用：
+   ```bash
+   # Windows
+   netstat -ano | findstr :3333
+   
+   # Mac/Linux
+   lsof -i :3333
+   ```
+
+2. 检查项目依赖是否安装：
+   ```bash
+   # 重新运行安装脚本
+   # Windows: setup-windows.bat
+   # Mac/Linux: ./setup-mac.sh
+   ```
+
+3. 查看详细错误日志：
+   ```bash
+   uv run python -m mcp_server.server --transport http --port 3333
+   ```
+4. 尝试自定义端口:
+   ```bash
+   uv run python -m mcp_server.server --transport http --port 33333
+   ```
+
+</details>
+
+<details>
+<summary><b>👉 Q2: 客户端无法连接到 MCP 服务？</b></summary>
+<br>
+
+**解决方案**：
+
+1. **STDIO 模式**：
+   - 确认 UV 路径正确（运行 `which uv` 或 `where uv`）
+   - 确认项目路径正确且无中文字符
+   - 查看客户端错误日志
+
+2. **HTTP 模式**：
+   - 确认服务已启动（访问 `http://localhost:3333/mcp`）
+   - 检查防火墙设置
+   - 尝试使用 127.0.0.1 替代 localhost
+
+3. **通用检查**：
+   - 重启客户端应用
+   - 查看 MCP 服务日志
+   - 使用 MCP Inspector 测试连接
+
+</details>
+
+<details>
+<summary><b>👉 Q3: 工具调用失败或返回错误？</b></summary>
+<br>
+
+**可能原因**：
+
+1. **数据不存在**：
+   - 确认已运行过爬虫（有 output 目录数据）
+   - 检查查询日期范围是否有数据
+   - 查看 output 目录的可用日期
+
+2. **参数错误**：
+   - 检查日期格式：`YYYY-MM-DD`
+   - 确认平台 ID 正确：`zhihu`, `weibo` 等
+   - 查看工具文档中的参数说明
+
+3. **配置问题**：
+   - 确认 `config/config.yaml` 存在
+   - 确认 `config/frequency_words.txt` 存在
+   - 检查配置文件格式是否正确
+
+</details>
 
 ### 项目相关
 
