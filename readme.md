@@ -47,7 +47,7 @@
 - 感谢**关注[公众号](#问题答疑与1元点赞)** 的读者们，你们的留言、点赞、分享和推荐等积极互动让内容更有温度😎。  
 
 <details>
-<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥43🔥</strong> 位)</summary>
+<summary>👉 点击查看<strong>致谢名单</strong> (当前 <strong>🔥44🔥</strong> 位)</summary>
 
 ### 数据支持
 
@@ -67,6 +67,7 @@
 
 |           点赞人            |  金额  |  日期  |             备注             |
 | :-------------------------: | :----: | :----: | :-----------------------: |
+|           C*e          |  1  | 2025.11.05  |        | 
 |           Peter Fan          |  20  | 2025.10.29  |        | 
 |           M*n          |  1  | 2025.10.27  |      感谢开源  | 
 |           *许          |  8.88  | 2025.10.23  |      老师 小白一枚，摸了几天了还没整起来，求教  | 
@@ -1676,7 +1677,7 @@ MCP Inspector 是官方调试工具，用于测试 MCP 连接：
 2. 检查项目依赖是否安装：
    ```bash
    # 重新运行安装脚本
-   # Windows: setup-windows.bat
+   # Windows: setup-windows.bat 或者 setup-windows-en.bat
    # Mac/Linux: ./setup-mac.sh
    ```
 
