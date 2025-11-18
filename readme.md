@@ -8,7 +8,7 @@
 
 <a href="https://trendshift.io/repositories/14726" target="_blank"><img src="https://trendshift.io/api/badge/repositories/14726" alt="sansan0%2FTrendRadar | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-<a href="https://share.302.ai/mEOUzG" target="_blank"><img src="_image/302ai.png" alt="302.AI logo" height="40"/></a>
+<a href="https://share.302.ai/mEOUzG" target="_blank"><img src="_image/302ai.png" alt="302.AI logo" height="60"/></a>
 
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
@@ -847,22 +847,33 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
 
 2. **设置 GitHub Secrets（选择你需要的平台）**:
 
-   在你 Fork 后的仓库中，进入 `Settings` > `Secrets and variables` > `Actions` > `New repository secret`，然后根据需要配置以下任一或多个通知平台：
+   在你 Fork 后的仓库中，进入 `Settings` > `Secrets and variables` > `Actions` > `New repository secret`
 
-   可以同时配置多个平台，系统会向所有配置的平台发送通知。
+   **📌 重要说明（请务必仔细阅读）：**
 
-   效果类似下图，一个 name 对应一个 secret，保存完就行，你重新编辑看不到 secret 是正常情况。 
+   - ✅ **一个 Name 对应一个 Secret**：每添加一个配置项，点击一次"New repository secret"按钮，填写一对"Name"和"Secret"
+   - ✅ **保存后看不到值是正常的**：出于安全考虑，保存后重新编辑时，只能看到 Name（名称），看不到 Secret（值）的内容
+   - ⚠️ **严禁自创名称**：Secret 的 Name（名称）必须**严格使用**下方列出的名称（如 `WEWORK_WEBHOOK_URL`、`FEISHU_WEBHOOK_URL` 等），不能自己随意修改或创造新名称，否则系统无法识别
+   - 💡 **可以同时配置多个平台**：系统会向所有配置的平台发送通知
 
-   <img src="_image/secrets.png" alt="GitHub Secrets"/>
+   **配置示例：**
+
+   <img src="_image/secrets.png" alt="GitHub Secrets 配置示例"/>
+
+   如上图所示，每一行是一个配置项：
+   - **Name（名称）**：必须使用下方展开内容中列出的固定名称（如 `WEWORK_WEBHOOK_URL`）
+   - **Secret（值）**：填写你从对应平台获取的实际内容（如 Webhook 地址、Token 等）
+
+   <br>
 
 
    <details>
    <summary> <strong>👉 点击展开：企业微信机器人</strong>（配置最简单最迅速）</summary>
    <br>
 
-   **GitHub Secret 配置：**
-   - 名称：`WEWORK_WEBHOOK_URL`
-   - 值：你的企业微信机器人 Webhook 地址
+   **GitHub Secret 配置（⚠️ Name 名称必须严格一致）：**
+   - **Name（名称）**：`WEWORK_WEBHOOK_URL`（请复制粘贴此名称，不要手打，避免打错）
+   - **Secret（值）**：你的企业微信机器人 Webhook 地址
 
    <br>
 
@@ -881,9 +892,9 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    <summary> <strong>👉 点击展开：飞书机器人</strong>（消息显示最友好）</summary>
    <br>
 
-   **GitHub Secret 配置：**
-   - 名称：`FEISHU_WEBHOOK_URL`
-   - 值：你的飞书机器人 Webhook 地址(该链接开头类似 https://www.feishu.cn/flow/api/trigger-webhook/********)
+   **GitHub Secret 配置（⚠️ Name 名称必须严格一致）：**
+   - **Name（名称）**：`FEISHU_WEBHOOK_URL`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：你的飞书机器人 Webhook 地址（该链接开头类似 https://www.feishu.cn/flow/api/trigger-webhook/********）
    <br>
 
    有两个方案，**方案一**配置简单，**方案二**配置复杂(但是稳定推送)
@@ -970,9 +981,9 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    <summary> <strong>👉 点击展开：钉钉机器人</strong></summary>
    <br>
 
-   **GitHub Secret 配置：**
-   - 名称：`DINGTALK_WEBHOOK_URL`
-   - 值：你的钉钉机器人 Webhook 地址
+   **GitHub Secret 配置（⚠️ Name 名称必须严格一致）：**
+   - **Name（名称）**：`DINGTALK_WEBHOOK_URL`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：你的钉钉机器人 Webhook 地址
 
    <br>
 
@@ -1000,9 +1011,14 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
    <summary> <strong>👉 点击展开：Telegram Bot</strong></summary>
    <br>
 
-   **GitHub Secret 配置：**
-   - 名称：`TELEGRAM_BOT_TOKEN` - 你的 Telegram Bot Token
-   - 名称：`TELEGRAM_CHAT_ID` - 你的 Telegram Chat ID
+   **GitHub Secret 配置（⚠️ Name 名称必须严格一致）：**
+   - **Name（名称）**：`TELEGRAM_BOT_TOKEN`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：你的 Telegram Bot Token
+
+   - **Name（名称）**：`TELEGRAM_CHAT_ID`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：你的 Telegram Chat ID
+
+   **说明**：Telegram 需要配置**两个** Secret，请分别点击两次"New repository secret"按钮添加
 
    <br>
 
@@ -1039,12 +1055,23 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
 
    <br>
 
-   **GitHub Secret 配置：**
-   - 名称：`EMAIL_FROM` - 发件人邮箱地址
-   - 名称：`EMAIL_PASSWORD` - 邮箱密码或授权码
-   - 名称：`EMAIL_TO` - 收件人邮箱地址（多个收件人用英文逗号分隔）也可以和 EMAIL_FROM 一样，自己发送给自己
-   - 名称：`EMAIL_SMTP_SERVER` - SMTP服务器地址（可选，留空则自动识别）
-   - 名称：`EMAIL_SMTP_PORT` - SMTP端口（可选，留空则自动识别）
+   **GitHub Secret 配置（⚠️ Name 名称必须严格一致）：**
+   - **Name（名称）**：`EMAIL_FROM`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：发件人邮箱地址
+
+   - **Name（名称）**：`EMAIL_PASSWORD`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：邮箱密码或授权码
+
+   - **Name（名称）**：`EMAIL_TO`（请复制粘贴此名称，不要手打）
+   - **Secret（值）**：收件人邮箱地址（多个收件人用英文逗号分隔，也可以和 EMAIL_FROM 一样，自己发送给自己）
+
+   - **Name（名称）**：`EMAIL_SMTP_SERVER`（可选配置，请复制粘贴此名称）
+   - **Secret（值）**：SMTP服务器地址（可留空，系统会自动识别）
+
+   - **Name（名称）**：`EMAIL_SMTP_PORT`（可选配置，请复制粘贴此名称）
+   - **Secret（值）**：SMTP端口（可留空，系统会自动识别）
+
+   **说明**：邮件推送需要配置至少**3个必需** Secret（EMAIL_FROM、EMAIL_PASSWORD、EMAIL_TO），后两个为可选配置
 
    <br>
 
@@ -1130,10 +1157,17 @@ frequency_words.txt 文件增加了一个【必须词】功能，使用 + 号
       ❌ 坏例子：news、alerts（太容易被猜到）
       ```
 
-   3. **配置 GitHub Secret**：
-      - `NTFY_TOPIC`：填写你刚才订阅的主题名称
-      - `NTFY_SERVER_URL`：留空（默认使用 ntfy.sh）
-      - `NTFY_TOKEN`：留空
+   3. **配置 GitHub Secret（⚠️ Name 名称必须严格一致）**：
+      - **Name（名称）**：`NTFY_TOPIC`（请复制粘贴此名称，不要手打）
+      - **Secret（值）**：填写你刚才订阅的主题名称
+
+      - **Name（名称）**：`NTFY_SERVER_URL`（可选配置，请复制粘贴此名称）
+      - **Secret（值）**：留空（默认使用 ntfy.sh）
+
+      - **Name（名称）**：`NTFY_TOKEN`（可选配置，请复制粘贴此名称）
+      - **Secret（值）**：留空
+
+      **说明**：ntfy 至少需要配置 1 个必需 Secret (NTFY_TOPIC)，后两个为可选配置
 
    4. **测试**：
       ```bash
