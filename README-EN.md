@@ -546,7 +546,7 @@ frequency_words.txt file added **required word** feature, using + sign
 
 ## 🚀 Quick Start
 
-> **📖 Reminder**: Fork users should first **[check the latest official documentation](https://github.com/sansan0/TrendRadar/blob/master/README.md)** to ensure the configuration steps are up to date.
+> **📖 Reminder**: Fork users should first **[check the latest official documentation](https://github.com/sansan0/TrendRadar?tab=readme-ov-file)** to ensure the configuration steps are up to date.
 
 1. **Fork this project** to your GitHub account
 
