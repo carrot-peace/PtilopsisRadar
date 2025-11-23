@@ -8,12 +8,13 @@
 
 <a href="https://trendshift.io/repositories/14726" target="_blank"><img src="https://trendshift.io/api/badge/repositories/14726" alt="sansan0%2FTrendRadar | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-<a href="https://share.302.ai/mEOUzG" target="_blank"><img src="_image/302ai.png" alt="302.AI logo" height="60"/></a>
+<a href="https://share.302.ai/mEOUzG" target="_blank"><img src="_image/302ai.png" alt="302.AI logo" height="52"/></a>
+<a href="https://shandianshuo.cn" target="_blank"><img src="_image/shandianshuo.png" alt="FlashSpeak logo" height="55"/></a>
 
 [![GitHub Stars](https://img.shields.io/github/stars/sansan0/TrendRadar?style=flat-square&logo=github&color=yellow)](https://github.com/sansan0/TrendRadar/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/sansan0/TrendRadar?style=flat-square&logo=github&color=blue)](https://github.com/sansan0/TrendRadar/network/members)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v3.2.0-blue.svg)](https://github.com/sansan0/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v3.3.0-blue.svg)](https://github.com/sansan0/TrendRadar)
 [![MCP](https://img.shields.io/badge/MCP-v1.0.2-green.svg)](https://github.com/sansan0/TrendRadar)
 
 [![WeWork](https://img.shields.io/badge/WeWork-Notification-00D4AA?style=flat-square)](https://work.weixin.qq.com/)
@@ -258,9 +259,33 @@ Transform from "algorithm recommendation captivity" to "actively getting the inf
 ## 📝 Changelog
 
 >**Upgrade Instructions**:
-- **Tip**: Do NOT update this project via **Sync fork**. Check [Changelog](#changelog) to understand specific [Upgrade Methods] and [Features]
+- **📌 Check Latest Updates**: **[Original Repository Changelog](https://github.com/sansan0/TrendRadar?tab=readme-ov-file#-changelog)**
+- **Tip**: Do NOT update this project via **Sync fork**. Check [Changelog] to understand specific [Upgrade Methods] and [Features]
 - **Minor Version Update**: Upgrading from v2.x to v2.y, replace `main.py` in your forked repo with the latest version
 - **Major Version Upgrade**: Upgrading from v1.x to v2.y, recommend deleting existing fork and re-forking to save effort and avoid config conflicts
+
+
+### 2025/11/24 - v3.3.0
+
+**🎉 Added Bark Push Support**
+
+1. **iOS Exclusive Push Channel**
+   - Supports Bark push (based on APNs, iOS platform)
+   - Free, open-source, clean, efficient, ad-free
+   - Supports both official server and self-hosted server
+
+2. **Multiple Deployment Methods**
+   - GitHub Actions: Configure `BARK_URL` Secret
+   - Docker: Environment variable `BARK_URL`
+   - Local: `config/config.yaml` configuration file
+
+> 📖 **Detailed Configuration Tutorial**: [Quick Start - Bark Push](#-quick-start)
+
+**🐛 Bug Fix**
+- Fixed issue where `ntfy_server_url` in `config.yaml` was ignored ([#345](https://github.com/sansan0/TrendRadar/issues/345))
+
+**🔧 Upgrade Instructions**:
+- **GitHub Fork Users**: Update `main.py`, `config/config.yaml`, `.github/workflows/crawler.yml`
 
 
 ### 2025/11/23 - v3.2.0
@@ -2078,23 +2103,19 @@ Any client supporting Model Context Protocol can connect to TrendRadar:
 
 ## 🪄 Sponsors
 
+### 🤖 302.AI - Enterprise AI Resource Platform
+
 > **302.AI** is a pay-as-you-go enterprise-level AI resource platform
 > Providing the latest and most comprehensive **AI models** and **APIs** on the market, plus various ready-to-use online AI applications
 
-
 <div align="center">
 
+[![Register & Claim](https://img.shields.io/badge/Register_302.AI-Claim_$1_Credit-8B5CF6?style=for-the-badge&logo=openai&logoColor=white)](https://share.302.ai/mEOUzG)
 <a href="https://share.302.ai/mEOUzG" target="_blank">
-  <img src="_image/banner-302ai-en.jpg" alt="302.AI" width="800"/>
+  <img src="_image/banner-302ai-en.jpg" alt="302.AI" width="700"/>
 </a>
 </div>
 
-### 💰 302.AI New User Benefits
-
-> The $1 credit can be used to call various AI models (such as Claude, GPT, etc.)   
-> This project's AI analysis features require AI model integration. See [AI Analysis Deployment](#-ai-analysis-deployment) for configuration tutorial
-
-[![Register & Claim](https://img.shields.io/badge/Register_302.AI-Claim_$1_Free_Credit-FF6B6B?style=for-the-badge&logo=openai&logoColor=white)](https://share.302.ai/mEOUzG)
 
 <details id="sponsor-tutorial">
 <summary><b>👉 Click to expand: 302.AI Usage Tutorial</b></summary>
@@ -2126,7 +2147,24 @@ A: You can top up as needed, pay-as-you-go. Major AI model prices are now relati
 
 </details>
 
-<br>
+
+> Tracking so many trending topics daily, writing reports, replying messages making your wrists tired?
+>
+> Try「FlashSpeak」AI Voice Input - Speak instead of type, 4x faster ⚡
+>
+> On-device Model • Lightning Fast • Absolute Privacy • Mac/Win Support
+>
+> From reading trends to content output, double your efficiency 👇
+
+<div align="center">
+
+[![Mac Download](https://img.shields.io/badge/Mac-Free_Download-FF6B6B?style=for-the-badge&logo=apple&logoColor=white)](https://shandianshuo.cn) [![Windows Download](https://img.shields.io/badge/Windows-Free_Download-FF6B6B?style=for-the-badge&logo=lightning&logoColor=white)](https://shandianshuo.cn)
+<a href="https://shandianshuo.cn" target="_blank">
+  <img src="_image/banner-shandianshuo.png" alt="FlashSpeak" width="700"/>
+</a>
+</div>
+
+
 
 ---
 
