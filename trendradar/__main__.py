@@ -2056,7 +2056,7 @@ def _build_test_report_data(ctx: AppContext) -> Dict:
     """构造通知测试用报告数据"""
     now = ctx.get_time()
     time_display = now.strftime("%H:%M")
-    title = f"TrendRadar 通知测试消息（{now.strftime('%Y-%m-%d %H:%M:%S')}）"
+    title = f"Ptilopsis Radar 通知测试消息（{now.strftime('%Y-%m-%d %H:%M:%S')}）"
 
     return {
         "stats": [
@@ -2066,7 +2066,7 @@ def _build_test_report_data(ctx: AppContext) -> Dict:
                 "titles": [
                     {
                         "title": title,
-                        "source_name": "TrendRadar",
+                        "source_name": "Ptilopsis Radar",
                         "url": "https://github.com/sansan0/TrendRadar",
                         "mobile_url": "",
                         "ranks": [1],
