@@ -46,6 +46,9 @@ FALLBACK_NOTICE = (
 
 # ── 模块加载工具 ─────────────────────────────────────────────────────────────
 
+# Snapshot sys.modules before any stubbing so tearDownModule can restore it.
+_PRE_STUB_MODULES = dict(sys.modules)
+
 
 def _attach_getattr(mod):
     def __getattr__(name):
@@ -104,7 +107,24 @@ _stub_pkg("trendradar.crawler")
 _MAIN = _load_real("trendradar.__main__", "trendradar/__main__.py")
 NewsAnalyzer = _MAIN.NewsAnalyzer
 
+
+def tearDownModule():
+    """Restore sys.modules to its pre-stub state so stubs don't leak into other tests."""
+    for key in list(sys.modules):
+        if key not in _PRE_STUB_MODULES:
+            del sys.modules[key]
+        elif sys.modules[key] is not _PRE_STUB_MODULES[key]:
+            sys.modules[key] = _PRE_STUB_MODULES[key]
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+# Maps mode name to the strategy dict returned by _get_mode_strategy in production.
+_MODE_STRATEGY = {
+    "daily": {"report_type": "全天汇总", "should_send_notification": True},
+    "current": {"report_type": "当前榜单", "should_send_notification": True},
+    "incremental": {"report_type": "增量分析", "should_send_notification": True},
+}
 
 
 def _load_real_senders():
@@ -150,6 +170,41 @@ def _stats_with_titles():
     ], 1
 
 
+def _make_ctx(*, ai_analysis_region=False, html_sink=None, dashboard_sink=None):
+    """Build a minimal ctx SimpleNamespace with spy-able generate_html / generate_dashboard."""
+    return SimpleNamespace(
+        config={
+            "AI_ANALYSIS": {"ENABLED": True},
+            "STORAGE": {"FORMATS": {"HTML": True}},
+            "DISPLAY": {"REGIONS": {"AI_ANALYSIS": ai_analysis_region}},
+            "SHOW_VERSION_UPDATE": False,
+        },
+        display_mode="keyword",
+        platform_ids=["weibo"],
+        count_frequency=lambda *a, **k: _stats_with_titles(),
+        generate_html=lambda *a, **k: (html_sink.append(k) or "HTML_OUT") if html_sink is not None else "HTML_OUT",
+        generate_dashboard=lambda *a, **k: dashboard_sink.append(k) if dashboard_sink is not None else None,
+    )
+
+
+def _make_fake(ctx, *, ai_result, mode="daily"):
+    """Build a minimal fake self for NewsAnalyzer._run_analysis_pipeline."""
+    strategy = _MODE_STRATEGY[mode]
+    return SimpleNamespace(
+        filter_method="keyword",
+        frequency_file=None,
+        update_info=None,
+        ctx=ctx,
+        _hotlist_total_count=0,
+        _rss_matched_count=0,
+        _rss_total_count=0,
+        _rss_source_total=0,
+        _rss_source_failed=0,
+        _get_mode_strategy=lambda: strategy,
+        _run_ai_analysis=lambda *a, **k: ai_result,
+    )
+
+
 def _run_pipeline(fake, mode="daily"):
     return NewsAnalyzer._run_analysis_pipeline(
         fake,
@@ -179,33 +234,8 @@ class TestDailyGateSmoke(unittest.TestCase):
         html_calls = []
         dashboard_calls = []
 
-        ctx = SimpleNamespace(
-            config={
-                "AI_ANALYSIS": {"ENABLED": True},
-                "STORAGE": {"FORMATS": {"HTML": True}},
-                "DISPLAY": {"REGIONS": {"AI_ANALYSIS": False}},
-                "SHOW_VERSION_UPDATE": False,
-            },
-            display_mode="keyword",
-            platform_ids=["weibo"],
-            count_frequency=lambda *a, **k: _stats_with_titles(),
-            generate_html=lambda *a, **k: (html_calls.append(k) or "HTML_OUT"),
-            generate_dashboard=lambda *a, **k: dashboard_calls.append(k),
-        )
-
-        fake = SimpleNamespace(
-            filter_method="keyword",
-            frequency_file=None,
-            update_info=None,
-            ctx=ctx,
-            _hotlist_total_count=0,
-            _rss_matched_count=0,
-            _rss_total_count=0,
-            _rss_source_total=0,
-            _rss_source_failed=0,
-            _get_mode_strategy=lambda: {"report_type": "daily"},
-            _run_ai_analysis=lambda *a, **k: ai,
-        )
+        ctx = _make_ctx(ai_analysis_region=False, html_sink=html_calls, dashboard_sink=dashboard_calls)
+        fake = _make_fake(ctx, ai_result=ai, mode="daily")
 
         _run_pipeline(fake, "daily")
 
@@ -220,35 +250,9 @@ class TestDailyGateSmoke(unittest.TestCase):
         """
         html_calls = []
 
-        ctx = SimpleNamespace(
-            config={
-                "AI_ANALYSIS": {"ENABLED": True},
-                "STORAGE": {"FORMATS": {"HTML": True}},
-                "DISPLAY": {"REGIONS": {"AI_ANALYSIS": False}},
-                "SHOW_VERSION_UPDATE": False,
-            },
-            display_mode="keyword",
-            platform_ids=["weibo"],
-            count_frequency=lambda *a, **k: _stats_with_titles(),
-            generate_html=lambda *a, **k: (html_calls.append(k) or "HTML_OUT"),
-            generate_dashboard=lambda *a, **k: None,
-        )
+        ctx = _make_ctx(ai_analysis_region=False, html_sink=html_calls)
+        fake = _make_fake(ctx, ai_result=None, mode="daily")
 
-        fake = SimpleNamespace(
-            filter_method="keyword",
-            frequency_file=None,
-            update_info=None,
-            ctx=ctx,
-            _hotlist_total_count=0,
-            _rss_matched_count=0,
-            _rss_total_count=0,
-            _rss_source_total=0,
-            _rss_source_failed=0,
-            _get_mode_strategy=lambda: {"report_type": "daily"},
-            _run_ai_analysis=lambda *a, **k: None,
-        )
-
-        # 不 crash
         _run_pipeline(fake, "daily")
 
         self.assertEqual(len(html_calls), 1)
@@ -300,33 +304,8 @@ class TestNonDailyGateUnchangedSmoke(unittest.TestCase):
         ai = _make_ai_result()
         dashboard_calls = []
 
-        ctx = SimpleNamespace(
-            config={
-                "AI_ANALYSIS": {"ENABLED": True},
-                "STORAGE": {"FORMATS": {"HTML": True}},
-                "DISPLAY": {"REGIONS": {"AI_ANALYSIS": False}},
-                "SHOW_VERSION_UPDATE": False,
-            },
-            display_mode="keyword",
-            platform_ids=["weibo"],
-            count_frequency=lambda *a, **k: _stats_with_titles(),
-            generate_html=lambda *a, **k: "HTML",
-            generate_dashboard=lambda *a, **k: dashboard_calls.append(k),
-        )
-
-        fake = SimpleNamespace(
-            filter_method="keyword",
-            frequency_file=None,
-            update_info=None,
-            ctx=ctx,
-            _hotlist_total_count=0,
-            _rss_matched_count=0,
-            _rss_total_count=0,
-            _rss_source_total=0,
-            _rss_source_failed=0,
-            _get_mode_strategy=lambda: {"report_type": "daily"},
-            _run_ai_analysis=lambda *a, **k: ai,
-        )
+        ctx = _make_ctx(ai_analysis_region=False, dashboard_sink=dashboard_calls)
+        fake = _make_fake(ctx, ai_result=ai, mode="current")
 
         _run_pipeline(fake, "current")
 
@@ -338,33 +317,8 @@ class TestNonDailyGateUnchangedSmoke(unittest.TestCase):
         ai = _make_ai_result()
         dashboard_calls = []
 
-        ctx = SimpleNamespace(
-            config={
-                "AI_ANALYSIS": {"ENABLED": True},
-                "STORAGE": {"FORMATS": {"HTML": True}},
-                "DISPLAY": {"REGIONS": {"AI_ANALYSIS": False}},
-                "SHOW_VERSION_UPDATE": False,
-            },
-            display_mode="keyword",
-            platform_ids=["weibo"],
-            count_frequency=lambda *a, **k: _stats_with_titles(),
-            generate_html=lambda *a, **k: "HTML",
-            generate_dashboard=lambda *a, **k: dashboard_calls.append(k),
-        )
-
-        fake = SimpleNamespace(
-            filter_method="keyword",
-            frequency_file=None,
-            update_info=None,
-            ctx=ctx,
-            _hotlist_total_count=0,
-            _rss_matched_count=0,
-            _rss_total_count=0,
-            _rss_source_total=0,
-            _rss_source_failed=0,
-            _get_mode_strategy=lambda: {"report_type": "daily"},
-            _run_ai_analysis=lambda *a, **k: ai,
-        )
+        ctx = _make_ctx(ai_analysis_region=False, dashboard_sink=dashboard_calls)
+        fake = _make_fake(ctx, ai_result=ai, mode="incremental")
 
         _run_pipeline(fake, "incremental")
 
