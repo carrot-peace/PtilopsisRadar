@@ -3,7 +3,7 @@
 Information Environment Anomaly Monitoring & Public Opinion Radar Tool
 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v6.9.0-blue.svg)](https://github.com/carrot-peace/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v6.9.0-blue.svg)](https://github.com/carrot-peace/PtilopsisRadar)
 
 **English** | **[中文](README-CN.md)**
 
@@ -135,8 +135,8 @@ What AI cannot do:
 
 ```bash
 # Clone repository
-git clone https://github.com/carrot-peace/TrendRadar.git
-cd TrendRadar
+git clone https://github.com/carrot-peace/PtilopsisRadar.git
+cd PtilopsisRadar
 
 # Install dependencies with uv
 uv sync
