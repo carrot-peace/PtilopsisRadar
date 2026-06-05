@@ -908,7 +908,6 @@ class NewsAnalyzer:
         if self.ctx.config["STORAGE"]["FORMATS"]["HTML"]:
             display_regions = self.ctx.config.get("DISPLAY", {}).get("REGIONS", {})
             html_standalone = standalone_data if display_regions.get("STANDALONE", False) else None
-            html_ai = ai_result if display_regions.get("AI_ANALYSIS", True) else None
             report_metadata = {
                 "hotlist_total": total_titles,
                 "platform_total": len(self.ctx.platform_ids),
@@ -922,6 +921,11 @@ class NewsAnalyzer:
             #   current/incremental → 轻量盘面 dashboard（不写 full.html）
             # landing（public/index.html）由两条路径各自幂等维护。
             if mode == "daily":
+                # daily full report 是 PtilopsisRadar 的固定产品输出，不应被
+                # DISPLAY.REGIONS.AI_ANALYSIS gate 决定是否拿到真实 AI result。
+                # 始终传入原始 ai_result，由 renderer 自行决定显示 editorial
+                # 还是 no-AI fallback notice。
+                html_ai = ai_result
                 html_file = self.ctx.generate_html(
                     stats,
                     total_titles,
@@ -938,6 +942,8 @@ class NewsAnalyzer:
                     report_metadata=report_metadata,
                 )
             else:
+                # current / incremental dashboard 继续遵循旧的 display gate。
+                html_ai = ai_result if display_regions.get("AI_ANALYSIS", True) else None
                 self.ctx.generate_dashboard(
                     mode=mode,
                     ai_analysis=html_ai,
