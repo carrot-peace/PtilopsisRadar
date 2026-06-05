@@ -97,12 +97,13 @@ class _FakeBackend:
 class _SplitTracker:
     """记录 split_content_func 是否被调用（用于验证 environment 不走分批器）。"""
 
-    def __init__(self):
+    def __init__(self, content="分批内容"):
         self.called = False
+        self.content = content
 
     def __call__(self, *args, **kwargs):
         self.called = True
-        return ["分批内容"]
+        return [self.content]
 
 
 def _ok_response():
@@ -225,7 +226,7 @@ class TestAlertBriefRenderer(unittest.TestCase):
         )
 
     def test_contains_alert_layer_essentials(self):
-        self.assertIn("TrendRadar｜异常提醒", self.out)
+        self.assertIn("Ptilopsis Radar｜异常提醒", self.out)
         self.assertIn("本轮发现", self.out)
         # topic
         self.assertIn("AI前沿模型", self.out)
@@ -300,7 +301,7 @@ class TestDailyDigestRenderer(unittest.TestCase):
             html_file_path="https://reports.example.com/latest.html",
             now=self.now,
         )
-        self.assertIn("TrendRadar｜每日简报", out)
+        self.assertIn("Ptilopsis Radar｜每日简报", out)
         self.assertIn("今日盘面", out)
         self.assertIn("今日重点", out)
         self.assertIn("异常 2｜已抑制 2", out)
@@ -425,7 +426,7 @@ class TestSendToTelegramRouting(unittest.TestCase):
         self.assertFalse(split.called, "environment 不应走分批器")
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["parse_mode"], "HTML")
-        self.assertIn("TrendRadar｜异常提醒", payload["text"])
+        self.assertIn("Ptilopsis Radar｜异常提醒", payload["text"])
 
     def test_environment_long_summary_not_split(self):
         long_text = "传" * 5000
@@ -459,6 +460,24 @@ class TestSendToTelegramRouting(unittest.TestCase):
         self.assertTrue(split.called, "classic 应走原 split_content_func 分批路径")
         self.assertGreaterEqual(post.call_count, 1)
 
+    def test_classic_telegram_payload_replaces_visible_brand_only(self):
+        result = AIAnalysisResult(
+            report_style="classic", success=True, core_trends="核心趋势内容",
+        )
+        split = _SplitTracker(
+            'TrendRadar 更新：trendradar 已启动\n'
+            '<a href="https://github.com/sansan0/TrendRadar">TrendRadar 链接</a>'
+        )
+        with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
+            ok = _call_telegram(result, split)
+        self.assertTrue(ok)
+        text = post.call_args.kwargs["json"]["text"]
+        self.assertIn("Ptilopsis Radar 更新", text)
+        self.assertIn("Ptilopsis Radar 已启动", text)
+        self.assertIn(">Ptilopsis Radar 链接</a>", text)
+        self.assertNotIn("TrendRadar 更新", text)
+        self.assertIn('href="https://github.com/sansan0/TrendRadar"', text)
+
     def test_environment_daily_sends_single_digest_without_split(self):
         result = make_env_result()
         split = _SplitTracker()
@@ -479,7 +498,7 @@ class TestSendToTelegramRouting(unittest.TestCase):
         self.assertFalse(split.called)
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["parse_mode"], "HTML")
-        self.assertIn("TrendRadar｜每日简报", payload["text"])
+        self.assertIn("Ptilopsis Radar｜每日简报", payload["text"])
         self.assertIn("AI前沿模型", payload["text"])
         self.assertIn("output/html/latest/daily.html", payload["text"])
 
@@ -670,7 +689,7 @@ class TestCooldownIntegration(unittest.TestCase):
         self.assertTrue(ok)
         self.assertFalse(split.called, "daily 应走每日简报路径，而非完整 split 路径")
         self.assertEqual(post.call_count, 1, "daily 不应被静默")
-        self.assertIn("TrendRadar｜每日简报", post.call_args.kwargs["json"]["text"])
+        self.assertIn("Ptilopsis Radar｜每日简报", post.call_args.kwargs["json"]["text"])
 
     def test_daily_mode_does_not_touch_alert_state(self):
         # environment + daily：即使有候选，也不读写 alert_state（cooldown 不影响 daily）

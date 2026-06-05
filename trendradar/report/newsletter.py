@@ -347,13 +347,13 @@ def render_newsletter_report(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>TrendRadar · {_e(mode_label)} · {_e(date_str)}</title>
+<title>Ptilopsis Radar · {_e(mode_label)} · {_e(date_str)}</title>
 <style>{_NL_CSS}</style>
 </head>
 <body>
 <div class="wrap">
 <header>
-  <div class="brand">TrendRadar · 信息环境监测</div>
+  <div class="brand">Ptilopsis Radar · 信息环境监测</div>
   <h1>{_e(mode_label)}</h1>
   <div class="dateline">{_e(date_str)}</div>
 </header>
@@ -361,7 +361,7 @@ def render_newsletter_report(
 {data_zone}
 {notes_zone}
 <footer>
-  <span>TrendRadar</span>
+  <span>Ptilopsis Radar</span>
   <span>{_e(date_str)}</span>
 </footer>
 </div>

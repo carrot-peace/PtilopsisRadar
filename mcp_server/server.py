@@ -1,5 +1,5 @@
 """
-TrendRadar MCP Server - FastMCP 2.0 实现
+Ptilopsis Radar MCP Server - FastMCP 2.0 实现
 
 使用 FastMCP 2.0 提供生产级 MCP 工具服务器。
 支持 stdio 和 HTTP 两种传输模式。
@@ -59,7 +59,7 @@ async def get_platforms_resource() -> str:
     )
     return json.dumps({
         "platforms": config.get("platforms", []),
-        "description": "TrendRadar 支持的热榜平台列表"
+        "description": "Ptilopsis Radar 支持的热榜平台列表"
     }, ensure_ascii=False, indent=2)
 
 
@@ -74,7 +74,7 @@ async def get_rss_feeds_resource() -> str:
     status = await asyncio.to_thread(tools['data'].get_rss_feeds_status)
     return json.dumps({
         "feeds": status.get("today_feeds", {}),
-        "description": "TrendRadar 支持的 RSS 订阅源列表"
+        "description": "Ptilopsis Radar 支持的 RSS 订阅源列表"
     }, ensure_ascii=False, indent=2)
 
 
@@ -109,7 +109,7 @@ async def get_keywords_resource() -> str:
     return json.dumps({
         "word_groups": config.get("word_groups", []),
         "total_groups": config.get("total_groups", 0),
-        "description": "TrendRadar 关注词配置"
+        "description": "Ptilopsis Radar 关注词配置"
     }, ensure_ascii=False, indent=2)
 
 
@@ -792,7 +792,7 @@ async def check_version(
     proxy_url: Optional[str] = None
 ) -> str:
     """
-    检查版本更新（同时检查 TrendRadar 和 MCP Server）
+    检查版本更新（同时检查 Ptilopsis Radar 和 MCP Server）
 
     比较本地版本与 GitHub 远程版本，判断是否需要更新。
 
@@ -1071,7 +1071,7 @@ async def get_notification_channels() -> str:
 @mcp.tool
 async def send_notification(
     message: str,
-    title: str = "TrendRadar 通知",
+    title: str = "Ptilopsis Radar 通知",
     channels: Optional[List[str]] = None,
 ) -> str:
     """
@@ -1093,7 +1093,7 @@ async def send_notification(
 
     Args:
         message: markdown 格式的消息内容（必需）
-        title: 消息标题，默认 "TrendRadar 通知"
+        title: 消息标题，默认 "Ptilopsis Radar 通知"
         channels: 指定发送的渠道列表，不指定则发送到所有已配置渠道
                   可选值: feishu, dingtalk, wework, telegram, email, ntfy, bark, slack, generic_webhook
 
@@ -1135,7 +1135,7 @@ def run_server(
     # 打印启动信息
     print()
     print("=" * 60)
-    print("  TrendRadar MCP Server - FastMCP 2.0")
+    print("  Ptilopsis Radar MCP Server - FastMCP 2.0")
     print("=" * 60)
     print(f"  传输模式: {transport.upper()}")
 
@@ -1219,7 +1219,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='TrendRadar MCP Server - 新闻热点聚合 MCP 工具服务器',
+        description='Ptilopsis Radar MCP Server - 新闻热点聚合 MCP 工具服务器',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 详细配置教程请查看: README-Cherry-Studio.md

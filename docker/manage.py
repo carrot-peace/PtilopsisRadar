@@ -26,13 +26,13 @@ _WEBSERVER_PLACEHOLDER_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30">
 <meta name="robots" content="noindex, nofollow">
-<title>TrendRadar</title>
+<title>Ptilopsis Radar</title>
 <style>body{margin:0;padding:48px 16px;background:#0f1115;color:#e6e6e6;
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
 "Microsoft YaHei",sans-serif;text-align:center;line-height:1.7;}</style>
 </head>
 <body>
-<h1>TrendRadar</h1>
+<h1>Ptilopsis Radar</h1>
 <p>盘面尚未生成，请等待首次运行 / 定时任务完成。</p>
 <p style="color:#8a909a;font-size:13px;">本页每 30 秒自动刷新。</p>
 </body>
@@ -691,7 +691,7 @@ def webserver_status():
 def show_help():
     """显示帮助信息"""
     help_text = """
-🐳 TrendRadar 容器管理工具
+🐳 Ptilopsis Radar 容器管理工具
 
 📋 命令列表:
   run              - 手动执行一次爬虫

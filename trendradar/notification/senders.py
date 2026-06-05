@@ -18,6 +18,7 @@
 import smtplib
 import time
 import json
+import re
 from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -39,6 +40,19 @@ from .formatters import convert_markdown_to_mrkdwn, strip_markdown
 
 # realtime alert gate 只作用于「自动实时推送」的报告模式。
 REALTIME_ALERT_MODES = ("current", "incremental")
+TELEGRAM_BRAND_NAME = "Ptilopsis Radar"
+
+
+def _replace_telegram_brand_text(text: str) -> str:
+    """Replace visible Telegram brand text without rewriting HTML tag attributes."""
+    if not text:
+        return text
+    parts = re.split(r"(<[^>]*>)", text)
+    for idx, part in enumerate(parts):
+        if part.startswith("<") and part.endswith(">"):
+            continue
+        parts[idx] = re.sub(r"trendradar", TELEGRAM_BRAND_NAME, part, flags=re.IGNORECASE)
+    return "".join(parts)
 
 
 def should_apply_realtime_alert_gate(
@@ -338,7 +352,7 @@ def send_to_dingtalk(
         payload = {
             "msgtype": "markdown",
             "markdown": {
-                "title": f"TrendRadar 热点分析报告 - {report_type}",
+                "title": f"Ptilopsis Radar 热点分析报告 - {report_type}",
                 "text": batch_content,
             },
         }
@@ -620,6 +634,7 @@ def send_to_telegram(
             html_file_path=html_file_path,
             now=now,
         )
+        text = _replace_telegram_brand_text(text)
         # 单条消息：接近 Telegram 限制时按行截断，绝不调用通用分批器拆成多批
         # 上限取 min(batch_size, 3900)，留出余量避免逼近 Telegram 单条 4096 上限
         text = truncate_at_line_boundary(text, min(batch_size, 3900))
@@ -669,6 +684,7 @@ def send_to_telegram(
                 html_file_path=html_file_path,
                 now=now,
             )
+            text = _replace_telegram_brand_text(text)
             text = truncate_at_line_boundary(text, min(batch_size, 3900))
         except Exception as e:
             print(f"{log_prefix}每日简报渲染失败，回退完整分批路径 [{report_type}]：{e}")
@@ -720,6 +736,9 @@ def send_to_telegram(
 
     # 逐批发送
     for i, batch_content in enumerate(batches, 1):
+        batch_content = truncate_at_line_boundary(
+            _replace_telegram_brand_text(batch_content), batch_size
+        )
         content_size = len(batch_content.encode("utf-8"))
         print(
             f"发送{log_prefix}第 {i}/{len(batches)} 批次，大小：{content_size} 字节 [{report_type}]"
@@ -977,7 +996,7 @@ def send_to_email(
         msg = MIMEMultipart("alternative")
 
         # 严格按照 RFC 标准设置 From header
-        sender_name = "TrendRadar"
+        sender_name = "Ptilopsis Radar"
         msg["From"] = formataddr((sender_name, from_email))
 
         # 设置收件人
@@ -989,7 +1008,7 @@ def send_to_email(
 
         # 设置邮件主题
         now = get_time_func() if get_time_func else datetime.now()
-        subject = f"TrendRadar 热点分析报告 - {report_type} - {now.strftime('%m月%d日 %H:%M')}"
+        subject = f"Ptilopsis Radar 热点分析报告 - {report_type} - {now.strftime('%m月%d日 %H:%M')}"
         msg["Subject"] = Header(subject, "utf-8")
 
         # 设置其他标准 header
@@ -999,7 +1018,7 @@ def send_to_email(
 
         # 添加纯文本部分（作为备选）
         text_content = f"""
-TrendRadar 热点分析报告
+Ptilopsis Radar 热点分析报告
 ========================
 报告类型：{report_type}
 生成时间：{now.strftime('%Y-%m-%d %H:%M:%S')}
@@ -1367,7 +1386,7 @@ def send_to_bark(
             "markdown": batch_content,
             "device_key": device_key,
             "sound": "default",
-            "group": "TrendRadar",
+            "group": "Ptilopsis Radar",
             "action": "none",  # 点击推送跳到 APP 不弹出弹框,方便阅读
         }
 

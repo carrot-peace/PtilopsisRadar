@@ -1,4 +1,4 @@
-# TrendRadar × Cherry Studio 部署指南 🍒
+# Ptilopsis Radar × Cherry Studio 部署指南 🍒
 
 > **适合人群**：零编程基础的用户
 > **客户端**：Cherry Studio（免费开源 GUI 客户端）
@@ -123,7 +123,7 @@ cd 你的项目名
 
 如果配置成功，AI 会：
 
-- ✅ 调用 TrendRadar 工具
+- ✅ 调用 Ptilopsis Radar 工具
 - ✅ 返回真实的新闻数据
 - ✅ 显示平台、标题、排名等信息
 

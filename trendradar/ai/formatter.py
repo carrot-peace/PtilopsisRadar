@@ -241,8 +241,8 @@ def _render_env_telegram(result: AIAnalysisResult) -> str:
 # Telegram 异常提醒 brief（alert layer，非完整报告）
 # ════════════════════════════════════════════════════════════════
 
-ALERT_TITLE = "TrendRadar｜异常提醒"
-DAILY_DIGEST_TITLE = "TrendRadar｜每日简报"
+ALERT_TITLE = "Ptilopsis Radar｜异常提醒"
+DAILY_DIGEST_TITLE = "Ptilopsis Radar｜每日简报"
 
 # 自动提醒候选桶优先级（silence_gap 不进自动提醒，留给每日简报）
 _ALERT_BUCKET_ORDER = [
