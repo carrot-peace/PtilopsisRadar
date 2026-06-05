@@ -92,6 +92,9 @@ def _load_report_config(config_data: Dict) -> Dict:
         "RANK_THRESHOLD": report_config.get("rank_threshold", 10),
         "SORT_BY_POSITION_FIRST": sort_by_position_env if sort_by_position_env is not None else report_config.get("sort_by_position_first", False),
         "MAX_NEWS_PER_KEYWORD": max_news_env or report_config.get("max_news_per_keyword", 0),
+        # 背景组 realtime pull-only：current/incremental 模式不进 AI 告警输入，仅作 daily/HTML 上下文
+        "BACKGROUND_PULL_ONLY": report_config.get("background_pull_only", False),
+        "BACKGROUND_GROUP_PREFIX": report_config.get("background_group_prefix", "背景-"),
     }
 
 
@@ -502,9 +505,18 @@ def _load_filter_config(config_data: Dict) -> Dict:
         if ai_filter.get("enabled", False):
             method = "ai"
 
+    # 高热未归类兜底（仅热榜关键词模式）：未命中任何词组但高热的标题，
+    # 每条生成一个独立 synthetic topic，避免静默漏掉突发异常。
+    catch_all_cfg = filter_cfg.get("high_heat_catch_all", {}) or {}
+
     return {
         "METHOD": method,  # "keyword" | "ai"
         "PRIORITY_SORT_ENABLED": filter_cfg.get("priority_sort_enabled", False),  # AI 模式标签优先级排序开关
+        "HIGH_HEAT_CATCH_ALL": {
+            "ENABLED": catch_all_cfg.get("enabled", False),
+            "MIN_RANK": catch_all_cfg.get("min_rank", 5),
+            "MAX_ITEMS": catch_all_cfg.get("max_items", 5),
+        },
     }
 
 

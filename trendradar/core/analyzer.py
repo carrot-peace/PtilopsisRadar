@@ -63,6 +63,24 @@ def calculate_news_weight(
     return total_weight
 
 
+def strip_background_groups(
+    stats: Optional[List[Dict]], prefix: str = "背景-"
+) -> Optional[List[Dict]]:
+    """剔除 word/display_name 以 prefix 开头的（背景）组。
+
+    用于背景表 realtime pull-only：current/incremental 模式下把背景组从 AI 告警输入中移除。
+    返回新列表，不修改入参；prefix 为空或 stats 为空时原样返回。
+    """
+    if not stats or not prefix:
+        return stats
+
+    def _is_background(item: Dict) -> bool:
+        name = item.get("word") or item.get("display_name") or ""
+        return isinstance(name, str) and name.startswith(prefix)
+
+    return [s for s in stats if not _is_background(s)]
+
+
 def format_time_display(
     first_time: str,
     last_time: str,
@@ -106,6 +124,9 @@ def count_word_frequency(
     is_first_crawl_func: Optional[Callable[[], bool]] = None,
     convert_time_func: Optional[Callable[[str], str]] = None,
     quiet: bool = False,
+    catch_all_enabled: bool = False,
+    catch_all_min_rank: int = 5,
+    catch_all_max_items: int = 5,
 ) -> Tuple[List[Dict], int]:
     """
     统计词频，支持必须词、频率词、过滤词、全局过滤词，并标记新增标题
@@ -126,9 +147,18 @@ def count_word_frequency(
         is_first_crawl_func: 检测是否是当天第一次爬取的函数
         convert_time_func: 时间格式转换函数
         quiet: 是否静默模式（不打印日志）
+        catch_all_enabled: 是否启用“高热未归类”兜底（仅热榜）
+        catch_all_min_rank: 兜底纳入阈值，未命中任何词组且 min(rank) <= 此值才纳入
+        catch_all_max_items: 兜底最多生成多少个独立 synthetic topic（按热度取 Top-N）
 
     Returns:
         Tuple[List[Dict], int]: (统计结果列表, 总标题数)
+
+    高热未归类兜底说明：
+        关键词系统是上游过滤闸，未命中任何词组的标题会被丢弃。开启 catch_all 后，
+        对“未被 global_filter / filter_words 排除、且未命中任何词组、min(rank) <= 阈值”
+        的标题，每条生成一个独立的合成组（topic），统一排在最后，便于 AI 逐事件成 topic、
+        cooldown 按 topic_key 去重。低热未归类仍丢弃，避免退化成新闻聚合。
     """
     # 默认权重配置
     if weight_config is None:
@@ -214,6 +244,9 @@ def count_word_frequency(
     total_titles = 0
     processed_titles = {}
     matched_new_count = 0
+    # 高热未归类兜底：收集“未被过滤、且未命中任何词组”的候选标题
+    uncategorized_candidates = []
+    uncategorized_seen = set()
 
     if title_info is None:
         title_info = {}
@@ -240,6 +273,39 @@ def count_word_frequency(
             )
 
             if not matches_frequency_words:
+                # 高热未归类兜底：仅收集“未被过滤、且未命中任何词组”的标题
+                # （matches_word_groups 对“被过滤”和“未命中”都返回 False，这里区分二者）
+                if catch_all_enabled and title not in uncategorized_seen:
+                    title_lower_uc = (
+                        str(title).lower() if not isinstance(title, str) else title.lower()
+                    )
+                    excluded = False
+                    if global_filters and any(
+                        gw.lower() in title_lower_uc for gw in global_filters
+                    ):
+                        excluded = True
+                    if not excluded and filter_words and any(
+                        _word_matches(fw, title_lower_uc) for fw in filter_words
+                    ):
+                        excluded = True
+                    if not excluded:
+                        uc_ranks = title_data.get("ranks", []) or []
+                        if (
+                            source_id in title_info
+                            and title in title_info[source_id]
+                            and title_info[source_id][title].get("ranks")
+                        ):
+                            uc_ranks = title_info[source_id][title]["ranks"]
+                        uc_min_rank = min(uc_ranks) if uc_ranks else 99
+                        uncategorized_seen.add(title)
+                        uncategorized_candidates.append(
+                            {
+                                "source_id": source_id,
+                                "title": title,
+                                "title_data": title_data,
+                                "min_rank": uc_min_rank,
+                            }
+                        )
                 continue
 
             # 如果是增量模式或 current 模式第一次，统计匹配的新增新闻数量
@@ -421,6 +487,72 @@ def count_word_frequency(
                     f"当前榜单模式：{total_input_news} 条当前榜单新闻中有 {matched_count} 条{filter_status}"
                 )
 
+    # 高热未归类兜底：为每条高热未归类标题生成一个独立 synthetic topic（统一排最后）
+    synthetic_positions = {}
+    synthetic_display = {}
+    if catch_all_enabled and uncategorized_candidates:
+        qualified = [
+            c for c in uncategorized_candidates if c["min_rank"] <= catch_all_min_rank
+        ]
+        qualified.sort(key=lambda c: (c["min_rank"], c["title"]))
+        if catch_all_max_items > 0:
+            qualified = qualified[:catch_all_max_items]
+
+        base_position = len(word_groups) + 1000
+        for idx, cand in enumerate(qualified):
+            sid = cand["source_id"]
+            t = cand["title"]
+            td = cand["title_data"]
+
+            first_time = ""
+            last_time = ""
+            count_info = 1
+            ranks = td.get("ranks", []) or []
+            url = td.get("url", "")
+            mobile_url = td.get("mobileUrl", "")
+            rank_timeline = []
+            if sid in title_info and t in title_info[sid]:
+                info = title_info[sid][t]
+                first_time = info.get("first_time", "")
+                last_time = info.get("last_time", "")
+                count_info = info.get("count", 1)
+                if info.get("ranks"):
+                    ranks = info["ranks"]
+                url = info.get("url", url)
+                mobile_url = info.get("mobileUrl", mobile_url)
+                rank_timeline = info.get("rank_timeline", [])
+            if not ranks:
+                ranks = [99]
+
+            time_display = format_time_display(first_time, last_time, convert_time_func)
+            source_name = id_to_name.get(sid, sid)
+
+            is_new = False
+            if all_news_are_new:
+                is_new = True
+            elif new_titles and sid in new_titles:
+                is_new = t in new_titles[sid]
+
+            entry = {
+                "title": t,
+                "source_name": source_name,
+                "first_time": first_time,
+                "last_time": last_time,
+                "time_display": time_display,
+                "count": count_info,
+                "ranks": ranks,
+                "rank_threshold": rank_threshold,
+                "url": url,
+                "mobileUrl": mobile_url,
+                "is_new": is_new,
+                "rank_timeline": rank_timeline,
+            }
+
+            syn_key = f"__uncategorized__::{sid}::{t}"
+            word_stats[syn_key] = {"count": 1, "titles": {sid: [entry]}}
+            synthetic_positions[syn_key] = base_position + idx
+            synthetic_display[syn_key] = f"高热未归类·{t[:30]}"
+
     stats = []
     # 创建 group_key 到位置、最大数量、显示名称的映射
     group_key_to_position = {
@@ -432,6 +564,9 @@ def count_word_frequency(
     group_key_to_display_name = {
         group["group_key"]: group.get("display_name") for group in word_groups
     }
+    # 合成组的位置/显示名（位置 > 任何真实组，确保统一排最后）
+    group_key_to_position.update(synthetic_positions)
+    group_key_to_display_name.update(synthetic_display)
 
     for group_key, data in word_stats.items():
         all_titles = []

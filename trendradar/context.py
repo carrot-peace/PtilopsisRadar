@@ -275,6 +275,7 @@ class AppContext:
         quiet: bool = False,
     ) -> Tuple[List[Dict], int]:
         """统计词频"""
+        catch_all = (self.config.get("FILTER", {}) or {}).get("HIGH_HEAT_CATCH_ALL", {}) or {}
         return count_word_frequency(
             results=results,
             word_groups=word_groups,
@@ -291,6 +292,9 @@ class AppContext:
             is_first_crawl_func=self.is_first_crawl,
             convert_time_func=self.convert_time_display,
             quiet=quiet,
+            catch_all_enabled=bool(catch_all.get("ENABLED", False)),
+            catch_all_min_rank=int(catch_all.get("MIN_RANK", 5)),
+            catch_all_max_items=int(catch_all.get("MAX_ITEMS", 5)),
         )
 
     # === 报告生成 ===
