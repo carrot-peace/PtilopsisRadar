@@ -71,15 +71,17 @@ def _load_platforms(config_path):
     except ImportError:
         pass
 
-    # 回退：仅扫描 platforms: 块内的 sources 列表
+    # 回退：仅扫描顶层 platforms: 块，避免误抓 rss 等其它 sources。
+    # 支持 platforms 是最后一个顶层键；找不到时快速失败，不扫描整份配置。
+    m_block = re.search(r"^platforms:\s*\n(.*?)(?=^\S|\Z)", text, re.S | re.M)
+    if not m_block:
+        raise ValueError("未找到顶层 platforms: 配置块，无法用正则回退解析平台 sources")
+    block = m_block.group(1)
+
     api_url = ""
-    m_api = re.search(r"^platforms:.*?^\s*api_url:\s*\"([^\"]*)\"", text, re.S | re.M)
+    m_api = re.search(r"^\s*api_url:\s*[\"']?([^\"'\n]*)[\"']?", block, re.M)
     if m_api:
         api_url = m_api.group(1).strip()
-
-    # 限定在 platforms: 段（到下一个顶格 key 为止），避免误抓 rss 等其它 sources
-    m_block = re.search(r"^platforms:\n(.*?)(?=^\S)", text, re.S | re.M)
-    block = m_block.group(1) if m_block else text
 
     out = []
     # 以 "- id:" 为单位切分每个 source
