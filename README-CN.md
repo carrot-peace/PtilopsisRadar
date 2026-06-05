@@ -3,7 +3,7 @@
 信息环境异常监测与舆情雷达工具
 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v6.9.0-blue.svg)](https://github.com/carrot-peace/TrendRadar)
+[![Version](https://img.shields.io/badge/version-v6.9.0-blue.svg)](https://github.com/carrot-peace/PtilopsisRadar)
 
 **[English](README.md)** | **中文**
 
@@ -135,8 +135,8 @@ AI 不能做的事情：
 
 ```bash
 # 克隆仓库
-git clone https://github.com/carrot-peace/TrendRadar.git
-cd TrendRadar
+git clone https://github.com/carrot-peace/PtilopsisRadar.git
+cd PtilopsisRadar
 
 # 使用 uv 安装依赖
 uv sync
