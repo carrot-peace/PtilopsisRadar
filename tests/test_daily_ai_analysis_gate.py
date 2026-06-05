@@ -26,6 +26,9 @@ from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Snapshot sys.modules before any stubbing so tearDownModule can restore it.
+_PRE_STUB_MODULES = dict(sys.modules)
+
 
 def _attach_getattr(mod):
     """让 stub 模块对任意名字返回占位类（兼容 `from mod import Name`）。"""
@@ -79,12 +82,29 @@ def _load_main_module():
 _MAIN = _load_main_module()
 NewsAnalyzer = _MAIN.NewsAnalyzer
 
-# 可识别 sentinel，代表“已成功生成、可用”的 environment AI result
+
+def tearDownModule():
+    """Restore sys.modules to its pre-stub state so stubs don't leak into other tests."""
+    for key in list(sys.modules):
+        if key not in _PRE_STUB_MODULES:
+            del sys.modules[key]
+        elif sys.modules[key] is not _PRE_STUB_MODULES[key]:
+            sys.modules[key] = _PRE_STUB_MODULES[key]
+
+
+# 可识别 sentinel，代表"已成功生成、可用"的 environment AI result
 USABLE_AI = object()
+
+# Maps mode name to the strategy dict returned by _get_mode_strategy in production.
+_MODE_STRATEGY = {
+    "daily": {"report_type": "全天汇总", "should_send_notification": True},
+    "current": {"report_type": "当前榜单", "should_send_notification": True},
+    "incremental": {"report_type": "增量分析", "should_send_notification": True},
+}
 
 
 class _GateTestBase(unittest.TestCase):
-    def _build(self, *, ai_analysis_region, ai_result):
+    def _build(self, *, mode, ai_analysis_region, ai_result):
         """构造最小 fake self + ctx，并 spy 住两个 HTML 生成入口。"""
         self.html_calls = []
         self.dashboard_calls = []
@@ -105,6 +125,7 @@ class _GateTestBase(unittest.TestCase):
             generate_dashboard=lambda *a, **k: self.dashboard_calls.append(k),
         )
 
+        strategy = _MODE_STRATEGY[mode]
         fake = SimpleNamespace(
             filter_method="keyword",
             frequency_file=None,
@@ -115,7 +136,7 @@ class _GateTestBase(unittest.TestCase):
             _rss_total_count=0,
             _rss_source_total=0,
             _rss_source_failed=0,
-            _get_mode_strategy=lambda: {"report_type": "daily"},
+            _get_mode_strategy=lambda: strategy,
             _run_ai_analysis=lambda *a, **k: ai_result,
         )
         return fake
@@ -136,7 +157,7 @@ class _GateTestBase(unittest.TestCase):
 class TestDailyGate(_GateTestBase):
     def test_daily_region_false_usable_ai_passes_through(self):
         # daily + AI_ANALYSIS=false + 可用 ai_result → 仍传入原始 ai_result，不置空
-        fake = self._build(ai_analysis_region=False, ai_result=USABLE_AI)
+        fake = self._build(mode="daily", ai_analysis_region=False, ai_result=USABLE_AI)
         self._run(fake, "daily")
         self.assertEqual(len(self.html_calls), 1)
         self.assertEqual(len(self.dashboard_calls), 0)
@@ -144,14 +165,14 @@ class TestDailyGate(_GateTestBase):
 
     def test_daily_region_true_usable_ai_unchanged(self):
         # daily + AI_ANALYSIS=true + 可用 ai_result → 行为不变，仍传原始 ai_result
-        fake = self._build(ai_analysis_region=True, ai_result=USABLE_AI)
+        fake = self._build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
         self._run(fake, "daily")
         self.assertEqual(len(self.html_calls), 1)
         self.assertIs(self.html_calls[0]["ai_analysis"], USABLE_AI)
 
     def test_daily_region_false_no_ai_result_passes_none(self):
         # daily + AI_ANALYSIS=false + 无可用 AI → 传入 None，由 PR3a/PR3b fallback 处理；不 crash
-        fake = self._build(ai_analysis_region=False, ai_result=None)
+        fake = self._build(mode="daily", ai_analysis_region=False, ai_result=None)
         self._run(fake, "daily")
         self.assertEqual(len(self.html_calls), 1)
         self.assertIsNone(self.html_calls[0]["ai_analysis"])
@@ -160,7 +181,7 @@ class TestDailyGate(_GateTestBase):
 class TestNonDailyGateUnchanged(_GateTestBase):
     def test_current_region_false_dashboard_gets_none(self):
         # current + AI_ANALYSIS=false + 可用 ai_result → 仍按旧 gate 置空
-        fake = self._build(ai_analysis_region=False, ai_result=USABLE_AI)
+        fake = self._build(mode="current", ai_analysis_region=False, ai_result=USABLE_AI)
         self._run(fake, "current")
         self.assertEqual(len(self.dashboard_calls), 1)
         self.assertEqual(len(self.html_calls), 0)
@@ -168,7 +189,7 @@ class TestNonDailyGateUnchanged(_GateTestBase):
 
     def test_current_region_true_dashboard_gets_ai(self):
         # current + AI_ANALYSIS=true + 可用 ai_result → dashboard 仍收到原始 ai_result
-        fake = self._build(ai_analysis_region=True, ai_result=USABLE_AI)
+        fake = self._build(mode="current", ai_analysis_region=True, ai_result=USABLE_AI)
         self._run(fake, "current")
         self.assertEqual(len(self.dashboard_calls), 1)
         self.assertIs(self.dashboard_calls[0]["ai_analysis"], USABLE_AI)
