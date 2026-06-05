@@ -386,9 +386,9 @@ class SystemManagementTools:
         """
         检查版本更新
 
-        同时检查 TrendRadar 和 MCP Server 两个组件的版本更新。
+        同时检查 Ptilopsis Radar 和 MCP Server 两个组件的版本更新。
         远程版本 URL 从 config.yaml 获取：
-        - version_check_url: TrendRadar 版本
+        - version_check_url: Ptilopsis Radar 版本
         - mcp_version_check_url: MCP Server 版本
 
         Args:
@@ -397,7 +397,7 @@ class SystemManagementTools:
         Returns:
             版本检查结果字典，包含：
             - success: 是否成功
-            - trendradar: TrendRadar 版本检查结果
+            - trendradar: Ptilopsis Radar 版本检查结果
             - mcp: MCP Server 版本检查结果
             - any_update: 是否有任何组件需要更新
 
@@ -514,7 +514,7 @@ class SystemManagementTools:
 
             # 检查两个版本
             trendradar_result = check_single_version(
-                "TrendRadar", trendradar_version, trendradar_url, proxies, headers
+                "Ptilopsis Radar", trendradar_version, trendradar_url, proxies, headers
             )
             mcp_result = check_single_version(
                 "MCP Server", mcp_version, mcp_url, proxies, headers
@@ -529,7 +529,7 @@ class SystemManagementTools:
             return {
                 "success": True,
                 "summary": {
-                    "description": "版本检查结果（TrendRadar + MCP Server）",
+                    "description": "版本检查结果（Ptilopsis Radar + MCP Server）",
                     "any_update": any_update
                 },
                 "data": {

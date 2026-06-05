@@ -35,7 +35,7 @@ PUBLIC_LANDING_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>TrendRadar</title>
+<title>Ptilopsis Radar</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:#fff;color:#111;padding:0 20px;
@@ -52,7 +52,7 @@ a.card .d{font-size:13px;color:#777;margin-top:4px}
 </head>
 <body>
 <div class="wrap">
-  <div class="brand">TrendRadar · 信息环境监测</div>
+  <div class="brand">Ptilopsis Radar · 信息环境监测</div>
   <h1>盘面入口</h1>
   <a class="card" href="current/index.html">
     <div class="t">当前盘面 →</div>
@@ -400,13 +400,13 @@ def render_current_dashboard_html(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>{_esc(title)} · TrendRadar</title>
+<title>{_esc(title)} · Ptilopsis Radar</title>
 <style>{_DASHBOARD_CSS}</style>
 </head>
 <body>
 <div class="wrap">
   <div class="cur-head">
-    <span class="cur-brand">TrendRadar</span>
+    <span class="cur-brand">Ptilopsis Radar</span>
     <span class="cur-ts">{_esc(display_time)}</span>
   </div>
   {lead_html}

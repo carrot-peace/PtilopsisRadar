@@ -19,10 +19,10 @@ _OUTPUT_INDEX_REDIRECT_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta http-equiv="refresh" content="0; url=public/index.html">
 <meta name="robots" content="noindex, nofollow">
-<title>TrendRadar</title>
+<title>Ptilopsis Radar</title>
 </head>
 <body>
-<p>正在跳转到 <a href="public/index.html">TrendRadar 盘面</a> …</p>
+<p>正在跳转到 <a href="public/index.html">Ptilopsis Radar 盘面</a> …</p>
 </body>
 </html>"""
 

@@ -712,7 +712,7 @@ def _markdown_to_simple_html(text: str) -> str:
     html = html.replace('\n', '<br>\n')
 
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>TrendRadar 通知</title>
+<html><head><meta charset="utf-8"><title>Ptilopsis Radar 通知</title>
 <style>body{{font-family:sans-serif;padding:20px;max-width:800px;margin:0 auto}}
 a{{color:#1a73e8}}h1,h2,h3{{color:#333}}hr{{border:none;border-top:1px solid #ddd;margin:16px 0}}
 code{{background:#f5f5f5;padding:2px 6px;border-radius:3px}}</style>
@@ -819,7 +819,7 @@ def _send_email(
             use_tls = True
 
         msg = MIMEMultipart("alternative")
-        msg["From"] = formataddr(("TrendRadar", from_email))
+        msg["From"] = formataddr(("Ptilopsis Radar", from_email))
 
         recipients = [addr.strip() for addr in to_email.split(",")]
         msg["To"] = ", ".join(recipients)
@@ -867,7 +867,7 @@ def _send_ntfy(server_url: str, topic: str, content: str, title: str, token: str
     headers = {
         "Content-Type": "text/plain; charset=utf-8",
         "Markdown": "yes",
-        "Title": "TrendRadar Notification",  # ASCII，避免 HTTP header 编码问题
+        "Title": "Ptilopsis Radar Notification",  # ASCII，避免 HTTP header 编码问题
         "Priority": "default",
         "Tags": "news",
     }
@@ -905,7 +905,7 @@ def _send_bark(bark_url: str, content: str, title: str) -> Dict:
         "markdown": content,
         "device_key": device_key,
         "sound": "default",
-        "group": "TrendRadar",
+        "group": "Ptilopsis Radar",
         "action": "none",
     }
 
@@ -1108,7 +1108,7 @@ class NotificationTools:
     def send_notification(
         self,
         message: str,
-        title: str = "TrendRadar 通知",
+        title: str = "Ptilopsis Radar 通知",
         channels: Optional[List[str]] = None,
     ) -> Dict:
         """

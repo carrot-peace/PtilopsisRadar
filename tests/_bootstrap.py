@@ -2,7 +2,7 @@
 """
 测试引导模块
 
-TrendRadar 主包的 __init__ 会导入 litellm 等重依赖（pyproject 要求 Python 3.12）。
+Ptilopsis Radar 主包的 __init__ 会导入 litellm 等重依赖（pyproject 要求 Python 3.12）。
 本引导在不触发这些 __init__ 的前提下，按文件路径单独加载"信息环境异常监测"涉及的
 纯逻辑模块，并仅 stub 掉 litellm 客户端（trendradar.ai.client）。
 

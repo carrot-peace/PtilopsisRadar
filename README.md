@@ -1,4 +1,4 @@
-# TrendRadar
+# Ptilopsis Radar
 
 Information Environment Anomaly Monitoring & Public Opinion Radar Tool
 
@@ -11,7 +11,7 @@ Information Environment Anomaly Monitoring & Public Opinion Radar Tool
 
 ## What This Project Is
 
-TrendRadar monitors anomaly signals across multi-platform information environments. It simultaneously ingests data from Chinese hot-list / social platforms and RSS / international media / official sources, classifies sources into evidence tiers (A / B / C / D), and identifies through programmatic rules:
+Ptilopsis Radar monitors anomaly signals across multi-platform information environments. It simultaneously ingests data from Chinese hot-list / social platforms and RSS / international media / official sources, classifies sources into evidence tiers (A / B / C / D), and identifies through programmatic rules:
 
 - **Cross-layer resonance** — Social / trending platforms and primary or background sources appear simultaneously
 - **High-heat unverified** — D-tier platforms show rising propagation, but lack A / B / C source corroboration
@@ -31,7 +31,7 @@ TrendRadar monitors anomaly signals across multi-platform information environmen
 
 Chinese internet hot-list platforms (Weibo, Douyin, Zhihu, etc.) carry early-stage propagation value, but their credibility is unstable. International media, official sources, technical communities, and financial sources provide background reference, but are naturally isolated from Chinese social platform information streams.
 
-TrendRadar's value is placing these sources into a unified observation framework, examining whether "heat" and "evidence tier" are misaligned: a topic trending on D-tier platforms does not mean the event has been established; a topic with background information on A / B sources but silence on Chinese platforms is also a signal worth observing.
+Ptilopsis Radar's value is placing these sources into a unified observation framework, examining whether "heat" and "evidence tier" are misaligned: a topic trending on D-tier platforms does not mean the event has been established; a topic with background information on A / B sources but silence on Chinese platforms is also a signal worth observing.
 
 ---
 

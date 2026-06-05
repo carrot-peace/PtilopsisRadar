@@ -4,7 +4,7 @@
 
 </div>
 
-# TrendRadar MCP Tool Usage Q&A
+# Ptilopsis Radar MCP Tool Usage Q&A
 
 > AI Query Guide - How to Use News Trend Analysis Tools Through Natural Conversation (v3.1.7)
 
@@ -31,7 +31,7 @@
 | | `generate_summary_report` | Generate daily/weekly summary reports |
 | **System** | `get_current_config` | Get current system configuration |
 | | `get_system_status` | Get system running status |
-| | `check_version` | Check version updates (TrendRadar + MCP Server) |
+| | `check_version` | Check version updates (Ptilopsis Radar + MCP Server) |
 | | `trigger_crawl` | Manually trigger a crawl task |
 | **Storage** | `sync_from_remote` | Pull data from remote storage to local |
 | | `get_storage_status` | Get storage config and status |
@@ -568,7 +568,7 @@ Will check both components' versions simultaneously:
 
 | Component | Description |
 |-----------|-------------|
-| **TrendRadar** | Core crawler and analysis engine |
+| **Ptilopsis Radar** | Core crawler and analysis engine |
 | **MCP Server** | AI conversation tool service |
 
 For each component, you'll get:
