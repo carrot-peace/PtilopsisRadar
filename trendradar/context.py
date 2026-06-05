@@ -396,9 +396,14 @@ class AppContext:
     ) -> str:
         """渲染HTML内容。
 
-        environment 风格走 newsletter 渲染器；classic 走旧版 render_html_content。
+        daily 模式一律走 environment newsletter 渲染器：AI 是否可用只决定
+        newsletter 内部显示正常 editorial 还是 no-AI fallback notice，不再让
+        daily report 因为缺少/不可用 AI result 回落 legacy render_html_content。
+
+        其余模式保持现状：environment 风格走 newsletter 渲染器；classic 走旧版
+        render_html_content。
         """
-        if (
+        if mode == "daily" or (
             ai_analysis is not None
             and getattr(ai_analysis, "report_style", "") == "environment"
         ):
