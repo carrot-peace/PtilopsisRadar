@@ -27,6 +27,46 @@ Ptilopsis Radar 用于监测多平台信息环境中的异常信号。它同时�
 - 不是舆情结论生成器——它不输出"事件已发生"
 - 不是让 AI 直接判断真假的系统
 
+---
+
+## 产品边界
+
+PtilopsisRadar 不是 TrendRadar 的通用增强版，而是一次产品边界收缩后的 fork。
+
+TrendRadar 追求 broad utility：热点聚合、RSS 阅读、AI 摘要、多渠道通知、MCP 集成和可定制报告。
+
+PtilopsisRadar 只优化一个更窄的雷达功能：检测中文信息环境中的异常传播结构。
+
+因此，某个功能在 TrendRadar 中合理存在，并不意味着 PtilopsisRadar 必须保留它。凡是扩大维护面、但不提升信号发现、证据质量、运行可靠性或雷达可读性的能力，都可以在 PtilopsisRadar 中被标记为 legacy / deprecated / deletion candidate。
+
+使用以下规则作为判断依据：
+- 不要仅因为某个功能在 TrendRadar 中存在就保留它。
+- 只保留能够提升信号发现、证据质量、运行可靠性或雷达可读性的功能。
+- 否则将其分类为 legacy / deprecated / deletion candidate。
+
+### Signal Domains
+
+经济、社会、政策、公共安全和地缘政治议题可以作为 signal domains 进入 PtilopsisRadar。
+
+但这些议题不会改变产品边界：PtilopsisRadar 检测的是中文信息环境中的异常传播结构，而不是建设通用新闻平台、市场行情面板、经济数据库或金融资讯聚合器。
+
+微观经济信号在以下情况下属于范围内：它们表现为信息环境信号，例如裁员、欠薪、闭店、租金压力、地方财政压力、消费变化、供应中断、价格异常等。
+
+微观经济信号在以下情况下不属于范围内：需要项目变成市场数据面板、投资追踪器、宏观经济数据库、金融新闻聚合器或通用 RSS/news reader。
+
+### Core Product Path
+
+```
+热榜/RSS 抓取
+→ 来源分层 source tiers
+→ evidence summary / evidence labels / bucketize
+→ environment AI analysis
+→ current dashboard / daily report
+→ Telegram realtime alert / daily digest
+```
+
+---
+
 ## 解决什么问题
 
 中文互联网热榜平台（微博、抖音、知乎等）有早期传播价值，但可信度不稳定；国际媒体、官方源、技术社区、财经源可提供背景参照，但与中文社交平台的信息流天然隔离。
