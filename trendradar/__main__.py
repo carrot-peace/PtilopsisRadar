@@ -1523,36 +1523,6 @@ class NewsAnalyzer:
             pass
         return rss_items
 
-    def _generate_rss_html_report(self, rss_items: list, feeds_info: dict) -> str:
-        """生成 RSS HTML 报告"""
-        try:
-            from trendradar.report.rss_html import render_rss_html_content
-            from pathlib import Path
-
-            html_content = render_rss_html_content(
-                rss_items=rss_items,
-                total_count=len(rss_items),
-                feeds_info=feeds_info,
-                get_time_func=self.ctx.get_time,
-            )
-
-            # 保存 HTML 文件（扁平化结构：output/html/日期/）
-            date_folder = self.ctx.format_date()
-            time_filename = self.ctx.format_time()
-            output_dir = Path("output") / "html" / date_folder
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            file_path = output_dir / f"rss_{time_filename}.html"
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(html_content)
-
-            print(f"[RSS] HTML 报告已生成: {file_path}")
-            return str(file_path)
-
-        except Exception as e:
-            print(f"[RSS] 生成 HTML 报告失败: {e}")
-            return None
-
     def _execute_mode_strategy(
         self, mode_strategy: Dict, results: Dict, id_to_name: Dict, failed_ids: List,
         rss_items: Optional[List[Dict]] = None,
