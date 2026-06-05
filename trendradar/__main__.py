@@ -22,7 +22,10 @@ import requests
 from trendradar.context import AppContext
 from trendradar import __version__
 from trendradar.core import load_config, parse_multi_account_config, validate_paired_configs
-from trendradar.core.analyzer import convert_keyword_stats_to_platform_stats
+from trendradar.core.analyzer import (
+    convert_keyword_stats_to_platform_stats,
+    strip_background_groups,
+)
 from trendradar.crawler import DataFetcher
 from trendradar.storage import convert_crawl_results_to_news_data
 from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_days_old
@@ -519,6 +522,20 @@ class NewsAnalyzer:
                 ai_stats = stats
                 ai_id_to_name = id_to_name
 
+            # 背景表 realtime pull-only：current/incremental 模式下，从 AI 告警输入中剔除
+            # “背景-*”组（热榜 stats + RSS 分组），使背景仅作 daily/HTML 上下文、不自推 realtime。
+            # 仅过滤 AI 输入的本地副本，不影响 HTML/raw stats（仍含背景组）。
+            ai_rss_items = rss_items
+            if self.ctx.config.get("BACKGROUND_PULL_ONLY", False) and ai_mode in ("current", "incremental"):
+                bg_prefix = self.ctx.config.get("BACKGROUND_GROUP_PREFIX", "背景-")
+                _before, _before_rss = len(ai_stats or []), len(ai_rss_items or [])
+                ai_stats = strip_background_groups(ai_stats, bg_prefix)
+                ai_rss_items = strip_background_groups(ai_rss_items, bg_prefix)
+                _removed = _before - len(ai_stats or [])
+                _removed_rss = _before_rss - len(ai_rss_items or [])
+                if _removed or _removed_rss:
+                    print(f"[AI] 背景表 pull-only：realtime 输入剔除背景组 热榜 {_removed} / RSS {_removed_rss}")
+
             # 提取平台列表
             platforms = list(ai_id_to_name.values()) if ai_id_to_name else []
 
@@ -538,7 +555,7 @@ class NewsAnalyzer:
 
             result = analyzer.analyze(
                 stats=ai_stats,
-                rss_stats=rss_items,
+                rss_stats=ai_rss_items,
                 report_mode=ai_mode,
                 report_type=ai_report_type,
                 platforms=platforms,

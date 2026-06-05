@@ -253,6 +253,12 @@ report:
 
   max_news_per_keyword: 0             # 每个关键词/标签最大显示数量（0=不限制，仅影响展示裁剪）
 
+  # 背景表 realtime pull-only：background_group_prefix 开头的词组（如“背景-宏观经济”）
+  # 在 current/incremental 模式下不进 AI 告警输入（不自推 realtime），
+  # 仅在 daily 报告与 HTML 中作为上下文展示。
+  background_pull_only: true          # true = 背景组只作上下文、不触发 realtime 异常提醒
+  background_group_prefix: "背景-"    # 背景组识别前缀（与 frequency_words.txt 中的命名一致）
+
 
 # ===============================================================
 # 4.5 筛选策略
@@ -267,6 +273,16 @@ filter:
   priority_sort_enabled: true          # AI 模式标签排序（仅 method=ai 时生效）
                                        # true = 按兴趣描述中的定义顺序
                                        # false = 按匹配条数排序（多的在前）
+
+  # 高热未归类兜底（仅 method=keyword、仅热榜）：
+  # 未命中任何词组、未被过滤、且 min(rank) <= min_rank 的高热标题，
+  # 每条生成一个独立的“高热未归类·<标题>”synthetic topic（按热度取 Top max_items），
+  # 统一排在报告最后。用于兜住关键词没覆盖到的突发异常，避免静默漏报；
+  # min_rank 收紧（默认 5）以免退化成新闻聚合。
+  high_heat_catch_all:
+    enabled: true                      # 是否启用高热未归类兜底
+    min_rank: 5                        # 纳入阈值：未归类标题的最高名次 <= 此值才兜底
+    max_items: 5                       # 最多生成多少个独立兜底 topic
 
 
 # ===============================================================
