@@ -27,6 +27,46 @@ Ptilopsis Radar monitors anomaly signals across multi-platform information envir
 - Not a public opinion conclusion generator — it does not output "event has occurred"
 - Not a system that lets AI directly judge truth or falsehood
 
+---
+
+## Product Boundary
+
+PtilopsisRadar is a product-boundary fork of TrendRadar.
+
+TrendRadar optimizes for broad utility: aggregation, RSS reading, AI summaries, multi-channel notifications, MCP integrations, and customizable reports.
+
+PtilopsisRadar optimizes for a narrow radar function: detecting abnormal propagation structures in Chinese-language information environments.
+
+Therefore, features that are valid in TrendRadar may be deliberately removed from PtilopsisRadar when they expand the maintenance surface without improving signal detection.
+
+Use this as the governing rule:
+- Do not preserve a feature merely because it was valid in TrendRadar.
+- Preserve a feature only if it improves signal detection, evidence quality, operational reliability, or radar readability.
+- Otherwise classify it as legacy / deprecated / deletion candidate.
+
+### Signal Domains
+
+Economic, social, policy, public-safety, and geopolitical topics are valid as signal domains.
+
+They do not expand PtilopsisRadar into a general news, market-data, or economic-data product.
+
+Micro-level economic signals are in scope when they appear as information-environment signals, such as layoffs, wage arrears, shop closures, rent pressure, local fiscal stress, consumption changes, supply disruptions, price anomalies, or similar signals.
+
+They are out of scope when they require PtilopsisRadar to become a market dashboard, investment tracker, macroeconomic database, financial-news aggregator, or general RSS/news reader.
+
+### Core Product Path
+
+```
+hotlist/RSS crawling
+→ source tiers
+→ evidence summary / evidence labels / bucketize
+→ environment AI analysis
+→ current dashboard / daily report
+→ Telegram realtime alert / daily digest
+```
+
+---
+
 ## What Problem It Solves
 
 Chinese internet hot-list platforms (Weibo, Douyin, Zhihu, etc.) carry early-stage propagation value, but their credibility is unstable. International media, official sources, technical communities, and financial sources provide background reference, but are naturally isolated from Chinese social platform information streams.
