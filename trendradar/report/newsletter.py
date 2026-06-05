@@ -61,6 +61,8 @@ header h1{font-size:20px;font-weight:700;line-height:1.3;margin-top:6px}
 
 .overview-text{font-size:15px;line-height:1.8;color:var(--muted);margin-bottom:22px}
 
+.ai-unavailable{font-size:12px;color:var(--faint);margin-bottom:32px;padding:10px 0;border-bottom:1px solid var(--border)}
+
 .stats-brief{font-size:12px;color:var(--faint);margin-bottom:32px}
 .stats-brief strong{color:var(--text);font-weight:600}
 
@@ -223,6 +225,25 @@ def _nl_rss_html(
     return "\n".join(parts)
 
 
+_NL_AI_UNAVAILABLE_NOTICE = (
+    "本轮 AI 分析不可用；本报告仅展示程序已采集内容和可用元数据，不生成额外结论。"
+)
+
+
+def _is_usable_environment_ai(ai_analysis: Any) -> bool:
+    """是否存在可用的 environment AI 分析结果。
+
+    仅当三者同时满足才算可用：非 None、success 为 True、report_style 为
+    environment。不要把 `ai_analysis is not None` 直接当作可用——AI 失败、跳过或
+    classic 风格的结果都应进入 no-AI fallback。
+    """
+    return (
+        ai_analysis is not None
+        and getattr(ai_analysis, "success", False) is True
+        and getattr(ai_analysis, "report_style", "") == "environment"
+    )
+
+
 def render_newsletter_report(
     report_data: Dict[str, Any],
     total_titles: int,
@@ -246,8 +267,7 @@ def render_newsletter_report(
 
     # ── EDITORIAL ZONE ────────────────────────────────────────────────
     editorial = ""
-    if ai_analysis is not None and getattr(ai_analysis, "success", False) \
-            and getattr(ai_analysis, "report_style", "") == "environment":
+    if _is_usable_environment_ai(ai_analysis):
         radar = derive_radar_readout(getattr(ai_analysis, "overview_stats", {}) or {})
 
         overview = (getattr(ai_analysis, "overview", "") or "").strip()
@@ -304,6 +324,12 @@ def render_newsletter_report(
                 f'<div class="sec"><div class="sec-label">已抑制</div>'
                 f"{sup_html}</div>\n"
             )
+    else:
+        # no usable environment AI result：输出稳定的 fallback 提示，
+        # 仅展示程序已采集内容（DATA ZONE 照常渲染），不伪造任何 AI 结论。
+        editorial = (
+            f'<div class="ai-unavailable">{_e(_NL_AI_UNAVAILABLE_NOTICE)}</div>\n'
+        )
 
     # ── DATA ZONE ─────────────────────────────────────────────────────
     data_sections = ""
