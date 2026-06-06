@@ -120,7 +120,6 @@ class AIAnalyzer:
         report_type: str = "当日汇总",
         platforms: Optional[List[str]] = None,
         keywords: Optional[List[str]] = None,
-        standalone_data: Optional[Dict] = None,
         source_tier_resolver: Optional[Any] = None,
     ) -> AIAnalysisResult:
         """
@@ -133,6 +132,7 @@ class AIAnalyzer:
             report_type: 报告类型
             platforms: 平台列表
             keywords: 关键词列表
+            source_tier_resolver: 来源层级解析器
 
         Returns:
             AIAnalysisResult: 分析结果
@@ -386,93 +386,6 @@ class AIAnalyzer:
 
         return "→".join(parts)
 
-    def _prepare_standalone_content(self, standalone_data: Dict) -> tuple:
-        """
-        将独立展示区数据转为文本，注入 AI 分析 prompt
-
-        Args:
-            standalone_data: 独立展示区数据 {"platforms": [...], "rss_feeds": [...]}
-
-        Returns:
-            tuple: (格式化的文本内容, 独立展示区条目数)
-        """
-        lines = []
-
-        # 热榜平台
-        for platform in standalone_data.get("platforms", []):
-            platform_id = platform.get("id", "")
-            platform_name = platform.get("name", platform_id)
-            items = platform.get("items", [])
-            if not items:
-                continue
-
-            lines.append(f"### [{platform_name}]")
-            for item in items:
-                title = item.get("title", "")
-                if not title:
-                    continue
-
-                line = f"- {title}"
-
-                # 排名信息
-                ranks = item.get("ranks", [])
-                if ranks:
-                    min_rank = min(ranks)
-                    max_rank = max(ranks)
-                    rank_str = f"{min_rank}" if min_rank == max_rank else f"{min_rank}-{max_rank}"
-                    line += f" | 排名:{rank_str}"
-
-                # 时间范围
-                first_time = item.get("first_time", "")
-                last_time = item.get("last_time", "")
-                if first_time:
-                    time_str = self._format_time_range(first_time, last_time)
-                    line += f" | 时间:{time_str}"
-
-                # 出现次数
-                count = item.get("count", 1)
-                if count > 1:
-                    line += f" | 出现:{count}次"
-
-                # 排名轨迹（如果启用）
-                if self.include_rank_timeline:
-                    rank_timeline = item.get("rank_timeline", [])
-                    if rank_timeline:
-                        timeline_str = self._format_rank_timeline(rank_timeline)
-                        line += f" | 轨迹:{timeline_str}"
-
-                lines.append(line)
-            lines.append("")
-
-        # RSS 源
-        for feed in standalone_data.get("rss_feeds", []):
-            feed_id = feed.get("id", "")
-            feed_name = feed.get("name", feed_id)
-            items = feed.get("items", [])
-            if not items:
-                continue
-
-            lines.append(f"### [{feed_name}]")
-            for item in items:
-                title = item.get("title", "")
-                if not title:
-                    continue
-
-                line = f"- {title}"
-                published_at = item.get("published_at", "")
-                if published_at:
-                    line += f" | {published_at}"
-
-                lines.append(line)
-            lines.append("")
-
-        standalone_count = sum(
-            len(p.get("items", [])) for p in standalone_data.get("platforms", [])
-        ) + sum(
-            len(f.get("items", [])) for f in standalone_data.get("rss_feeds", [])
-        )
-        return "\n".join(lines), standalone_count
-
     def _parse_response(self, response: str) -> AIAnalysisResult:
         """解析 AI 响应"""
         result = AIAnalysisResult(raw_response=response)
@@ -546,13 +459,6 @@ class AIAnalyzer:
             result.signals = data.get("signals", "")
             result.rss_insights = data.get("rss_insights", "")
             result.outlook_strategy = data.get("outlook_strategy", "")
-
-            # 解析独立展示区概括
-            summaries = data.get("standalone_summaries", {})
-            if isinstance(summaries, dict):
-                result.standalone_summaries = {
-                    str(k): str(v) for k, v in summaries.items()
-                }
 
             result.success = True
         except (KeyError, TypeError, AttributeError) as e:
