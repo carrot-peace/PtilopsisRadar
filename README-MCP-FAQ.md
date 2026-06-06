@@ -38,8 +38,8 @@
 | | `list_available_dates` | 列出本地/远程可用的日期 |
 | **文章** | `read_article` | 读取单篇文章内容（Markdown 格式） |
 | | `read_articles_batch` | 批量读取多篇文章（最多 5 篇） |
-| **通知** | `get_notification_channels` | 获取所有已配置的通知渠道及其状态 |
-| | `send_notification` | 向已配置的通知渠道发送消息（自动格式转换） |
+
+> MCP 通知发送工具已不再暴露；通知发送由应用运行时的 Telegram 通知链路负责。
 
 ---
 
@@ -808,59 +808,11 @@
 
 ## 通知推送
 
-### Q21: 如何通过 MCP 发送通知消息？
+### Q21: 能否通过 MCP 发送通知消息？
 
-**你可以这样问：**
+MCP 通知发送工具已不再暴露。`get_notification_channels`、`send_notification` 等 MCP 通知发送工具已从 MCP server 移除，不再作为可用工具提供。
 
-- "查看当前配置了哪些通知渠道"
-- "发送一条测试消息到所有渠道"
-- "把这段内容推送到飞书"
-- "发送今天的新闻摘要到钉钉和 Telegram"
-
-**支持的通知渠道（9 个）：**
-
-| 渠道 | 消息格式 | 配置来源 |
-|------|---------|---------|
-| **飞书** (feishu) | 纯文本 | `FEISHU_WEBHOOK_URL` |
-| **钉钉** (dingtalk) | Markdown | `DINGTALK_WEBHOOK_URL` |
-| **企业微信** (wework) | Markdown | `WEWORK_WEBHOOK_URL` |
-| **Telegram** | HTML | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
-| **Email** | HTML | `EMAIL_FROM` + `EMAIL_PASSWORD` + `EMAIL_TO` |
-| **ntfy** | Markdown | `NTFY_SERVER_URL` + `NTFY_TOPIC` |
-| **Bark** | Markdown | `BARK_URL` |
-| **Slack** | mrkdwn | `SLACK_WEBHOOK_URL` |
-| **通用 Webhook** | Markdown | `GENERIC_WEBHOOK_URL` |
-
-**配置方式：**
-
-- 在 `config.yaml` 的 `notification.channels` 中配置对应渠道
-- 或在 `.env` 文件中设置对应的环境变量（优先级更高）
-- 两种方式会自动合并，`.env` 中的值会覆盖 `config.yaml` 中的值
-
-**两个工具：**
-
-| 工具 | 功能 | 示例问法 |
-|------|------|---------|
-| `get_notification_channels` | 检测已配置的渠道及状态 | "查看通知渠道配置" |
-| `send_notification` | 发送消息到指定或全部渠道 | "发送消息到飞书" |
-
-**典型使用流程：**
-
-1. 先查看渠道状态："查看当前配置了哪些通知渠道"
-2. 确认渠道可用后发送："把以下内容推送到钉钉：今日热点摘要..."
-3. 或指定多个渠道："发送到飞书和 Telegram"
-4. 不指定渠道则发送到所有已配置渠道
-
-**消息格式：**
-
-- 工具接受 **Markdown 格式** 的消息内容
-- 自动按各渠道要求转换格式（飞书转纯文本、Telegram 转 HTML、Slack 转 mrkdwn 等）
-- 无需手动处理格式差异
-
-**多账号支持：**
-
-- 配置值中用 `;` 分隔多个 URL/Token 即可发送到多个账号
-- 例如：`FEISHU_WEBHOOK_URL=url1;url2` 会同时发送到两个飞书群
+通知发送由应用运行时的 Telegram 通知链路负责，而非 MCP server。
 
 ---
 
