@@ -5,7 +5,6 @@
 将报告数据发送到 Telegram 通知渠道，支持分批发送、异常提醒、每日简报及 HTML 附件。
 """
 
-import time
 import re
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,7 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 
-from .batch import add_batch_headers, get_max_batch_header_size, truncate_at_line_boundary
+from .batch import truncate_at_line_boundary
 
 
 # ════════════════════════════════════════════════════════════════
@@ -316,72 +315,36 @@ def send_to_telegram(
                 print(f"{log_prefix}每日简报发送出错 [{report_type}]：{e}")
                 return False
 
-    # 渲染 AI 分析内容并提取统计数据
-    ai_content = _render_ai_analysis(ai_analysis, "telegram") if ai_analysis else None
-    ai_stats = _extract_ai_stats(ai_analysis)
+    # 未命中 realtime alert / daily digest 主路径 → 发送最小 fallback 消息
+    text = "本轮 Telegram 文本简报暂不可用；请查看已生成的 HTML 报告或附件。"
+    text = _replace_telegram_brand_text(text)
+    text = truncate_at_line_boundary(text, min(batch_size, 3900))
 
-    # 获取分批内容，预留批次头部空间
-    header_reserve = get_max_batch_header_size("telegram")
-    batches = split_content_func(
-        report_data, "telegram", update_info, max_bytes=batch_size - header_reserve, mode=mode,
-        rss_items=rss_items,
-        rss_new_items=rss_new_items,
-        ai_content=ai_content,
-        standalone_data=standalone_data,
-        ai_stats=ai_stats,
-        report_type=report_type,
-    )
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
 
-    # 统一添加批次头部（已预留空间，不会超限）
-    batches = add_batch_headers(batches, "telegram", batch_size)
-
-    print(f"{log_prefix}消息分为 {len(batches)} 批次发送 [{report_type}]")
-
-    # 逐批发送
-    for i, batch_content in enumerate(batches, 1):
-        batch_content = truncate_at_line_boundary(
-            _replace_telegram_brand_text(batch_content), batch_size
+    try:
+        response = requests.post(
+            url, headers=headers, json=payload, proxies=proxies, timeout=30
         )
-        content_size = len(batch_content.encode("utf-8"))
-        print(
-            f"发送{log_prefix}第 {i}/{len(batches)} 批次，大小：{content_size} 字节 [{report_type}]"
-        )
+        if response.status_code == 200 and response.json().get("ok"):
+            print(f"{log_prefix}最小 fallback 发送成功 [{report_type}]")
+            return True
 
-        payload = {
-            "chat_id": chat_id,
-            "text": batch_content,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-
+        description = ""
         try:
-            response = requests.post(
-                url, headers=headers, json=payload, proxies=proxies, timeout=30
-            )
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("ok"):
-                    print(f"{log_prefix}第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
-                    # 批次间间隔
-                    if i < len(batches):
-                        time.sleep(batch_interval)
-                else:
-                    print(
-                        f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]，错误：{result.get('description')}"
-                    )
-                    return False
-            else:
-                print(
-                    f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]，状态码：{response.status_code}"
-                )
-                return False
-        except Exception as e:
-            print(f"{log_prefix}第 {i}/{len(batches)} 批次发送出错 [{report_type}]：{e}")
-            return False
-
-    print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")
-
-    return True
+            description = response.json().get("description", "")
+        except Exception:
+            description = f"状态码：{response.status_code}"
+        print(f"{log_prefix}最小 fallback 发送失败 [{report_type}]，错误：{description}")
+        return False
+    except Exception as e:
+        print(f"{log_prefix}最小 fallback 发送出错 [{report_type}]：{e}")
+        return False
 
 
 ATTACHMENT_EVENT_DEFAULTS = {

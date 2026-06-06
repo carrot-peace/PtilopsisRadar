@@ -5,7 +5,8 @@ Telegram environment 异常提醒 brief 测试。
 覆盖：
 - candidate selection（select_environment_alert_items）的 gate 规则
 - alert brief renderer 只输出 alert layer（不含完整报告区块 / 证据 / source_links）
-- send_to_telegram 在 environment 下走单条提醒路径、无候选静默跳过、classic 走原分批路径
+- send_to_telegram 在 environment 下走单条提醒路径、无候选静默跳过
+- 未命中主路径时发送最小 fallback 消息（不走 split 分批路径）
 - 超长摘要先截断单条，绝不拆成多批
 """
 
@@ -463,7 +464,7 @@ class TestSendToTelegramRouting(unittest.TestCase):
         self.assertNotIn("example.com", text)
         self.assertNotIn("<details", text)
 
-    def test_classic_uses_split_path(self):
+    def test_classic_sends_minimal_fallback_without_split(self):
         result = AIAnalysisResult(
             report_style="classic", success=True, core_trends="核心趋势内容",
         )
@@ -471,26 +472,25 @@ class TestSendToTelegramRouting(unittest.TestCase):
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = _call_telegram(result, split)
         self.assertTrue(ok)
-        self.assertTrue(split.called, "classic 应走原 split_content_func 分批路径")
-        self.assertGreaterEqual(post.call_count, 1)
+        self.assertFalse(split.called, "classic 不应回退到 split 路径")
+        self.assertEqual(post.call_count, 1)
+        payload = post.call_args.kwargs["json"]
+        self.assertIn("本轮 Telegram 文本简报暂不可用", payload["text"])
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertTrue(payload["disable_web_page_preview"])
 
-    def test_classic_telegram_payload_replaces_visible_brand_only(self):
+    def test_classic_fallback_applies_brand_replacement(self):
         result = AIAnalysisResult(
             report_style="classic", success=True, core_trends="核心趋势内容",
         )
-        split = _SplitTracker(
-            'TrendRadar 更新：trendradar 已启动\n'
-            '<a href="https://github.com/sansan0/TrendRadar">TrendRadar 链接</a>'
-        )
+        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = _call_telegram(result, split)
         self.assertTrue(ok)
         text = post.call_args.kwargs["json"]["text"]
-        self.assertIn("Ptilopsis Radar 更新", text)
-        self.assertIn("Ptilopsis Radar 已启动", text)
-        self.assertIn(">Ptilopsis Radar 链接</a>", text)
-        self.assertNotIn("TrendRadar 更新", text)
-        self.assertIn('href="https://github.com/sansan0/TrendRadar"', text)
+        # fallback 文案不含 trendradar，brand replacement 为 no-op，但仍经过处理
+        self.assertIn("本轮 Telegram 文本简报暂不可用", text)
+        self.assertNotIn("TrendRadar", text)
 
     def test_environment_daily_sends_single_digest_without_split(self):
         result = make_env_result()
@@ -560,6 +560,26 @@ class TestSendToTelegramRouting(unittest.TestCase):
         self.assertEqual(payload["parse_mode"], "HTML")
         self.assertTrue(payload["disable_web_page_preview"])
         self.assertIn("每日简报正文暂不可用", payload["text"])
+        for pseudo in ("已核实", "已确认", "异常已判定"):
+            self.assertNotIn(pseudo, payload["text"])
+
+    def test_no_ai_analysis_sends_minimal_fallback_without_split(self):
+        split = _SplitTracker()
+        with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
+            ok = SENDERS.send_to_telegram(
+                bot_token="token", chat_id="chat",
+                report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
+                report_type="当前榜单", mode="current",
+                split_content_func=split,
+                ai_analysis=None,
+            )
+        self.assertTrue(ok)
+        self.assertFalse(split.called, "ai_analysis=None 不应调用 split_content_func")
+        self.assertEqual(post.call_count, 1)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertTrue(payload["disable_web_page_preview"])
+        self.assertIn("本轮 Telegram 文本简报暂不可用", payload["text"])
         for pseudo in ("已核实", "已确认", "异常已判定"):
             self.assertNotIn(pseudo, payload["text"])
 
@@ -752,7 +772,7 @@ class TestCooldownIntegration(unittest.TestCase):
         post.assert_not_called()
 
     def test_manual_trigger_bypasses_gate(self):
-        # 未来手动 /now：绕过 realtime alert gate，直接走完整渲染，且不读写 alert_state
+        # 未来手动 /now：绕过 realtime alert gate，走 generic fallback，且不读写 alert_state
         result = make_env_result()
         store = AS.AlertStateStore(self.backend)
         split = _SplitTracker()
@@ -769,7 +789,9 @@ class TestCooldownIntegration(unittest.TestCase):
                 manual_trigger=True,
             )
         self.assertTrue(ok)
-        self.assertTrue(split.called, "manual /now 应走完整渲染路径，而非 alert gate")
+        self.assertFalse(split.called, "manual /now 应走 generic fallback，而非 split 路径")
+        self.assertEqual(post.call_count, 1)
+        self.assertIn("本轮 Telegram 文本简报暂不可用", post.call_args.kwargs["json"]["text"])
         self.assertEqual(self.backend.get_calls, 0, "manual /now 不应读取 alert_state")
         self.assertEqual(self.backend.save_calls, 0, "manual /now 不应写入 alert_state")
 
