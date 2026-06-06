@@ -4,7 +4,22 @@ import sys
 import types
 from types import SimpleNamespace
 
-import trendradar.__main__ as main
+# Earlier-collected test modules install partial `trendradar` trees into
+# sys.modules at import time: bare package stubs (via _bootstrap.load_all() /
+# _stub_pkg) mixed with real submodules loaded by file path. Under full-suite
+# collection order that leaves `trendradar` resolvable only as a stub (no real
+# __path__ / __version__) and a few real submodules attached to it, so the
+# `import trendradar.__main__` below fails (ModuleNotFoundError /
+# "cannot import name '__version__'"). Drop the whole `trendradar` subtree so the
+# import resolves cleanly and consistently against the real installed package.
+for _stale in [
+    _name
+    for _name in list(sys.modules)
+    if _name == "trendradar" or _name.startswith("trendradar.")
+]:
+    del sys.modules[_stale]
+
+import trendradar.__main__ as main  # noqa: E402
 
 
 class FakeAppContext:
