@@ -17,7 +17,7 @@ newsletter.render_newsletter_report 完整链路中 AI analysis gate 行为
      → 输出中包含 PR3a no-AI fallback notice
 
   3. current / incremental + DISPLAY.REGIONS.AI_ANALYSIS=false + usable AI result
-     → 旧行为保持：dashboard 仍收到 ai_analysis=None
+     → PR8a 起忽略 gate：dashboard 始终收到真实 ai_result
 
   4. Telegram daily attachment path 稳定性
      → daily_digest 附件路径指向 public/daily/full.html
@@ -289,10 +289,10 @@ assert "某条热榜标题" in out
         )
 
 
-class TestNonDailyGateUnchangedSmoke(unittest.TestCase):
-    """PR4a: current / incremental 保持旧的 AI_ANALYSIS gate。"""
+class TestNonDailyGateUpdatedSmoke(unittest.TestCase):
+    """PR8a: current / incremental 不再受 AI_ANALYSIS gate 影响。"""
 
-    def test_current_gate_false_dashboard_gets_none(self):
+    def test_current_gate_false_dashboard_gets_real_ai(self):
         code = _SUBPROCESS_PREAMBLE + """
 ai = _make_ai_result()
 dashboard_calls = []
@@ -300,7 +300,7 @@ ctx = _make_ctx(ai_analysis_region=False, dashboard_sink=dashboard_calls)
 fake = _make_fake(ctx, ai_result=ai, mode="current")
 _run_pipeline(fake, "current")
 assert len(dashboard_calls) == 1
-assert dashboard_calls[0].get("ai_analysis") is None
+assert dashboard_calls[0].get("ai_analysis") is ai
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
@@ -308,7 +308,7 @@ assert dashboard_calls[0].get("ai_analysis") is None
             f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_incremental_gate_false_dashboard_gets_none(self):
+    def test_incremental_gate_false_dashboard_gets_real_ai(self):
         code = _SUBPROCESS_PREAMBLE + """
 ai = _make_ai_result()
 dashboard_calls = []
@@ -316,7 +316,7 @@ ctx = _make_ctx(ai_analysis_region=False, dashboard_sink=dashboard_calls)
 fake = _make_fake(ctx, ai_result=ai, mode="incremental")
 _run_pipeline(fake, "incremental")
 assert len(dashboard_calls) == 1
-assert dashboard_calls[0].get("ai_analysis") is None
+assert dashboard_calls[0].get("ai_analysis") is ai
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
