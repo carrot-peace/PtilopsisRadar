@@ -585,7 +585,6 @@ class NewsAnalyzer:
                 report_type=ai_report_type,
                 platforms=platforms,
                 keywords=keywords,
-                standalone_data=None,
                 source_tier_resolver=self.ctx.source_tier_resolver,
             )
 
@@ -681,154 +680,6 @@ class NewsAnalyzer:
                     "mobileUrl": mobile_url,
                 }
         return title_info
-
-    def _prepare_standalone_data(
-        self,
-        results: Dict,
-        id_to_name: Dict,
-        title_info: Optional[Dict] = None,
-        rss_items: Optional[List[Dict]] = None,
-    ) -> Optional[Dict]:
-        """
-        从原始数据中提取独立展示区数据
-
-        纯数据准备方法，不检查 display.regions.standalone 开关。
-        PR8c 起，standalone_data 不再进入 canonical HTML/dashboard 输出。
-        仅供通知渠道（Telegram 等）使用，由 dispatcher 层消费。
-
-        Args:
-            results: 原始爬取结果 {platform_id: {title: title_data}}
-            id_to_name: 平台 ID 到名称的映射
-            title_info: 标题元信息（含排名历史、时间等）
-            rss_items: RSS 条目列表
-
-        Returns:
-            独立展示数据字典，如果未配置数据源返回 None
-        """
-        display_config = self.ctx.config.get("DISPLAY", {})
-        standalone_config = display_config.get("STANDALONE", {})
-
-        platform_ids = standalone_config.get("PLATFORMS", [])
-        rss_feed_ids = standalone_config.get("RSS_FEEDS", [])
-        max_items = standalone_config.get("MAX_ITEMS", 20)
-
-        if not platform_ids and not rss_feed_ids:
-            return None
-
-        standalone_data = {
-            "platforms": [],
-            "rss_feeds": [],
-        }
-
-        # 找出最新批次时间（类似 current 模式的过滤逻辑）
-        latest_time = None
-        if title_info:
-            for source_titles in title_info.values():
-                for title_data in source_titles.values():
-                    last_time = title_data.get("last_time", "")
-                    if last_time:
-                        if latest_time is None or last_time > latest_time:
-                            latest_time = last_time
-
-        # 提取热榜平台数据
-        for platform_id in platform_ids:
-            if platform_id not in results:
-                continue
-
-            platform_name = id_to_name.get(platform_id, platform_id)
-            platform_titles = results[platform_id]
-
-            items = []
-            for title, title_data in platform_titles.items():
-                # 获取元信息（如果有 title_info）
-                meta = {}
-                if title_info and platform_id in title_info and title in title_info[platform_id]:
-                    meta = title_info[platform_id][title]
-
-                # 只保留当前在榜的话题（last_time 等于最新时间）
-                if latest_time and meta:
-                    if meta.get("last_time") != latest_time:
-                        continue
-
-                # 使用当前热榜的排名数据（title_data）进行排序
-                # title_data 包含的是爬虫返回的当前排名，用于保证独立展示区的顺序与热榜一致
-                current_ranks = title_data.get("ranks", [])
-                current_rank = current_ranks[-1] if current_ranks else 0
-
-                # 用于显示的排名范围：合并历史排名和当前排名
-                historical_ranks = meta.get("ranks", []) if meta else []
-                # 合并去重，保持顺序
-                all_ranks = historical_ranks.copy()
-                for rank in current_ranks:
-                    if rank not in all_ranks:
-                        all_ranks.append(rank)
-                display_ranks = all_ranks if all_ranks else current_ranks
-
-                item = {
-                    "title": title,
-                    "url": title_data.get("url", ""),
-                    "mobileUrl": title_data.get("mobileUrl", ""),
-                    "rank": current_rank,  # 用于排序的当前排名
-                    "ranks": display_ranks,  # 用于显示的排名范围（历史+当前）
-                    "first_time": meta.get("first_time", ""),
-                    "last_time": meta.get("last_time", ""),
-                    "count": meta.get("count", 1),
-                    "rank_timeline": meta.get("rank_timeline", []),
-                }
-                items.append(item)
-
-            # 按当前排名排序
-            items.sort(key=lambda x: x["rank"] if x["rank"] > 0 else 9999)
-
-            # 限制条数
-            if max_items > 0:
-                items = items[:max_items]
-
-            if items:
-                standalone_data["platforms"].append({
-                    "id": platform_id,
-                    "name": platform_name,
-                    "items": items,
-                })
-
-        # 提取 RSS 数据
-        if rss_items and rss_feed_ids:
-            # 按 feed_id 分组
-            feed_items_map = {}
-            for item in rss_items:
-                feed_id = item.get("feed_id", "")
-                if feed_id in rss_feed_ids:
-                    if feed_id not in feed_items_map:
-                        feed_items_map[feed_id] = {
-                            "name": item.get("feed_name", feed_id),
-                            "items": [],
-                        }
-                    feed_items_map[feed_id]["items"].append({
-                        "title": item.get("title", ""),
-                        "url": item.get("url", ""),
-                        "published_at": item.get("published_at", ""),
-                        "author": item.get("author", ""),
-                    })
-
-            # 限制条数并添加到结果
-            for feed_id in rss_feed_ids:
-                if feed_id in feed_items_map:
-                    feed_data = feed_items_map[feed_id]
-                    items = feed_data["items"]
-                    if max_items > 0:
-                        items = items[:max_items]
-                    if items:
-                        standalone_data["rss_feeds"].append({
-                            "id": feed_id,
-                            "name": feed_data["name"],
-                            "items": items,
-                        })
-
-        # 如果没有任何数据，返回 None
-        if not standalone_data["platforms"] and not standalone_data["rss_feeds"]:
-            return None
-
-        return standalone_data
 
     def _run_analysis_pipeline(
         self,
@@ -982,16 +833,11 @@ class NewsAnalyzer:
         html_file_path: Optional[str] = None,
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
-        standalone_data: Optional[Dict] = None,
         ai_result: Optional[AIAnalysisResult] = None,
         current_results: Optional[Dict] = None,
         schedule: ResolvedSchedule = None,
     ) -> bool:
-        """统一的通知发送逻辑。
-
-        standalone_data 仅供通知渠道（Telegram 等）使用，不进入 canonical HTML/dashboard 输出。
-        """
-        """统一的通知发送逻辑，包含所有判断条件，支持热榜+RSS合并推送+AI分析+独立展示区"""
+        """统一的通知发送逻辑，包含所有判断条件，支持热榜+RSS合并推送+AI分析"""
         has_notification = self._has_notification_configured()
         cfg = self.ctx.config
 
@@ -1056,7 +902,7 @@ class NewsAnalyzer:
             update_info_to_send = self.update_info if cfg["SHOW_VERSION_UPDATE"] else None
 
             # 使用 NotificationDispatcher 发送到所有渠道
-            # RSS/独立展示区数据已在分析流水线中翻译过，跳过重复翻译（仅翻译热榜 report_data）
+            # RSS 数据已在分析流水线中翻译过，跳过重复翻译（仅翻译热榜 report_data）
             dispatcher = self.ctx.create_notification_dispatcher()
             results = dispatcher.dispatch_all(
                 report_data=report_data,
@@ -1068,7 +914,6 @@ class NewsAnalyzer:
                 rss_items=rss_items,
                 rss_new_items=rss_new_items,
                 ai_analysis=ai_result,
-                standalone_data=standalone_data,
                 skip_translation=True,
             )
 
@@ -1717,9 +1562,6 @@ class NewsAnalyzer:
 
         # 发送通知
         if mode_strategy["should_send_notification"]:
-            standalone_data = self._prepare_standalone_data(
-                results, id_to_name, title_info, raw_rss_items
-            )
             self._send_notification_if_needed(
                 stats,
                 mode_strategy["report_type"],
@@ -1730,7 +1572,6 @@ class NewsAnalyzer:
                 html_file_path=html_file,
                 rss_items=rss_items,
                 rss_new_items=rss_new_items,
-                standalone_data=standalone_data,
                 ai_result=ai_result,
                 current_results=results,
                 schedule=schedule,
