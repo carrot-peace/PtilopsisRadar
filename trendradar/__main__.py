@@ -488,7 +488,6 @@ class NewsAnalyzer:
         id_to_name: Optional[Dict],
         current_results: Optional[Dict] = None,
         schedule: ResolvedSchedule = None,
-        standalone_data: Optional[Dict] = None,
     ) -> Optional[AIAnalysisResult]:
         """执行 AI 分析"""
         analysis_config = self.ctx.config.get("AI_ANALYSIS", {})
@@ -586,7 +585,7 @@ class NewsAnalyzer:
                 report_type=ai_report_type,
                 platforms=platforms,
                 keywords=keywords,
-                standalone_data=standalone_data,
+                standalone_data=None,
                 source_tier_resolver=self.ctx.source_tier_resolver,
             )
 
@@ -694,11 +693,8 @@ class NewsAnalyzer:
         从原始数据中提取独立展示区数据
 
         纯数据准备方法，不检查 display.regions.standalone 开关。
-        PR8a 起，standalone_data 始终传入 canonical HTML 生成，不再由 display gate 过滤。
-        各消费者自行决定是否使用：
-        - AI 分析：由 ai.include_standalone 控制（在 _run_ai_analysis 层门控）
-        - HTML 报告 / 邮件：PR8a 起始终传入（不再由 display.regions.standalone 门控）
-        - Webhook 推送：由 dispatcher 层处理
+        PR8c 起，standalone_data 不再进入 canonical HTML/dashboard 输出。
+        仅供通知渠道（Telegram 等）使用，由 dispatcher 层消费。
 
         Args:
             results: 原始爬取结果 {platform_id: {title: title_data}}
@@ -848,7 +844,6 @@ class NewsAnalyzer:
         quiet: bool = False,
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
-        standalone_data: Optional[Dict] = None,
         schedule: ResolvedSchedule = None,
         rss_new_urls: Optional[set] = None,
     ) -> Tuple[List[Dict], Optional[str], Optional[AIAnalysisResult], Optional[List[Dict]]]:
@@ -909,11 +904,9 @@ class NewsAnalyzer:
             ai_result = self._run_ai_analysis(
                 stats, rss_items, mode, report_type, id_to_name,
                 current_results=data_source, schedule=schedule,
-                standalone_data=standalone_data
             )
 
         # 翻译 RSS 内容（如果启用）— 在 HTML 生成前执行，确保网页版也能展示翻译内容
-        # 注意：仅翻译 rss_items 和 rss_new_items，不翻译 standalone_data（通知前会重新生成）
         # 热榜翻译在推送时由 dispatch_all 处理 report_data
         trans_config = self.ctx.config.get("AI_TRANSLATION", {})
         if trans_config.get("ENABLED", False):
@@ -933,9 +926,6 @@ class NewsAnalyzer:
         # HTML生成（如果启用）— 使用翻译后的数据
         html_file = None
         if self.ctx.config["STORAGE"]["FORMATS"]["HTML"]:
-            # PR8a: STANDALONE gate removed — standalone_data 始终传入 HTML 生成，
-            # 不再由 display.regions.standalone 决定是否出现在 canonical output。
-            html_standalone = standalone_data
             report_metadata = {
                 "hotlist_total": total_titles,
                 "platform_total": len(self.ctx.platform_ids),
@@ -964,7 +954,6 @@ class NewsAnalyzer:
                     rss_items=rss_items,
                     rss_new_items=rss_new_items,
                     ai_analysis=html_ai,
-                    standalone_data=html_standalone,
                     frequency_file=self.frequency_file,
                     report_metadata=report_metadata,
                 )
@@ -998,6 +987,10 @@ class NewsAnalyzer:
         current_results: Optional[Dict] = None,
         schedule: ResolvedSchedule = None,
     ) -> bool:
+        """统一的通知发送逻辑。
+
+        standalone_data 仅供通知渠道（Telegram 等）使用，不进入 canonical HTML/dashboard 输出。
+        """
         """统一的通知发送逻辑，包含所有判断条件，支持热榜+RSS合并推送+AI分析+独立展示区"""
         has_notification = self._has_notification_configured()
         cfg = self.ctx.config
@@ -1622,11 +1615,6 @@ class NewsAnalyzer:
                     f"current模式：使用过滤后的历史数据，包含平台：{list(all_results.keys())}"
                 )
 
-                # 使用历史数据准备独立展示区数据（包含完整的 title_info）
-                standalone_data = self._prepare_standalone_data(
-                    all_results, historical_id_to_name, historical_title_info, raw_rss_items
-                )
-
                 stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
                     all_results,
                     self.report_mode,
@@ -1639,7 +1627,6 @@ class NewsAnalyzer:
                     global_filters=global_filters,
                     rss_items=rss_items,
                     rss_new_items=rss_new_items,
-                    standalone_data=standalone_data,
                     schedule=schedule,
                     rss_new_urls=rss_new_urls,
                 )
@@ -1666,11 +1653,6 @@ class NewsAnalyzer:
                     _,
                 ) = analysis_data
 
-                # 使用历史数据准备独立展示区数据（包含完整的 title_info）
-                standalone_data = self._prepare_standalone_data(
-                    all_results, historical_id_to_name, historical_title_info, raw_rss_items
-                )
-
                 stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
                     all_results,
                     self.report_mode,
@@ -1683,7 +1665,6 @@ class NewsAnalyzer:
                     global_filters=global_filters,
                     rss_items=rss_items,
                     rss_new_items=rss_new_items,
-                    standalone_data=standalone_data,
                     schedule=schedule,
                     rss_new_urls=rss_new_urls,
                 )
@@ -1696,9 +1677,6 @@ class NewsAnalyzer:
             else:
                 # 没有历史数据时使用当前数据
                 title_info = self._prepare_current_title_info(results, time_info)
-                standalone_data = self._prepare_standalone_data(
-                    results, id_to_name, title_info, raw_rss_items
-                )
                 stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
                     results,
                     self.report_mode,
@@ -1711,16 +1689,12 @@ class NewsAnalyzer:
                     global_filters=global_filters,
                     rss_items=rss_items,
                     rss_new_items=rss_new_items,
-                    standalone_data=standalone_data,
                     schedule=schedule,
                     rss_new_urls=rss_new_urls,
                 )
         else:
             # incremental 模式：只使用当前抓取的数据
             title_info = self._prepare_current_title_info(results, time_info)
-            standalone_data = self._prepare_standalone_data(
-                results, id_to_name, title_info, raw_rss_items
-            )
             stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
                 results,
                 self.report_mode,
@@ -1733,7 +1707,6 @@ class NewsAnalyzer:
                 global_filters=global_filters,
                 rss_items=rss_items,
                 rss_new_items=rss_new_items,
-                standalone_data=standalone_data,
                 schedule=schedule,
                 rss_new_urls=rss_new_urls,
             )
