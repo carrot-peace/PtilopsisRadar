@@ -70,10 +70,8 @@ def _extract_ai_stats(ai_analysis) -> Optional[Dict]:
         "rss_count": getattr(ai_analysis, "rss_count", 0),
         "hotlist_analyzed": getattr(ai_analysis, "hotlist_analyzed", 0),
         "rss_analyzed": getattr(ai_analysis, "rss_analyzed", 0),
-        "standalone_analyzed": getattr(ai_analysis, "standalone_analyzed", 0),
         "ai_mode": getattr(ai_analysis, "ai_mode", ""),
         "include_rss": getattr(ai_analysis, "include_rss", True),
-        "include_standalone": getattr(ai_analysis, "include_standalone", False),
     }
 
 
@@ -106,7 +104,6 @@ def send_to_telegram(
     rss_new_items: Optional[list] = None,
     ai_analysis: Any = None,
     display_regions: Optional[Dict] = None,
-    standalone_data: Optional[Dict] = None,
     html_file_path: Optional[str] = None,
     get_time_func: Optional[Callable] = None,
     alert_state_store: Any = None,
