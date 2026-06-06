@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 
-from .batch import truncate_at_line_boundary
+from .text_utils import truncate_at_line_boundary
 
 
 # ════════════════════════════════════════════════════════════════
