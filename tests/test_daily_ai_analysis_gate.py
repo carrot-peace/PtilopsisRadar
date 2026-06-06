@@ -9,35 +9,45 @@ PR4a：daily full report 在传递 ai_result 时忽略 DISPLAY.REGIONS.AI_ANALYS
                              report 是固定产品输出，AI 是否显示由 renderer 决定）。
   - current / incremental  → 维持旧 gate：AI_ANALYSIS=false 时 dashboard 收到 None。
 
-测试方式（不经端到端，不跑真实 crawler / AI / Telegram）：
-  - 按 routing 测试同款思路，把 __main__ 的重依赖 import 成占位 stub，按文件路径加载
-    真实 trendradar.__main__，取出真实 NewsAnalyzer 类；
-  - 不实例化（__init__ 很重），改为构造最小 fake self，调用未绑定的
-    NewsAnalyzer._run_analysis_pipeline，把 self.ctx.generate_html /
-    generate_dashboard spy 起来，断言传入的 ai_analysis。
+测试方式（subprocess 隔离）：
+  每个测试在独立子进程中加载 stub + 真实 trendradar.__main__，不污染当前进程 sys.modules。
 """
 
+import os
+import subprocess
+import sys
+import textwrap
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _run_in_subprocess(code: str):
+    """Run test code in an isolated subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    return result
+
+
+_SUBPROCESS_PREAMBLE = f"""
 import importlib.util
 import os
 import sys
 import types
-import unittest
 from types import SimpleNamespace
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Snapshot sys.modules before any stubbing so tearDownModule can restore it.
-_PRE_STUB_MODULES = dict(sys.modules)
+ROOT = {ROOT!r}
 
 
 def _attach_getattr(mod):
-    """让 stub 模块对任意名字返回占位类（兼容 `from mod import Name`）。"""
-
-    def __getattr__(name):  # PEP 562 module-level __getattr__
-        obj = type(name, (), {})
+    def __getattr__(name):
+        obj = type(name, (), {{}})
         setattr(mod, name, obj)
         return obj
-
     mod.__getattr__ = __getattr__
     return mod
 
@@ -53,11 +63,7 @@ def _stub_pkg(name, is_pkg=True):
 
 
 def _load_main_module():
-    """stub 掉 __main__ 的重依赖后，按文件路径加载真实 trendradar.__main__。"""
-    # 顶层第三方依赖
     _stub_pkg("requests", is_pkg=False)
-
-    # trendradar 包与子模块：本测试路径不会真正调用它们，占位即可
     _stub_pkg("trendradar")
     _stub_pkg("trendradar.context")
     _stub_pkg("trendradar.core")
@@ -69,6 +75,8 @@ def _load_main_module():
     _stub_pkg("trendradar.utils")
     _stub_pkg("trendradar.utils.time")
     _stub_pkg("trendradar.ai")
+    _stub_pkg("trendradar.telegram_bot")
+    _stub_pkg("trendradar.telegram_bot.access")
 
     spec = importlib.util.spec_from_file_location(
         "trendradar.__main__", os.path.join(ROOT, "trendradar/__main__.py")
@@ -82,117 +90,139 @@ def _load_main_module():
 _MAIN = _load_main_module()
 NewsAnalyzer = _MAIN.NewsAnalyzer
 
-
-def tearDownModule():
-    """Restore sys.modules to its pre-stub state so stubs don't leak into other tests."""
-    for key in list(sys.modules):
-        if key not in _PRE_STUB_MODULES:
-            del sys.modules[key]
-        elif sys.modules[key] is not _PRE_STUB_MODULES[key]:
-            sys.modules[key] = _PRE_STUB_MODULES[key]
-
-
-# 可识别 sentinel，代表"已成功生成、可用"的 environment AI result
 USABLE_AI = object()
 
-# Maps mode name to the strategy dict returned by _get_mode_strategy in production.
-_MODE_STRATEGY = {
-    "daily": {"report_type": "全天汇总", "should_send_notification": True},
-    "current": {"report_type": "当前榜单", "should_send_notification": True},
-    "incremental": {"report_type": "增量分析", "should_send_notification": True},
-}
+_MODE_STRATEGY = {{
+    "daily": {{"report_type": "全天汇总", "should_send_notification": True}},
+    "current": {{"report_type": "当前榜单", "should_send_notification": True}},
+    "incremental": {{"report_type": "增量分析", "should_send_notification": True}},
+}}
 
 
-class _GateTestBase(unittest.TestCase):
-    def _build(self, *, mode, ai_analysis_region, ai_result):
-        """构造最小 fake self + ctx，并 spy 住两个 HTML 生成入口。"""
-        self.html_calls = []
-        self.dashboard_calls = []
+def _build(*, mode, ai_analysis_region, ai_result):
+    html_calls = []
+    dashboard_calls = []
 
-        config = {
-            "AI_ANALYSIS": {"ENABLED": True},
-            "STORAGE": {"FORMATS": {"HTML": True}},
-            "DISPLAY": {"REGIONS": {"AI_ANALYSIS": ai_analysis_region}},
-            "SHOW_VERSION_UPDATE": False,
-        }
+    config = {{
+        "AI_ANALYSIS": {{"ENABLED": True}},
+        "STORAGE": {{"FORMATS": {{"HTML": True}}}},
+        "DISPLAY": {{"REGIONS": {{"AI_ANALYSIS": ai_analysis_region}}}},
+        "SHOW_VERSION_UPDATE": False,
+    }}
 
-        ctx = SimpleNamespace(
-            config=config,
-            display_mode="keyword",
-            platform_ids=["weibo"],
-            count_frequency=lambda *a, **k: ([{"word": "x", "count": 1, "titles": []}], 5),
-            generate_html=lambda *a, **k: (self.html_calls.append(k) or "FULL_HTML"),
-            generate_dashboard=lambda *a, **k: self.dashboard_calls.append(k),
-        )
+    ctx = SimpleNamespace(
+        config=config,
+        display_mode="keyword",
+        platform_ids=["weibo"],
+        count_frequency=lambda *a, **k: ([{{"word": "x", "count": 1, "titles": []}}], 5),
+        generate_html=lambda *a, **k: (html_calls.append(k) or "FULL_HTML"),
+        generate_dashboard=lambda *a, **k: dashboard_calls.append(k),
+    )
 
-        strategy = _MODE_STRATEGY[mode]
-        fake = SimpleNamespace(
-            filter_method="keyword",
-            frequency_file=None,
-            update_info=None,
-            ctx=ctx,
-            _hotlist_total_count=0,
-            _rss_matched_count=0,
-            _rss_total_count=0,
-            _rss_source_total=0,
-            _rss_source_failed=0,
-            _get_mode_strategy=lambda: strategy,
-            _run_ai_analysis=lambda *a, **k: ai_result,
-        )
-        return fake
-
-    def _run(self, fake, mode):
-        return NewsAnalyzer._run_analysis_pipeline(
-            fake,
-            data_source={"weibo": {}},
-            mode=mode,
-            title_info={},
-            new_titles={},
-            word_groups=[],
-            filter_words=[],
-            id_to_name={"weibo": "微博"},
-        )
+    strategy = _MODE_STRATEGY[mode]
+    fake = SimpleNamespace(
+        filter_method="keyword",
+        frequency_file=None,
+        update_info=None,
+        ctx=ctx,
+        _hotlist_total_count=0,
+        _rss_matched_count=0,
+        _rss_total_count=0,
+        _rss_source_total=0,
+        _rss_source_failed=0,
+        _get_mode_strategy=lambda: strategy,
+        _run_ai_analysis=lambda *a, **k: ai_result,
+    )
+    return fake, html_calls, dashboard_calls
 
 
-class TestDailyGate(_GateTestBase):
+def _run_pipeline(fake, mode):
+    return NewsAnalyzer._run_analysis_pipeline(
+        fake,
+        data_source={{"weibo": {{}}}},
+        mode=mode,
+        title_info={{}},
+        new_titles={{}},
+        word_groups=[],
+        filter_words=[],
+        id_to_name={{"weibo": "微博"}},
+    )
+"""
+
+
+class TestDailyGate(unittest.TestCase):
+    """PR4a: daily full report 在 AI_ANALYSIS=false 时仍使用真实 ai_result。"""
+
     def test_daily_region_false_usable_ai_passes_through(self):
-        # daily + AI_ANALYSIS=false + 可用 ai_result → 仍传入原始 ai_result，不置空
-        fake = self._build(mode="daily", ai_analysis_region=False, ai_result=USABLE_AI)
-        self._run(fake, "daily")
-        self.assertEqual(len(self.html_calls), 1)
-        self.assertEqual(len(self.dashboard_calls), 0)
-        self.assertIs(self.html_calls[0]["ai_analysis"], USABLE_AI)
+        code = _SUBPROCESS_PREAMBLE + """
+fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=False, ai_result=USABLE_AI)
+_run_pipeline(fake, "daily")
+assert len(html_calls) == 1, f"Expected 1 html call, got {len(html_calls)}"
+assert len(dashboard_calls) == 0, f"Expected 0 dashboard calls, got {len(dashboard_calls)}"
+assert html_calls[0]["ai_analysis"] is USABLE_AI, "ai_analysis should be USABLE_AI"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
     def test_daily_region_true_usable_ai_unchanged(self):
-        # daily + AI_ANALYSIS=true + 可用 ai_result → 行为不变，仍传原始 ai_result
-        fake = self._build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
-        self._run(fake, "daily")
-        self.assertEqual(len(self.html_calls), 1)
-        self.assertIs(self.html_calls[0]["ai_analysis"], USABLE_AI)
+        code = _SUBPROCESS_PREAMBLE + """
+fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
+_run_pipeline(fake, "daily")
+assert len(html_calls) == 1
+assert html_calls[0]["ai_analysis"] is USABLE_AI
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
     def test_daily_region_false_no_ai_result_passes_none(self):
-        # daily + AI_ANALYSIS=false + 无可用 AI → 传入 None，由 PR3a/PR3b fallback 处理；不 crash
-        fake = self._build(mode="daily", ai_analysis_region=False, ai_result=None)
-        self._run(fake, "daily")
-        self.assertEqual(len(self.html_calls), 1)
-        self.assertIsNone(self.html_calls[0]["ai_analysis"])
+        code = _SUBPROCESS_PREAMBLE + """
+fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=False, ai_result=None)
+_run_pipeline(fake, "daily")
+assert len(html_calls) == 1
+assert html_calls[0]["ai_analysis"] is None
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
 
-class TestNonDailyGateUnchanged(_GateTestBase):
+class TestNonDailyGateUnchanged(unittest.TestCase):
+    """PR4a: current / incremental 保持旧的 AI_ANALYSIS gate。"""
+
     def test_current_region_false_dashboard_gets_none(self):
-        # current + AI_ANALYSIS=false + 可用 ai_result → 仍按旧 gate 置空
-        fake = self._build(mode="current", ai_analysis_region=False, ai_result=USABLE_AI)
-        self._run(fake, "current")
-        self.assertEqual(len(self.dashboard_calls), 1)
-        self.assertEqual(len(self.html_calls), 0)
-        self.assertIsNone(self.dashboard_calls[0]["ai_analysis"])
+        code = _SUBPROCESS_PREAMBLE + """
+fake, html_calls, dashboard_calls = _build(mode="current", ai_analysis_region=False, ai_result=USABLE_AI)
+_run_pipeline(fake, "current")
+assert len(dashboard_calls) == 1
+assert len(html_calls) == 0
+assert dashboard_calls[0]["ai_analysis"] is None
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
     def test_current_region_true_dashboard_gets_ai(self):
-        # current + AI_ANALYSIS=true + 可用 ai_result → dashboard 仍收到原始 ai_result
-        fake = self._build(mode="current", ai_analysis_region=True, ai_result=USABLE_AI)
-        self._run(fake, "current")
-        self.assertEqual(len(self.dashboard_calls), 1)
-        self.assertIs(self.dashboard_calls[0]["ai_analysis"], USABLE_AI)
+        code = _SUBPROCESS_PREAMBLE + """
+fake, html_calls, dashboard_calls = _build(mode="current", ai_analysis_region=True, ai_result=USABLE_AI)
+_run_pipeline(fake, "current")
+assert len(dashboard_calls) == 1
+assert dashboard_calls[0]["ai_analysis"] is USABLE_AI
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
 
 
 if __name__ == "__main__":

@@ -9,6 +9,22 @@ import _bootstrap  # noqa: E402
 
 _bootstrap._ensure_pkg("trendradar")
 sys.modules["trendradar"].__path__ = [os.path.join(_bootstrap.ROOT, "trendradar")]
+# Clear stale stubs left by other test modules whose module-level code runs during
+# pytest collection.  Only clear the modules that directly block the RSS import chain
+# to avoid invalidating `import trendradar.__main__ as main` held by other tests.
+for _key in [
+    "requests",
+    "trendradar.crawler",
+    "trendradar.crawler.fetcher",
+    "trendradar.crawler.rss",
+    "trendradar.crawler.rss.fetcher",
+    "trendradar.crawler.rss.parser",
+    "trendradar.storage",
+    "trendradar.storage.base",
+    "trendradar.utils",
+    "trendradar.utils.time",
+]:
+    sys.modules.pop(_key, None)
 from trendradar.crawler.rss.fetcher import RSSFeedConfig, RSSFetcher
 
 
