@@ -17,10 +17,10 @@ from trendradar.ai.prompt_loader import load_prompt_template
 @dataclass
 class AIAnalysisResult:
     """AI 分析结果"""
-    # 报告风格：classic（旧版热点分析） / environment（信息环境异常监测日报）
-    report_style: str = "classic"
+    # 报告风格：environment（信息环境异常监测日报）。classic 已废弃，统一为 environment。
+    report_style: str = "environment"
 
-    # ── classic 风格：5 核心板块 ──
+    # ── classic 风格（已废弃，保留字段以兼容旧调用方） ──
     core_trends: str = ""                # 核心热点与舆情态势
     sentiment_controversy: str = ""      # 舆论风向与争议
     signals: str = ""                    # 异动与弱信号
@@ -100,18 +100,13 @@ class AIAnalyzer:
         self.include_standalone = analysis_config.get("INCLUDE_STANDALONE", False)
         self.language = analysis_config.get("LANGUAGE", "Chinese")
 
-        # 报告风格：environment（信息环境异常监测） / classic（旧版热点分析）
-        self.report_style = str(analysis_config.get("REPORT_STYLE", "environment")).lower()
-        if self.report_style not in ("environment", "classic"):
-            self.report_style = "environment"
+        # 报告风格：environment（信息环境异常监测）。classic 已废弃，统一为 environment。
+        self.report_style = "environment"
 
-        # 加载提示词模板（按风格选择不同 prompt 文件）
-        if self.report_style == "environment":
-            prompt_file = analysis_config.get(
-                "ENVIRONMENT_PROMPT_FILE", "ai_environment_report_prompt.txt"
-            )
-        else:
-            prompt_file = analysis_config.get("PROMPT_FILE", "ai_analysis_prompt.txt")
+        # 加载提示词模板（environment prompt）
+        prompt_file = analysis_config.get(
+            "ENVIRONMENT_PROMPT_FILE", "ai_environment_report_prompt.txt"
+        )
         self.system_prompt, self.user_prompt_template = load_prompt_template(
             prompt_file,
             label="AI",
@@ -163,123 +158,17 @@ class AIAnalyzer:
         if not self.client.api_key:
             return AIAnalysisResult(
                 success=False,
-                report_style=self.report_style,
+                report_style="environment",
                 error="未配置 AI API Key，请在 config.yaml 或环境变量 AI_API_KEY 中设置"
             )
 
-        # 信息环境异常监测风格：走独立的 evidence-based 流程
-        if self.report_style == "environment":
-            return self._analyze_environment(
-                stats=stats,
-                rss_stats=rss_stats,
-                report_mode=report_mode,
-                source_tier_resolver=source_tier_resolver,
-            )
-
-        # 准备新闻内容并获取统计数据
-        news_content, rss_content, hotlist_total, rss_total, analyzed_count, hotlist_analyzed, rss_analyzed = self._prepare_news_content(stats, rss_stats)
-        total_news = hotlist_total + rss_total
-
-        if not news_content and not rss_content:
-            return AIAnalysisResult(
-                success=False,
-                skipped=True,
-                error="本轮无新增热点内容，跳过 AI 分析",
-                total_news=total_news,
-                hotlist_count=hotlist_total,
-                rss_count=rss_total,
-                analyzed_news=0,
-                max_news_limit=self.max_news
-            )
-
-        # 构建提示词
-        current_time = self.get_time_func().strftime("%Y-%m-%d %H:%M:%S")
-
-        # 提取关键词
-        if not keywords:
-            keywords = [s.get("word", "") for s in stats if s.get("word")] if stats else []
-
-        # 使用安全的字符串替换，避免模板中其他花括号（如 JSON 示例）被误解析
-        user_prompt = self.user_prompt_template
-        user_prompt = user_prompt.replace("{report_mode}", report_mode)
-        user_prompt = user_prompt.replace("{report_type}", report_type)
-        user_prompt = user_prompt.replace("{current_time}", current_time)
-        user_prompt = user_prompt.replace("{news_count}", str(hotlist_total))
-        user_prompt = user_prompt.replace("{rss_count}", str(rss_total))
-        user_prompt = user_prompt.replace("{platforms}", ", ".join(platforms) if platforms else "多平台")
-        user_prompt = user_prompt.replace("{keywords}", ", ".join(keywords[:20]) if keywords else "无")
-        user_prompt = user_prompt.replace("{news_content}", news_content)
-        user_prompt = user_prompt.replace("{rss_content}", rss_content)
-        user_prompt = user_prompt.replace("{language}", self.language)
-
-        # 构建独立展示区内容
-        standalone_content = ""
-        standalone_count = 0
-        if self.include_standalone and standalone_data:
-            standalone_content, standalone_count = self._prepare_standalone_content(standalone_data)
-        user_prompt = user_prompt.replace("{standalone_content}", standalone_content)
-
-        if self.debug:
-            print("\n" + "=" * 80)
-            print("[AI 调试] 发送给 AI 的完整提示词")
-            print("=" * 80)
-            if self.system_prompt:
-                print("\n--- System Prompt ---")
-                print(self.system_prompt)
-            print("\n--- User Prompt ---")
-            print(user_prompt)
-            print("=" * 80 + "\n")
-
-        # 调用 AI API（使用 LiteLLM）
-        try:
-            response = self._call_ai(user_prompt)
-            result = self._parse_response(response)
-
-            # JSON 解析失败时的重试兜底（仅重试一次）
-            if result.error and "JSON 解析错误" in result.error:
-                print(f"[AI] JSON 解析失败，尝试让 AI 修复...")
-                retry_result = self._retry_fix_json(response, result.error)
-                if retry_result and retry_result.success and not retry_result.error:
-                    print("[AI] JSON 修复成功")
-                    retry_result.raw_response = response
-                    result = retry_result
-                else:
-                    print("[AI] JSON 修复失败，使用原始文本兜底")
-
-            # 如果配置未启用 RSS 分析，强制清空 AI 返回的 RSS 洞察
-            if not self.include_rss:
-                result.rss_insights = ""
-
-            # 如果配置未启用 standalone 分析，强制清空
-            if not self.include_standalone:
-                result.standalone_summaries = {}
-
-            # 填充统计数据
-            result.total_news = total_news
-            result.hotlist_count = hotlist_total
-            result.rss_count = rss_total
-            result.analyzed_news = analyzed_count
-            result.hotlist_analyzed = hotlist_analyzed
-            result.rss_analyzed = rss_analyzed
-            result.standalone_analyzed = standalone_count
-            result.max_news_limit = self.max_news
-            result.include_rss = self.include_rss
-            result.include_standalone = self.include_standalone
-            result.report_style = self.report_style
-            return result
-        except Exception as e:
-            error_type = type(e).__name__
-            error_msg = str(e)
-
-            # 截断过长的错误消息
-            if len(error_msg) > 200:
-                error_msg = error_msg[:200] + "..."
-            friendly_msg = f"AI 分析失败 ({error_type}): {error_msg}"
-
-            return AIAnalysisResult(
-                success=False,
-                error=friendly_msg
-            )
+        # 信息环境异常监测：走独立的 evidence-based 流程
+        return self._analyze_environment(
+            stats=stats,
+            rss_stats=rss_stats,
+            report_mode=report_mode,
+            source_tier_resolver=source_tier_resolver,
+        )
 
     def _prepare_news_content(
         self,
