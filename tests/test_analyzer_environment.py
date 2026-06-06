@@ -229,19 +229,19 @@ class TestEnvironmentConfigSemantics(unittest.TestCase):
         self.assertNotIn("议题「B议题」", captured["prompt"])
 
 
-class TestClassicUnaffected(unittest.TestCase):
-    def test_classic_style_uses_classic_prompt_and_parser(self):
+class TestClassicDeprecated(unittest.TestCase):
+    def test_classic_config_normalized_to_environment(self):
+        """PR7e: REPORT_STYLE=classic 被忽略，统一走 environment 流程。"""
         ai_config = {"MODEL": "test/model", "API_KEY": "k"}
         analysis_config = {"ENABLED": True, "REPORT_STYLE": "classic",
                            "PROMPT_FILE": "ai_analysis_prompt.txt", "LANGUAGE": "Chinese"}
         az = B.analyzer.AIAnalyzer(ai_config, analysis_config, _time_func, debug=False)
-        az._call_ai = lambda _: '{"core_trends": "经典核心趋势"}'
+        az._call_ai = lambda _: '{"overview":"x","items":{},"background_notes":[]}'
         stats = [{"word": "X", "titles": [T("a", "微博", 2)]}]
         result = az.analyze(stats=stats, source_tier_resolver=_bootstrap.make_resolver(B))
-        self.assertEqual(result.report_style, "classic")
-        self.assertEqual(result.core_trends, "经典核心趋势")
-        # 环境字段保持空
-        self.assertEqual(result.high_heat_unverified, [])
+        self.assertEqual(result.report_style, "environment")
+        # classic 字段保持空（environment 流程不填充 classic 字段）
+        self.assertEqual(result.core_trends, "")
 
 
 if __name__ == "__main__":
