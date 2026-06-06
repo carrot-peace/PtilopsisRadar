@@ -443,5 +443,102 @@ assert ctx.region_order == expected_order
         )
 
 
+# ── PR8f: display_mode=platform runtime behavior removed ──
+
+class TestDisplayModeAlwaysCanonical(unittest.TestCase):
+    """PR8f: display_mode 固定返回 "canonical"，忽略 config DISPLAY_MODE。"""
+
+    def test_platform_config_returns_canonical(self):
+        """DISPLAY_MODE=platform → display_mode 仍为 "canonical"。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({"DISPLAY_MODE": "platform"})
+assert ctx.display_mode == "canonical", f"Expected 'canonical', got {ctx.display_mode!r}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_keyword_config_returns_canonical(self):
+        """DISPLAY_MODE=keyword → display_mode 仍为 "canonical"。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({"DISPLAY_MODE": "keyword"})
+assert ctx.display_mode == "canonical", f"Expected 'canonical', got {ctx.display_mode!r}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_missing_display_mode_returns_canonical(self):
+        """无 DISPLAY_MODE config → display_mode 仍为 "canonical"。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({})
+assert ctx.display_mode == "canonical", f"Expected 'canonical', got {ctx.display_mode!r}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+class TestPlatformConversionRemoved(unittest.TestCase):
+    """PR8f: __main__.py 不再导入或调用 convert_keyword_stats_to_platform_stats。"""
+
+    def test_main_module_has_no_platform_conversion_import(self):
+        """__main__.py 源码中不包含 convert_keyword_stats_to_platform_stats 导入。"""
+        code = f"""
+import os
+main_path = os.path.join({ROOT!r}, "trendradar", "__main__.py")
+with open(main_path, "r") as f:
+    source = f.read()
+# Should not import convert_keyword_stats_to_platform_stats
+assert "convert_keyword_stats_to_platform_stats" not in source, \\
+    "__main__.py still references convert_keyword_stats_to_platform_stats"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_main_module_has_no_display_mode_branch(self):
+        """__main__.py 源码中不包含 display_mode == 'platform' 分支。"""
+        code = f"""
+import os
+main_path = os.path.join({ROOT!r}, "trendradar", "__main__.py")
+with open(main_path, "r") as f:
+    source = f.read()
+assert 'display_mode == "platform"' not in source, \\
+    "__main__.py still has display_mode == 'platform' branch"
+assert "display_mode == 'platform'" not in source, \\
+    "__main__.py still has display_mode == 'platform' branch"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_convert_function_removed_from_core(self):
+        """PR8 final audit: orphaned convert_keyword_stats_to_platform_stats 已从 core/analyzer.py 删除（无 caller）。"""
+        code = f"""
+import os
+analyzer_path = os.path.join({ROOT!r}, "trendradar", "core", "analyzer.py")
+with open(analyzer_path, "r") as f:
+    source = f.read()
+assert "def convert_keyword_stats_to_platform_stats" not in source, \\
+    "convert_keyword_stats_to_platform_stats should be removed from core/analyzer.py (orphaned, no caller)"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
