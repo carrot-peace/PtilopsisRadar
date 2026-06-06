@@ -131,7 +131,7 @@ _MODE_STRATEGY = {{
 
 
 def _load_real_senders():
-    _load_real("trendradar.notification.batch", "trendradar/notification/batch.py")
+    _load_real("trendradar.notification.text_utils", "trendradar/notification/text_utils.py")
     _load_real("trendradar.notification.formatters", "trendradar/notification/formatters.py")
     return _load_real("trendradar.notification.senders", "trendradar/notification/senders.py")
 

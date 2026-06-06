@@ -9,7 +9,6 @@
 
 模块结构：
 - formatters: 内容格式转换
-- batch: 批次处理工具
 - renderer: 通知内容渲染
 - senders: 消息发送器（各渠道发送函数）
 - dispatcher: 多账号通知调度器
@@ -17,12 +16,6 @@
 
 from trendradar.notification.formatters import (
     strip_markdown,
-)
-from trendradar.notification.batch import (
-    get_batch_header,
-    get_max_batch_header_size,
-    truncate_to_bytes,
-    add_batch_headers,
 )
 from trendradar.notification.senders import (
     send_to_telegram,
@@ -32,11 +25,6 @@ from trendradar.notification.dispatcher import NotificationDispatcher
 __all__ = [
     # 格式转换
     "strip_markdown",
-    # 批次处理
-    "get_batch_header",
-    "get_max_batch_header_size",
-    "truncate_to_bytes",
-    "add_batch_headers",
     # 消息发送器
     "send_to_telegram",
     # 通知调度器
