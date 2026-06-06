@@ -14,10 +14,6 @@ import unittest
 POSITIVE_EXPORTS = (
     "NotificationDispatcher",
     "send_to_telegram",
-    "get_batch_header",
-    "get_max_batch_header_size",
-    "truncate_to_bytes",
-    "add_batch_headers",
     "strip_markdown",
 )
 
@@ -35,6 +31,10 @@ REMOVED_EXPORTS = (
     "convert_markdown_to_mrkdwn",
     "split_content_into_batches",
     "DEFAULT_BATCH_SIZES",
+    "get_batch_header",
+    "get_max_batch_header_size",
+    "truncate_to_bytes",
+    "add_batch_headers",
 )
 
 

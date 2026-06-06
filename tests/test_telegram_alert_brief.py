@@ -43,7 +43,7 @@ def _load_senders():
         spec.loader.exec_module(m)
         return m
 
-    _load("trendradar.notification.batch", "trendradar/notification/batch.py")
+    _load("trendradar.notification.text_utils", "trendradar/notification/text_utils.py")
     _load("trendradar.notification.formatters", "trendradar/notification/formatters.py")
     return _load("trendradar.notification.senders", "trendradar/notification/senders.py")
 
