@@ -537,14 +537,9 @@ class TestSendToTelegramRouting(unittest.TestCase):
         text = post.call_args.kwargs["json"]["text"]
         self.assertIn("2026-01-15 09:00:00", text)
 
-    def test_environment_daily_renderer_failure_falls_back_to_split(self):
+    def test_environment_daily_renderer_failure_sends_minimal_fallback_without_split(self):
         result = make_env_result()
         split = _SplitTracker()
-        # senders.py lazy-imports render_environment_telegram_daily_digest from
-        # sys.modules["trendradar.ai.formatter"].  Prior tests that purge
-        # trendradar.* from sys.modules may leave that entry missing or replaced
-        # with a fresh module object.  Restore the bootstrap-loaded module (which
-        # holds our mock target) as the live entry before patching.
         _ensure_fmt_in_sys_modules()
         with mock.patch.object(
             sys.modules["trendradar.ai.formatter"],
@@ -559,8 +554,14 @@ class TestSendToTelegramRouting(unittest.TestCase):
                 ai_analysis=result,
             )
         self.assertTrue(ok)
-        self.assertTrue(split.called, "daily digest 构造失败应回退完整分批路径")
-        self.assertGreaterEqual(post.call_count, 1)
+        self.assertFalse(split.called, "daily digest fallback 不应回退到 split 路径")
+        self.assertEqual(post.call_count, 1)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertTrue(payload["disable_web_page_preview"])
+        self.assertIn("每日简报正文暂不可用", payload["text"])
+        for pseudo in ("已核实", "已确认", "异常已判定"):
+            self.assertNotIn(pseudo, payload["text"])
 
 
 # ════════════════════════════════════════════════════════════════
