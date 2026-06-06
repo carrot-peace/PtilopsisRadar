@@ -6,7 +6,7 @@
 支持所有通知渠道的多账号配置，使用 `;` 分隔多个账号。
 
 使用示例:
-    dispatcher = NotificationDispatcher(config, get_time_func, split_content_func)
+    dispatcher = NotificationDispatcher(config, get_time_func)
     results = dispatcher.dispatch_all(report_data, report_type, ...)
 """
 
@@ -100,7 +100,6 @@ class NotificationDispatcher:
         self,
         config: Dict[str, Any],
         get_time_func: Callable,
-        split_content_func: Callable,
         translator: Optional["AITranslator"] = None,
         storage_backend: Any = None,
         attachment_output_dir: str = "output",
@@ -111,7 +110,6 @@ class NotificationDispatcher:
         Args:
             config: 完整的配置字典，包含所有通知渠道的配置
             get_time_func: 获取当前时间的函数
-            split_content_func: 内容分批函数
             translator: AI 翻译器实例（可选）
             storage_backend: 存储后端（可选，用于 environment 实时提醒的 cooldown 状态持久化）
             attachment_output_dir: 发布根所在的输出目录（用于解析 public/{group}/full.html 附件路径），
@@ -119,7 +117,6 @@ class NotificationDispatcher:
         """
         self.config = config
         self.get_time_func = get_time_func
-        self.split_content_func = split_content_func
         self.max_accounts = config.get("MAX_ACCOUNTS_PER_CHANNEL", 3)
         self.translator = translator
         self.storage_backend = storage_backend
@@ -475,7 +472,6 @@ class NotificationDispatcher:
                     account_label=account_label,
                     batch_size=self.config.get("MESSAGE_BATCH_SIZE", 4000),
                     batch_interval=self.config.get("BATCH_SEND_INTERVAL", 1.0),
-                    split_content_func=self.split_content_func,
                     rss_items=rss_items,
                     rss_new_items=rss_new_items,
                     ai_analysis=ai_analysis,
@@ -593,4 +589,3 @@ class NotificationDispatcher:
                 print("⚠️ " + summary)
             else:
                 print(summary)
-

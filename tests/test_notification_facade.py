@@ -14,8 +14,6 @@ import unittest
 POSITIVE_EXPORTS = (
     "NotificationDispatcher",
     "send_to_telegram",
-    "split_content_into_batches",
-    "DEFAULT_BATCH_SIZES",
     "get_batch_header",
     "get_max_batch_header_size",
     "truncate_to_bytes",
@@ -35,6 +33,8 @@ REMOVED_EXPORTS = (
     "send_to_slack",
     "SMTP_CONFIGS",
     "convert_markdown_to_mrkdwn",
+    "split_content_into_batches",
+    "DEFAULT_BATCH_SIZES",
 )
 
 
@@ -108,8 +108,8 @@ class AppContextNotificationFacadeTest(unittest.TestCase):
                 errors.append("AppContext still has render_feishu")
             if hasattr(AppContext, "render_dingtalk"):
                 errors.append("AppContext still has render_dingtalk")
-            if not hasattr(AppContext, "split_content"):
-                errors.append("AppContext missing split_content")
+            if hasattr(AppContext, "split_content"):
+                errors.append("AppContext still has split_content")
 
             if errors:
                 raise AssertionError("\\n".join(errors))

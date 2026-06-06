@@ -227,10 +227,6 @@ class _AI:
         self.success = True
 
 
-def _split(*args, **kwargs):
-    return ["content"]
-
-
 def _attach_cfg(**overrides):
     cfg = {
         "ENABLED": True,
@@ -265,7 +261,6 @@ class TestDispatcherAttachments(unittest.TestCase):
         return NotificationDispatcher(
             config,
             get_time_func=lambda: datetime(2026, 6, 4, 8, 0, 0),
-            split_content_func=_split,
             storage_backend=backend,
             attachment_output_dir=attachment_output_dir,
         )

@@ -35,7 +35,6 @@ from trendradar.report import (
 from trendradar.report.dashboard import write_dashboard
 from trendradar.report.newsletter import render_newsletter_report
 from trendradar.notification import (
-    split_content_into_batches,
     NotificationDispatcher,
 )
 from trendradar.ai import AITranslator
@@ -430,64 +429,6 @@ class AppContext:
             standalone_data=standalone_data,
         )
 
-    def split_content(
-        self,
-        report_data: Dict,
-        format_type: str,
-        update_info: Optional[Dict] = None,
-        max_bytes: Optional[int] = None,
-        mode: str = "daily",
-        rss_items: Optional[list] = None,
-        rss_new_items: Optional[list] = None,
-        ai_content: Optional[str] = None,
-        standalone_data: Optional[Dict] = None,
-        ai_stats: Optional[Dict] = None,
-        report_type: str = "热点分析报告",
-    ) -> List[str]:
-        """分批处理消息内容（支持热榜+RSS合并+AI分析+独立展示区）
-
-        Args:
-            report_data: 报告数据
-            format_type: 格式类型
-            update_info: 更新信息
-            max_bytes: 最大字节数
-            mode: 报告模式
-            rss_items: RSS 统计条目列表
-            rss_new_items: RSS 新增条目列表
-            ai_content: AI 分析内容（已渲染的字符串）
-            standalone_data: 独立展示区数据
-            ai_stats: AI 分析统计数据
-            report_type: 报告类型
-
-        Returns:
-            分批后的消息内容列表
-        """
-        return split_content_into_batches(
-            report_data=report_data,
-            format_type=format_type,
-            update_info=update_info,
-            max_bytes=max_bytes,
-            mode=mode,
-            batch_sizes={
-                "dingtalk": self.config.get("DINGTALK_BATCH_SIZE", 20000),
-                "feishu": self.config.get("FEISHU_BATCH_SIZE", 29000),
-                "default": self.config.get("MESSAGE_BATCH_SIZE", 4000),
-            },
-            feishu_separator=self.config.get("FEISHU_MESSAGE_SEPARATOR", "---"),
-            region_order=self.region_order,
-            get_time_func=self.get_time,
-            rss_items=rss_items,
-            rss_new_items=rss_new_items,
-            timezone=self.config.get("TIMEZONE", DEFAULT_TIMEZONE),
-            display_mode=self.display_mode,
-            ai_content=ai_content,
-            standalone_data=standalone_data,
-            rank_threshold=self.rank_threshold,
-            ai_stats=ai_stats,
-            report_type=report_type,
-            show_new_section=self.show_new_section,
-        )
-
     # === 通知发送 ===
 
     def create_notification_dispatcher(self) -> NotificationDispatcher:
@@ -502,7 +443,6 @@ class AppContext:
         return NotificationDispatcher(
             config=self.config,
             get_time_func=self.get_time,
-            split_content_func=self.split_content,
             translator=translator,
             storage_backend=self.get_storage_manager(),
             attachment_output_dir="output",

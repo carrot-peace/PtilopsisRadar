@@ -102,7 +102,6 @@ def send_to_telegram(
     *,
     batch_size: int = 4000,
     batch_interval: float = 1.0,
-    split_content_func: Callable = None,
     rss_items: Optional[list] = None,
     rss_new_items: Optional[list] = None,
     ai_analysis: Any = None,
@@ -128,7 +127,6 @@ def send_to_telegram(
         account_label: 账号标签（多账号时显示）
         batch_size: 批次大小（字节）
         batch_interval: 批次发送间隔（秒）
-        split_content_func: 内容分批函数
         rss_items: RSS 统计条目列表（可选，用于合并推送）
         rss_new_items: RSS 新增条目列表（可选，用于新增区块）
         html_file_path: HTML 报告路径（environment alert brief 用于"完整报告"链接）
