@@ -109,17 +109,6 @@ class _FakeBackend:
         return True
 
 
-class _SplitTracker:
-    """记录 split_content_func 是否被调用（用于验证 environment 不走分批器）。"""
-
-    def __init__(self, content="分批内容"):
-        self.called = False
-        self.content = content
-
-    def __call__(self, *args, **kwargs):
-        self.called = True
-        return [self.content]
-
 
 def _ok_response():
     resp = mock.Mock()
@@ -128,14 +117,13 @@ def _ok_response():
     return resp
 
 
-def _call_telegram(ai_analysis, split_func, mode="current", **extra):
+def _call_telegram(ai_analysis, mode="current", **extra):
     return SENDERS.send_to_telegram(
         bot_token="token",
         chat_id="chat",
         report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
         report_type="当前榜单",
         mode=mode,
-        split_content_func=split_func,
         ai_analysis=ai_analysis,
         **extra,
     )
@@ -422,23 +410,19 @@ class TestSendToTelegramRouting(unittest.TestCase):
             report_style="environment", success=True,
             silence_gap=[{"topic": "外热中静议题", "source_layers": "B"}],
         )
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
-            ok = _call_telegram(result, split)
+            ok = _call_telegram(result)
         self.assertTrue(ok)
         post.assert_not_called()
-        self.assertFalse(split.called, "无候选时不应调用通用分批器")
 
     def test_environment_with_candidates_sends_single_message(self):
         result = make_env_result()
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = _call_telegram(
-                result, split, html_file_path="output/html/latest/current.html",
+                result, html_file_path="output/html/latest/current.html",
             )
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1, "environment 应只发一条消息")
-        self.assertFalse(split.called, "environment 不应走分批器")
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["parse_mode"], "HTML")
         self.assertIn("Ptilopsis Radar｜异常提醒", payload["text"])
@@ -454,12 +438,10 @@ class TestSendToTelegramRouting(unittest.TestCase):
                 "factual_boundary": EV.LABELS["cross_layer_verified"]["factual_boundary"],
             }],
         )
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
-            ok = _call_telegram(result, split)
+            ok = _call_telegram(result)
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1, "超长摘要应截断而非拆成多批")
-        self.assertFalse(split.called)
         text = post.call_args.kwargs["json"]["text"]
         self.assertNotIn("example.com", text)
         self.assertNotIn("<details", text)
@@ -468,11 +450,9 @@ class TestSendToTelegramRouting(unittest.TestCase):
         result = AIAnalysisResult(
             report_style="classic", success=True, core_trends="核心趋势内容",
         )
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
-            ok = _call_telegram(result, split)
+            ok = _call_telegram(result)
         self.assertTrue(ok)
-        self.assertFalse(split.called, "classic 不应回退到 split 路径")
         self.assertEqual(post.call_count, 1)
         payload = post.call_args.kwargs["json"]
         self.assertIn("本轮 Telegram 文本简报暂不可用", payload["text"])
@@ -483,9 +463,8 @@ class TestSendToTelegramRouting(unittest.TestCase):
         result = AIAnalysisResult(
             report_style="classic", success=True, core_trends="核心趋势内容",
         )
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
-            ok = _call_telegram(result, split)
+            ok = _call_telegram(result)
         self.assertTrue(ok)
         text = post.call_args.kwargs["json"]["text"]
         # fallback 文案不含 trendradar，brand replacement 为 no-op，但仍经过处理
@@ -494,14 +473,12 @@ class TestSendToTelegramRouting(unittest.TestCase):
 
     def test_environment_daily_sends_single_digest_without_split(self):
         result = make_env_result()
-        split = _SplitTracker()
         store = AS.AlertStateStore(_FakeBackend())
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当日汇总", mode="daily",
-                split_content_func=split,
                 ai_analysis=result,
                 html_file_path="output/html/latest/daily.html",
                 alert_state_store=store,
@@ -509,7 +486,6 @@ class TestSendToTelegramRouting(unittest.TestCase):
             )
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1)
-        self.assertFalse(split.called)
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["parse_mode"], "HTML")
         self.assertIn("Ptilopsis Radar｜每日简报", payload["text"])
@@ -521,25 +497,21 @@ class TestSendToTelegramRouting(unittest.TestCase):
 
         fixed_time = _dt(2026, 1, 15, 9, 0, 0)
         result = make_env_result()
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当日汇总", mode="daily",
-                split_content_func=split,
                 ai_analysis=result,
                 get_time_func=lambda: fixed_time,
             )
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1)
-        self.assertFalse(split.called)
         text = post.call_args.kwargs["json"]["text"]
         self.assertIn("2026-01-15 09:00:00", text)
 
     def test_environment_daily_renderer_failure_sends_minimal_fallback_without_split(self):
         result = make_env_result()
-        split = _SplitTracker()
         _ensure_fmt_in_sys_modules()
         with mock.patch.object(
             sys.modules["trendradar.ai.formatter"],
@@ -550,11 +522,9 @@ class TestSendToTelegramRouting(unittest.TestCase):
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当日汇总", mode="daily",
-                split_content_func=split,
                 ai_analysis=result,
             )
         self.assertTrue(ok)
-        self.assertFalse(split.called, "daily digest fallback 不应回退到 split 路径")
         self.assertEqual(post.call_count, 1)
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["parse_mode"], "HTML")
@@ -564,17 +534,14 @@ class TestSendToTelegramRouting(unittest.TestCase):
             self.assertNotIn(pseudo, payload["text"])
 
     def test_no_ai_analysis_sends_minimal_fallback_without_split(self):
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当前榜单", mode="current",
-                split_content_func=split,
                 ai_analysis=None,
             )
         self.assertTrue(ok)
-        self.assertFalse(split.called, "ai_analysis=None 不应调用 split_content_func")
         self.assertEqual(post.call_count, 1)
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["parse_mode"], "HTML")
@@ -617,23 +584,21 @@ class TestCooldownIntegration(unittest.TestCase):
             state_ttl_days=ALERT_CFG["STATE_TTL_DAYS"],
             cooldown_minutes=ALERT_CFG["COOLDOWN_MINUTES"],
         )
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当前榜单", mode=mode,
-                split_content_func=split,
                 ai_analysis=result,
                 get_time_func=lambda: now,
                 alert_state_store=store,
                 alert_config=ALERT_CFG,
             )
-        return ok, post, split
+        return ok, post
 
     def test_first_push_sends_and_persists(self):  # #1
         result = make_env_result()
-        ok, post, _ = self._send(result, self.T0)
+        ok, post = self._send(result, self.T0)
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1)
         # 状态已落盘：两个候选 topic_key 入库
@@ -655,7 +620,7 @@ class TestCooldownIntegration(unittest.TestCase):
             },
         }
 
-        ok, post, _ = self._send(make_env_result(), self.T0)
+        ok, post = self._send(make_env_result(), self.T0)
 
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1)
@@ -666,7 +631,7 @@ class TestCooldownIntegration(unittest.TestCase):
         import datetime as _dt
         result = make_env_result()
         self._send(result, self.T0)
-        ok, post, _ = self._send(result, self.T0 + _dt.timedelta(minutes=60))
+        ok, post = self._send(result, self.T0 + _dt.timedelta(minutes=60))
         self.assertTrue(ok)
         post.assert_not_called()  # 冷却内全部抑制 → 静默成功
 
@@ -674,7 +639,7 @@ class TestCooldownIntegration(unittest.TestCase):
         import datetime as _dt
         result = make_env_result()
         self._send(result, self.T0)
-        ok, post, _ = self._send(result, self.T0 + _dt.timedelta(minutes=200))
+        ok, post = self._send(result, self.T0 + _dt.timedelta(minutes=200))
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1)
 
@@ -684,14 +649,14 @@ class TestCooldownIntegration(unittest.TestCase):
         self._send(r1, self.T0)
         # 30 分钟后同议题升级为 cross_layer_verified（含 A 层）
         r2 = _one_item_result("cross_layer_verified", "升级议题", "A/D", "微博 第3名")
-        ok, post, _ = self._send(r2, self.T0 + _dt.timedelta(minutes=30))
+        ok, post = self._send(r2, self.T0 + _dt.timedelta(minutes=30))
         self.assertTrue(ok)
         self.assertEqual(post.call_count, 1)
 
     def test_weak_high_heat_gated_out(self):  # #6（集成）
         # rank=40 且单平台 → 不满足 heat gate → 首见也静默
         result = _one_item_result("high_heat_unverified", "弱高热", "D", "微博 第40名", platform_count=1)
-        ok, post, _ = self._send(result, self.T0)
+        ok, post = self._send(result, self.T0)
         self.assertTrue(ok)
         post.assert_not_called()
 
@@ -706,13 +671,11 @@ class TestCooldownIntegration(unittest.TestCase):
 
     def test_store_none_behaves_like_previous_stage(self):  # #11
         result = make_env_result()
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当前榜单", mode="current",
-                split_content_func=split,
                 ai_analysis=result,
                 alert_state_store=None,  # 未启用 → 无冷却
                 alert_config=ALERT_CFG,
@@ -728,18 +691,16 @@ class TestCooldownIntegration(unittest.TestCase):
             report_style="environment", success=True,
             silence_gap=[{"topic": "外热中静议题", "source_layers": "B"}],
         )
-        ok, post, split = self._send(result, self.T0, mode="daily")
+        ok, post = self._send(result, self.T0, mode="daily")
         self.assertTrue(ok)
-        self.assertFalse(split.called, "daily 应走每日简报路径，而非完整 split 路径")
         self.assertEqual(post.call_count, 1, "daily 不应被静默")
         self.assertIn("Ptilopsis Radar｜每日简报", post.call_args.kwargs["json"]["text"])
 
     def test_daily_mode_does_not_touch_alert_state(self):
         # environment + daily：即使有候选，也不读写 alert_state（cooldown 不影响 daily）
         result = make_env_result()
-        ok, post, split = self._send(result, self.T0, mode="daily")
+        ok, post = self._send(result, self.T0, mode="daily")
         self.assertTrue(ok)
-        self.assertFalse(split.called)
         self.assertEqual(post.call_count, 1)
         self.assertEqual(self.backend.get_calls, 0, "daily 不应读取 alert_state")
         self.assertEqual(self.backend.save_calls, 0, "daily 不应写入 alert_state")
@@ -747,9 +708,8 @@ class TestCooldownIntegration(unittest.TestCase):
 
     def test_daily_mode_no_anomaly_still_sends_digest(self):
         result = AIAnalysisResult(report_style="environment", success=True)
-        ok, post, split = self._send(result, self.T0, mode="daily")
+        ok, post = self._send(result, self.T0, mode="daily")
         self.assertTrue(ok)
-        self.assertFalse(split.called)
         self.assertEqual(post.call_count, 1)
         self.assertIn("今日未发现高优先级异常信号", post.call_args.kwargs["json"]["text"])
 
@@ -757,7 +717,7 @@ class TestCooldownIntegration(unittest.TestCase):
         import datetime as _dt
         result = make_env_result()
         self._send(result, self.T0, mode="incremental")
-        ok, post, _ = self._send(
+        ok, post = self._send(
             result, self.T0 + _dt.timedelta(minutes=60), mode="incremental"
         )
         self.assertTrue(ok)
@@ -767,7 +727,7 @@ class TestCooldownIntegration(unittest.TestCase):
         import datetime as _dt
         result = make_env_result()
         self._send(result, self.T0, mode="current")
-        ok, post, _ = self._send(result, self.T0 + _dt.timedelta(minutes=60), mode="current")
+        ok, post = self._send(result, self.T0 + _dt.timedelta(minutes=60), mode="current")
         self.assertTrue(ok)
         post.assert_not_called()
 
@@ -775,13 +735,11 @@ class TestCooldownIntegration(unittest.TestCase):
         # 未来手动 /now：绕过 realtime alert gate，走 generic fallback，且不读写 alert_state
         result = make_env_result()
         store = AS.AlertStateStore(self.backend)
-        split = _SplitTracker()
         with mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
                 report_data={"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}},
                 report_type="当前榜单", mode="current",
-                split_content_func=split,
                 ai_analysis=result,
                 get_time_func=lambda: self.T0,
                 alert_state_store=store,
@@ -789,7 +747,6 @@ class TestCooldownIntegration(unittest.TestCase):
                 manual_trigger=True,
             )
         self.assertTrue(ok)
-        self.assertFalse(split.called, "manual /now 应走 generic fallback，而非 split 路径")
         self.assertEqual(post.call_count, 1)
         self.assertIn("本轮 Telegram 文本简报暂不可用", post.call_args.kwargs["json"]["text"])
         self.assertEqual(self.backend.get_calls, 0, "manual /now 不应读取 alert_state")

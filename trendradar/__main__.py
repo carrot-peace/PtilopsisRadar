@@ -2130,7 +2130,6 @@ def _run_test_notification(config: Dict) -> bool:
         dispatcher = NotificationDispatcher(
             config=test_config,
             get_time_func=ctx.get_time,
-            split_content_func=ctx.split_content,
             translator=None,
         )
 

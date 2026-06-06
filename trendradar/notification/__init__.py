@@ -11,7 +11,6 @@
 - formatters: 内容格式转换
 - batch: 批次处理工具
 - renderer: 通知内容渲染
-- splitter: 消息分批拆分
 - senders: 消息发送器（各渠道发送函数）
 - dispatcher: 多账号通知调度器
 """
@@ -24,10 +23,6 @@ from trendradar.notification.batch import (
     get_max_batch_header_size,
     truncate_to_bytes,
     add_batch_headers,
-)
-from trendradar.notification.splitter import (
-    split_content_into_batches,
-    DEFAULT_BATCH_SIZES,
 )
 from trendradar.notification.senders import (
     send_to_telegram,
@@ -42,9 +37,6 @@ __all__ = [
     "get_max_batch_header_size",
     "truncate_to_bytes",
     "add_batch_headers",
-    # 消息分批
-    "split_content_into_batches",
-    "DEFAULT_BATCH_SIZES",
     # 消息发送器
     "send_to_telegram",
     # 通知调度器

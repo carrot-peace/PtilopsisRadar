@@ -35,9 +35,6 @@ class FakeAppContext:
 
         return datetime(2026, 6, 6, 12, 0, 0)
 
-    def split_content(self, content, max_length=None):
-        return [content]
-
     def format_date(self):
         return "2026-06-06"
 
