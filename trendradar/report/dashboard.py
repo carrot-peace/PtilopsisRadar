@@ -151,6 +151,7 @@ def _group_for_mode(mode: str) -> str:
 def _is_environment(ai_analysis: Optional[Any]) -> bool:
     return bool(
         ai_analysis is not None
+        and getattr(ai_analysis, "success", False) is True
         and getattr(ai_analysis, "report_style", "") == "environment"
     )
 
@@ -217,7 +218,7 @@ def build_dashboard_state(
         "mode": mode,
         "group": _group_for_mode(mode),
         "generated_at": generated_at.isoformat(),
-        "report_style": getattr(ai_analysis, "report_style", "classic")
+        "report_style": getattr(ai_analysis, "report_style", "environment")
         if ai_analysis is not None
         else "none",
         "overview": overview,
@@ -326,7 +327,7 @@ def render_current_dashboard_html(
 
     - environment 样式：异常信号列表 + 热榜/RSS 追踪 + 已抑制脚注。
     - 无异常信号：lead 改"未检测到异常信号"，仍展示热榜/RSS 追踪。
-    - classic / ai_analysis is None：降级提示 + 热榜/RSS 追踪。
+    - ai_analysis is None：降级提示 + 热榜/RSS 追踪。
 
     stats / rss_items 为发布安全的追踪数据（公开榜单信息，无 URL）。
     任何 mode 都能出页，不受 cooldown / notify_labels 影响。

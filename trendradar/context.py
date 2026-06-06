@@ -30,7 +30,6 @@ from trendradar.core import (
 from trendradar.report import (
     prepare_report_data,
     generate_html_report,
-    render_html_content,
 )
 from trendradar.report.dashboard import write_dashboard
 from trendradar.report.newsletter import render_newsletter_report
@@ -393,40 +392,19 @@ class AppContext:
     ) -> str:
         """渲染HTML内容。
 
-        daily 模式一律走 environment newsletter 渲染器：AI 是否可用只决定
-        newsletter 内部显示正常 editorial 还是 no-AI fallback notice，不再让
-        daily report 因为缺少/不可用 AI result 回落 legacy render_html_content。
-
-        其余模式保持现状：environment 风格走 newsletter 渲染器；classic 走旧版
-        render_html_content。
+        统一使用 environment newsletter 渲染器：AI 是否可用只决定
+        newsletter 内部显示正常 editorial 还是 no-AI fallback notice。
+        classic report_style 已废弃，不再路由到旧版 HTML 渲染器。
         """
-        if mode == "daily" or (
-            ai_analysis is not None
-            and getattr(ai_analysis, "report_style", "") == "environment"
-        ):
-            return render_newsletter_report(
-                report_data,
-                total_titles,
-                mode,
-                update_info,
-                rss_items=rss_items,
-                rss_new_items=rss_new_items,
-                ai_analysis=ai_analysis,
-                get_time_func=self.get_time,
-            )
-        return render_html_content(
-            report_data=report_data,
-            total_titles=total_titles,
-            mode=mode,
-            update_info=update_info,
-            region_order=self.region_order,
-            get_time_func=self.get_time,
+        return render_newsletter_report(
+            report_data,
+            total_titles,
+            mode,
+            update_info,
             rss_items=rss_items,
             rss_new_items=rss_new_items,
-            display_mode=self.display_mode,
             ai_analysis=ai_analysis,
-            show_new_section=self.show_new_section,
-            standalone_data=standalone_data,
+            get_time_func=self.get_time,
         )
 
     # === 通知发送 ===

@@ -194,11 +194,26 @@ class TestRenderDegraded(unittest.TestCase):
         self.assertIn("当前盘面", html)
         self.assertIn("未生成信息环境监测盘面", html)  # 降级提示
 
-    def test_classic_style(self):
+    def test_non_environment_style_shows_degraded(self):
+        """PR7e: classic 结果在 dashboard 仍显示降级提示（dashboard 按 report_style 判断）。"""
         classic = AIAnalysisResult(report_style="classic", success=True)
         html = DASH.render_current_dashboard_html(classic, META, NOW, mode="daily")
         self.assertIn("每日盘面", html)
         self.assertIn("未生成信息环境监测盘面", html)  # 非 environment 降级
+
+    def test_environment_failure_shows_degraded_not_no_signal(self):
+        """AI failure (success=False, report_style='environment') 走 degraded fallback，
+        不应显示'未检测到异常信号'等 usable environment 语义。"""
+        failed = AIAnalysisResult(
+            success=False, report_style="environment", error="boom"
+        )
+        html = DASH.render_current_dashboard_html(failed, META, NOW, mode="current")
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("当前盘面", html)
+        # 必须走 degraded fallback
+        self.assertIn("未生成信息环境监测盘面", html)
+        # 不应出现 usable environment / no-signal 语义
+        self.assertNotIn("未检测到异常信号", html)
 
     def test_daily_title(self):
         html = DASH.render_current_dashboard_html(
