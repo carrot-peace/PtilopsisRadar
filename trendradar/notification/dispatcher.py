@@ -144,7 +144,6 @@ class NotificationDispatcher:
         report_data: Dict,
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
-        standalone_data: Optional[Dict] = None,
         display_regions: Optional[Dict] = None,
         skip_rss: bool = False,
     ) -> tuple:
@@ -155,15 +154,14 @@ class NotificationDispatcher:
             report_data: 报告数据
             rss_items: RSS 统计条目
             rss_new_items: RSS 新增条目
-            standalone_data: 独立展示区数据
             display_regions: 区域显示配置（不展示的区域跳过翻译）
-            skip_rss: 跳过 RSS 和独立展示区翻译（当数据已在上游翻译过时使用）
+            skip_rss: 跳过 RSS 翻译（当数据已在上游翻译过时使用）
 
         Returns:
-            tuple: (翻译后的 report_data, rss_items, rss_new_items, standalone_data)
+            tuple: (翻译后的 report_data, rss_items, rss_new_items)
         """
         if not self.translator or not self.translator.enabled:
-            return report_data, rss_items, rss_new_items, standalone_data
+            return report_data, rss_items, rss_new_items
 
         import copy
         print(f"[翻译] 开始翻译内容到 {self.translator.target_language}...")
@@ -175,7 +173,6 @@ class NotificationDispatcher:
         report_data = copy.deepcopy(report_data)
         rss_items = copy.deepcopy(rss_items) if rss_items else None
         rss_new_items = copy.deepcopy(rss_new_items) if rss_new_items else None
-        standalone_data = copy.deepcopy(standalone_data) if standalone_data else None
 
         # 收集所有需要翻译的标题
         titles_to_translate = []
@@ -208,23 +205,9 @@ class NotificationDispatcher:
                     titles_to_translate.append(title_data.get("title", ""))
                     title_locations.append(("rss_new_items", stat_idx, title_idx))
 
-        # 5. 独立展示区 - 热榜平台
-        if standalone_data and scope.get("STANDALONE", True) and display_regions.get("STANDALONE", False):
-            for plat_idx, platform in enumerate(standalone_data.get("platforms", [])):
-                for item_idx, item in enumerate(platform.get("items", [])):
-                    titles_to_translate.append(item.get("title", ""))
-                    title_locations.append(("standalone_platforms", plat_idx, item_idx))
-
-            # 6. 独立展示区 - RSS 源（跳过已翻译的）
-            if not skip_rss:
-                for feed_idx, feed in enumerate(standalone_data.get("rss_feeds", [])):
-                    for item_idx, item in enumerate(feed.get("items", [])):
-                        titles_to_translate.append(item.get("title", ""))
-                        title_locations.append(("standalone_rss", feed_idx, item_idx))
-
         if not titles_to_translate:
             print("[翻译] 没有需要翻译的内容")
-            return report_data, rss_items, rss_new_items, standalone_data
+            return report_data, rss_items, rss_new_items
 
         print(f"[翻译] 共 {len(titles_to_translate)} 条标题待翻译")
 
@@ -233,7 +216,7 @@ class NotificationDispatcher:
 
         if result.success_count == 0:
             print(f"[翻译] 翻译失败: {result.results[0].error if result.results else '未知错误'}")
-            return report_data, rss_items, rss_new_items, standalone_data
+            return report_data, rss_items, rss_new_items
 
         print(f"[翻译] 翻译完成: {result.success_count}/{result.total_count} 成功")
 
@@ -277,12 +260,8 @@ class NotificationDispatcher:
                     rss_items[idx1]["titles"][idx2]["title"] = translated
                 elif loc_type == "rss_new_items" and rss_new_items:
                     rss_new_items[idx1]["titles"][idx2]["title"] = translated
-                elif loc_type == "standalone_platforms" and standalone_data:
-                    standalone_data["platforms"][idx1]["items"][idx2]["title"] = translated
-                elif loc_type == "standalone_rss" and standalone_data:
-                    standalone_data["rss_feeds"][idx1]["items"][idx2]["title"] = translated
 
-        return report_data, rss_items, rss_new_items, standalone_data
+        return report_data, rss_items, rss_new_items
 
     def dispatch_all(
         self,
@@ -295,11 +274,10 @@ class NotificationDispatcher:
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
         ai_analysis: Optional[AIAnalysisResult] = None,
-        standalone_data: Optional[Dict] = None,
         skip_translation: bool = False,
     ) -> Dict[str, bool]:
         """
-        分发通知到所有已配置的渠道（支持热榜+RSS合并推送+AI分析+独立展示区）
+        分发通知到所有已配置的渠道（支持热榜+RSS合并推送+AI分析）
 
         Args:
             report_data: 报告数据（由 prepare_report_data 生成）
@@ -311,7 +289,6 @@ class NotificationDispatcher:
             rss_items: RSS 统计条目列表（用于 RSS 统计区块）
             rss_new_items: RSS 新增条目列表（用于 RSS 新增区块）
             ai_analysis: AI 分析结果（可选）
-            standalone_data: 独立展示区数据（可选）
             skip_translation: 跳过翻译（当数据已在上游翻译过时使用）
 
         Returns:
@@ -325,13 +302,13 @@ class NotificationDispatcher:
         # 执行翻译（如果启用，根据 display_regions 跳过不展示的区域）
         # skip_translation=True 时，RSS 已在上游翻译过，跳过 RSS 重复翻译
         if not skip_translation:
-            report_data, rss_items, rss_new_items, standalone_data = self.translate_content(
-                report_data, rss_items, rss_new_items, standalone_data, display_regions
+            report_data, rss_items, rss_new_items = self.translate_content(
+                report_data, rss_items, rss_new_items, display_regions
             )
         else:
-            # RSS 已翻译，仅翻译热榜 report_data 和独立展示区热榜部分
-            report_data, _, _, standalone_data = self.translate_content(
-                report_data, standalone_data=standalone_data, display_regions=display_regions,
+            # RSS 已翻译，仅翻译热榜 report_data
+            report_data, _, _ = self.translate_content(
+                report_data, display_regions=display_regions,
                 skip_rss=True,
             )
 
@@ -340,7 +317,7 @@ class NotificationDispatcher:
         if self.config.get("TELEGRAM_BOT_TOKEN") and telegram_receivers:
             results["telegram"] = self._send_telegram(
                 report_data, report_type, update_info, proxy_url, mode, rss_items, rss_new_items,
-                ai_analysis, display_regions, standalone_data, html_file_path
+                ai_analysis, display_regions, html_file_path
             )
 
         return results
@@ -352,9 +329,8 @@ class NotificationDispatcher:
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
         ai_analysis: Optional[AIAnalysisResult] = None,
-        standalone_data: Optional[Dict] = None,
     ) -> tuple:
-        """根据 display_regions 过滤各区域数据，返回 (report_data, rss_items, rss_new_items, ai_analysis, standalone_data)"""
+        """根据 display_regions 过滤各区域数据，返回 (report_data, rss_items, rss_new_items, ai_analysis)"""
         display_regions = display_regions or {}
         if not display_regions.get("HOTLIST", True):
             report_data = {"stats": [], "failed_ids": [], "new_titles": [], "id_to_name": {}}
@@ -364,7 +340,6 @@ class NotificationDispatcher:
             rss_items if show_rss else None,
             rss_new_items if (show_rss and display_regions.get("NEW_ITEMS", True)) else None,
             ai_analysis if display_regions.get("AI_ANALYSIS", True) else None,
-            standalone_data if display_regions.get("STANDALONE", False) else None,
         )
 
     def _send_telegram(
@@ -378,12 +353,11 @@ class NotificationDispatcher:
         rss_new_items: Optional[List[Dict]] = None,
         ai_analysis: Optional[AIAnalysisResult] = None,
         display_regions: Optional[Dict] = None,
-        standalone_data: Optional[Dict] = None,
         html_file_path: Optional[str] = None,
     ) -> bool:
         """发送到 Telegram（旧多账号兼容；新 receiver 白名单 fanout）"""
-        report_data, rss_items, rss_new_items, ai_analysis, standalone_data = self._apply_display_regions(
-            report_data, display_regions, rss_items, rss_new_items, ai_analysis, standalone_data
+        report_data, rss_items, rss_new_items, ai_analysis = self._apply_display_regions(
+            report_data, display_regions, rss_items, rss_new_items, ai_analysis
         )
         display_regions = display_regions or {}
 
@@ -476,7 +450,6 @@ class NotificationDispatcher:
                     rss_new_items=rss_new_items,
                     ai_analysis=ai_analysis,
                     display_regions=display_regions,
-                    standalone_data=standalone_data,
                     html_file_path=html_file_path,
                     get_time_func=self.get_time_func,
                     alert_state_store=deferred_store or alert_state_store,
