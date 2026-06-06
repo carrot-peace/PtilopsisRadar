@@ -22,10 +22,7 @@ import requests
 from trendradar.context import AppContext
 from trendradar import __version__
 from trendradar.core import load_config, parse_multi_account_config
-from trendradar.core.analyzer import (
-    convert_keyword_stats_to_platform_stats,
-    strip_background_groups,
-)
+from trendradar.core.analyzer import strip_background_groups
 from trendradar.crawler import DataFetcher
 from trendradar.storage import convert_crawl_results_to_news_data
 from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_days_old
@@ -419,14 +416,6 @@ class NewsAnalyzer:
                     quiet=True,
                 )
 
-                # 如果是 platform 模式，转换数据结构
-                if self.ctx.display_mode == "platform" and stats:
-                    stats = convert_keyword_stats_to_platform_stats(
-                        stats,
-                        self.ctx.weight_config,
-                        self.ctx.rank_threshold,
-                    )
-
                 return stats, current_id_to_name
 
             elif ai_mode in ["daily", "current"]:
@@ -458,14 +447,6 @@ class NewsAnalyzer:
                     global_filters=global_filters,
                     quiet=True,
                 )
-
-                # 如果是 platform 模式，转换数据结构
-                if self.ctx.display_mode == "platform" and stats:
-                    stats = convert_keyword_stats_to_platform_stats(
-                        stats,
-                        self.ctx.weight_config,
-                        self.ctx.rank_threshold,
-                    )
 
                 return stats, id_to_name
             else:
@@ -736,14 +717,6 @@ class NewsAnalyzer:
             )
 
         self._hotlist_total_count = total_titles
-
-        # 如果是 platform 模式，转换数据结构
-        if self.ctx.display_mode == "platform" and stats:
-            stats = convert_keyword_stats_to_platform_stats(
-                stats,
-                self.ctx.weight_config,
-                self.ctx.rank_threshold,
-            )
 
         # AI 分析（如果启用，用于 HTML 报告）
         ai_result = None
