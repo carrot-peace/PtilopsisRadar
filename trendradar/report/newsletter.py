@@ -3,8 +3,7 @@
 Newsletter 风格完整报告渲染器（environment）
 
 为 daily 定时盘面生成 newsletter 风格的完整报告（public/{group}/full.html）。
-与 html.py 的 classic 巨型渲染器并存：context 按 report_style 分流，
-environment → 本模块，classic → render_html_content。
+本模块是唯一的 HTML 报告渲染器（classic renderer 已在 PR7e 中移除）。
 
 页面结构（窄栏、黑白、无卡片阴影，对齐已审定的样例）：
 - EDITORIAL ZONE：overview 导言 + 内联统计 + 各异常 bucket + 已抑制

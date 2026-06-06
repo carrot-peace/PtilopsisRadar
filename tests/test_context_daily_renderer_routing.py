@@ -1,26 +1,26 @@
 # coding=utf-8
 """
-AppContext.render_html() 的 daily renderer routing 测试。
+AppContext.render_html() 的 renderer routing 测试。
 
-验证 PR3b：daily mode 一律走 environment newsletter 渲染器，AI 是否可用只决定
-newsletter 内部显示正常 editorial 还是 no-AI fallback notice，不再让 daily report
-因为缺少/不可用 AI result 回落 legacy render_html_content()。
+验证 PR7e：所有模式统一走 environment newsletter 渲染器，AI 是否可用只决定
+newsletter 内部显示正常 editorial 还是 no-AI fallback notice。classic
+render_html_content 已移除，不再作为 fallback。
 
 测试方式（不经 __main__ / 端到端）：
   - 用 _bootstrap 注册真实 trendradar.ai.* 依赖；
-  - 加载真实 trendradar.report.newsletter（这样 daily 输出里能断言真实 fallback 文案）；
+  - 加载真实 trendradar.report.newsletter（这样输出里能断言真实 fallback 文案）；
   - 把 context.py 的其余重依赖（utils.time / core / notification / storage 等）stub 成
     占位模块，使 context.py 能在精简解释器下加载；
-  - 加载真实 trendradar.context，再用 spy 包裹 render_newsletter_report /
-    render_html_content，断言 routing 选择了哪个渲染器。
+  - 加载真实 trendradar.context，再用 spy 包裹 render_newsletter_report，
+    断言 routing 始终选择 newsletter 渲染器。
 
 覆盖：
-  1. daily + ai_analysis=None              → newsletter；不调 render_html_content；含 fallback notice
-  2. daily + ai_analysis.success=False     → newsletter；不调 render_html_content；含 fallback notice
-  3. daily + report_style!="environment"   → newsletter；不调 render_html_content；含 fallback notice
+  1. daily + ai_analysis=None              → newsletter；含 fallback notice
+  2. daily + ai_analysis.success=False     → newsletter；含 fallback notice
+  3. daily + report_style!="environment"   → newsletter；含 fallback notice
   4. daily + usable environment AI result  → newsletter；无 fallback notice；正常 editorial
-  5. non-daily + ai_analysis=None          → 保持现状：调 render_html_content，不强转 newsletter
-  6. non-daily + usable environment AI     → 保持现状：仍走 newsletter（非 daily 环境路由不变）
+  5. non-daily + ai_analysis=None          → newsletter（统一走 newsletter，不再回落 classic）
+  6. non-daily + usable environment AI     → newsletter
 """
 
 import importlib.util
@@ -74,7 +74,7 @@ def _load_real(name, relpath):
 
 def _load_context_module():
     """在 stub 掉重依赖后加载真实 trendradar.context，返回模块对象。"""
-    # 真实 newsletter：daily 输出需断言真实 fallback 文案
+    # 真实 newsletter：输出需断言真实 fallback 文案
     _stub_pkg("trendradar.report")
     _load_real("trendradar.report.newsletter", "trendradar/report/newsletter.py")
     _stub_pkg("trendradar.report.dashboard")
@@ -110,9 +110,8 @@ def _report_data():
 
 class _RoutingTestBase(unittest.TestCase):
     def setUp(self):
-        # 用 spy 包裹两个渲染器：记录调用，并保留真实行为/可识别 sentinel
+        # 用 spy 包裹 newsletter 渲染器：记录调用，并保留真实行为
         self.nl_calls = []
-        self.hc_calls = []
 
         real_nl = _CTX.render_newsletter_report
 
@@ -120,14 +119,8 @@ class _RoutingTestBase(unittest.TestCase):
             self.nl_calls.append((args, kwargs))
             return real_nl(*args, **kwargs)  # 真实 newsletter 输出（含/不含 fallback）
 
-        def hc_spy(*args, **kwargs):
-            self.hc_calls.append((args, kwargs))
-            return "LEGACY_HTML_CONTENT"
-
         self._orig_nl = _CTX.render_newsletter_report
-        self._orig_hc = _CTX.render_html_content
         _CTX.render_newsletter_report = nl_spy
-        _CTX.render_html_content = hc_spy
 
         self.ctx = AppContext({})
         # newsletter 内部会 get_time_func().strftime(...)，给一个真实 datetime
@@ -135,13 +128,10 @@ class _RoutingTestBase(unittest.TestCase):
 
     def tearDown(self):
         _CTX.render_newsletter_report = self._orig_nl
-        _CTX.render_html_content = self._orig_hc
 
     def _assert_newsletter_only(self, out):
         self.assertEqual(len(self.nl_calls), 1, "应调用 render_newsletter_report")
-        self.assertEqual(len(self.hc_calls), 0, "不应调用 render_html_content")
         self.assertIn("<!DOCTYPE html>", out)  # 真实 newsletter shell
-        self.assertNotEqual(out, "LEGACY_HTML_CONTENT")
 
 
 class TestDailyAlwaysNewsletter(_RoutingTestBase):
@@ -175,23 +165,20 @@ class TestDailyAlwaysNewsletter(_RoutingTestBase):
         self.assertIn("今日盘面平稳", out)
 
 
-class TestNonDailyUnchanged(_RoutingTestBase):
-    def test_non_daily_ai_none_keeps_legacy(self):
-        # 现状：非 daily + 无 AI → 回落 render_html_content；本 PR 不扩大改动
+class TestNonDailyAllNewsletter(_RoutingTestBase):
+    def test_non_daily_ai_none_uses_newsletter(self):
+        """PR7e: non-daily + 无 AI → 统一走 newsletter（不再回落 classic HTML）。"""
         out = self.ctx.render_html(_report_data(), 1, mode="current", ai_analysis=None)
-        self.assertEqual(len(self.hc_calls), 1, "non-daily 无 AI 仍应调用 render_html_content")
-        self.assertEqual(len(self.nl_calls), 0, "non-daily 无 AI 不应强转 newsletter")
-        self.assertEqual(out, "LEGACY_HTML_CONTENT")
+        self._assert_newsletter_only(out)
+        self.assertIn(FALLBACK_NOTICE, out)
 
     def test_non_daily_usable_environment_still_newsletter(self):
-        # 现状：非 daily + 可用 environment AI → 仍走 newsletter（环境路由未变）
         ai = AIAnalysisResult(
             success=True, report_style="environment", overview="当前盘面"
         )
         out = self.ctx.render_html(_report_data(), 1, mode="current", ai_analysis=ai)
-        self.assertEqual(len(self.nl_calls), 1)
-        self.assertEqual(len(self.hc_calls), 0)
-        self.assertNotEqual(out, "LEGACY_HTML_CONTENT")
+        self._assert_newsletter_only(out)
+        self.assertNotIn(FALLBACK_NOTICE, out)
 
 
 if __name__ == "__main__":

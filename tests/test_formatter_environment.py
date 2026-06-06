@@ -197,21 +197,20 @@ class TestSkippedAndFailed(unittest.TestCase):
         self.assertIn("失败", out)
 
 
-class TestClassicRegression(unittest.TestCase):
-    def test_classic_path_unchanged(self):
+class TestClassicDeprecated(unittest.TestCase):
+    def test_classic_result_now_renders_as_environment(self):
+        """PR7e: classic 结果统一走 environment 渲染。"""
         res = AIAnalysisResult(
             report_style="classic", success=True,
             core_trends="核心趋势内容", sentiment_controversy="争议",
         )
         out = FMT.render_ai_analysis_markdown(res)
-        self.assertIn("AI 热点分析", out)
-        self.assertIn("核心热点态势", out)
-        self.assertNotIn("信息环境异常监测日报", out)
+        self.assertIn("信息环境异常监测日报", out)
 
-    def test_default_report_style_is_classic_on_dataclass(self):
-        # 未显式设置时，默认 classic（向后兼容旧调用方）
+    def test_default_report_style_is_environment_on_dataclass(self):
+        # PR7e: 默认 environment
         res = AIAnalysisResult(success=True, core_trends="x")
-        self.assertEqual(res.report_style, "classic")
+        self.assertEqual(res.report_style, "environment")
 
 
 if __name__ == "__main__":
