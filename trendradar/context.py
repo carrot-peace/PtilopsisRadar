@@ -132,14 +132,13 @@ class AppContext:
 
     @property
     def show_new_section(self) -> bool:
-        """是否显示新增热点区域"""
-        return self.config.get("DISPLAY", {}).get("REGIONS", {}).get("NEW_ITEMS", True)
+        """是否显示新增热点区域（PR8b: canonical 固定为 True，忽略 display config）"""
+        return True
 
     @property
     def region_order(self) -> List[str]:
-        """获取区域显示顺序"""
-        default_order = ["hotlist", "rss", "new_items", "standalone", "ai_analysis"]
-        return self.config.get("DISPLAY", {}).get("REGION_ORDER", default_order)
+        """获取区域显示顺序（PR8b: canonical 固定顺序，忽略 display config）"""
+        return ["hotlist", "rss", "new_items", "ai_analysis"]
 
     @property
     def filter_method(self) -> str:
@@ -327,7 +326,6 @@ class AppContext:
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
         ai_analysis: Optional[Any] = None,
-        standalone_data: Optional[Dict] = None,
         frequency_file: Optional[str] = None,
         report_metadata: Optional[Dict] = None,
     ) -> str:
@@ -344,7 +342,7 @@ class AppContext:
             output_dir="output",
             date_folder=self.format_date(),
             time_filename=self.format_time(),
-            render_html_func=lambda *args, **kwargs: self.render_html(*args, rss_items=rss_items, rss_new_items=rss_new_items, ai_analysis=ai_analysis, standalone_data=standalone_data, **kwargs),
+            render_html_func=lambda *args, **kwargs: self.render_html(*args, rss_items=rss_items, rss_new_items=rss_new_items, ai_analysis=ai_analysis, **kwargs),
             report_metadata=report_metadata,
         )
 
@@ -388,7 +386,6 @@ class AppContext:
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
         ai_analysis: Optional[Any] = None,
-        standalone_data: Optional[Dict] = None,
     ) -> str:
         """渲染HTML内容。
 

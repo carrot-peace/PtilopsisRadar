@@ -1,16 +1,25 @@
 # coding=utf-8
 """
-PR8a：display.regions 不再改变 canonical runtime output。
+PR8a + PR8b + PR8c：display config 不再改变 canonical runtime output。
 
-验证 trendradar/__main__.py 中以下旧 gate 已被移除：
+PR8a 验证 trendradar/__main__.py 中以下旧 gate 已被移除：
 
   Case A: AI_ANALYSIS=false 不再清空 AI result（current/incremental 也传递真实 ai_result）
-  Case B: STANDALONE=false 不再阻止 standalone_data 进入 canonical HTML 生成
   Case C: HOTLIST/NEW_ITEMS=false 不影响 canonical report data 传入（data 始终进入 pipeline）
   Case D: RSS=false 不再跳过 RSS 关键词分析（_process_rss_data_by_mode 始终执行分析）
 
+PR8b 验证 AppContext 层不再消费 display config 改变 canonical structure：
+
+  show_new_section: 始终返回 True（忽略 DISPLAY.REGIONS.NEW_ITEMS）
+  region_order: 始终返回固定 canonical 顺序（忽略 DISPLAY.REGION_ORDER）
+
+PR8c 验证 standalone_data 不再进入 canonical output：
+
+  Case B: standalone_data 不再传入 generate_html（canonical output 不含 standalone section）
+  region_order: 不含 standalone
+
 测试方式（subprocess 隔离）：
-  每个测试在独立子进程中加载 stub + 真实 trendradar.__main__，不污染当前进程 sys.modules。
+  每个测试在独立子进程中加载 stub + 真实模块，不污染当前进程 sys.modules。
 """
 
 import os
@@ -101,7 +110,7 @@ _MODE_STRATEGY = {{
 }}
 
 
-def _build(*, mode, ai_analysis_region, ai_result, standalone_data=None):
+def _build(*, mode, ai_analysis_region, ai_result):
     html_calls = []
     dashboard_calls = []
 
@@ -138,7 +147,7 @@ def _build(*, mode, ai_analysis_region, ai_result, standalone_data=None):
     return fake, html_calls, dashboard_calls
 
 
-def _run_pipeline(fake, mode, standalone_data=None):
+def _run_pipeline(fake, mode):
     return NewsAnalyzer._run_analysis_pipeline(
         fake,
         data_source={{"weibo": {{}}}},
@@ -148,7 +157,6 @@ def _run_pipeline(fake, mode, standalone_data=None):
         word_groups=[],
         filter_words=[],
         id_to_name={{"weibo": "微博"}},
-        standalone_data=standalone_data,
     )
 """
 
@@ -185,21 +193,33 @@ assert dashboard_calls[0]["ai_analysis"] is USABLE_AI
         )
 
 
-# ── Case B: STANDALONE=false 不再阻止 standalone_data 进入 canonical HTML ──
+# ── Case B: PR8c: standalone_data 不再进入 canonical HTML output ──
 
-class TestStandaloneGateRemoved(unittest.TestCase):
-    """PR8a: STANDALONE=false 不再阻止 standalone_data 进入 HTML 生成。"""
+class TestStandaloneRemovedFromCanonicalOutput(unittest.TestCase):
+    """PR8c: standalone_data 不再传入 generate_html，canonical output 不含 standalone section。"""
 
-    def test_daily_standalone_false_data_still_passed(self):
-        """daily + STANDALONE=false → generate_html 仍收到 standalone_data。"""
+    def test_daily_standalone_data_not_passed_to_html(self):
+        """daily 模式 → generate_html 不再收到 standalone_data 参数。"""
         code = _PREAMBLE_AI_GATE + """
-# Add STANDALONE=False to config
-standalone = {"platforms": [{"id": "zhihu", "name": "zh"}], "rss_feeds": []}
+fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
+_run_pipeline(fake, "daily")
+assert len(html_calls) == 1
+assert "standalone_data" not in html_calls[0], "standalone_data should not be passed to generate_html"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_standalone_false_ignored_for_canonical_output(self):
+        """STANDALONE=false + daily → generate_html 仍不收到 standalone_data。"""
+        code = _PREAMBLE_AI_GATE + """
 fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
 fake.ctx.config["DISPLAY"]["REGIONS"]["STANDALONE"] = False
-_run_pipeline(fake, "daily", standalone_data=standalone)
+_run_pipeline(fake, "daily")
 assert len(html_calls) == 1
-assert html_calls[0].get("standalone_data") is standalone, "standalone_data should be passed through"
+assert "standalone_data" not in html_calls[0], "standalone_data should not be passed to generate_html"
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
@@ -251,10 +271,170 @@ def _capture_html(*a, **k):
 fake, _, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
 fake.ctx.generate_html = _capture_html
 fake.ctx.config["DISPLAY"]["REGIONS"]["NEW_ITEMS"] = False
-_run_pipeline(fake, "daily", standalone_data=None)
+_run_pipeline(fake, "daily")
 assert len(all_calls) == 1, "generate_html should be called once"
 kwargs = all_calls[0][1]
 assert "new_titles" in kwargs, "new_titles should be passed as keyword arg"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+# ── PR8b: show_new_section / region_order 忽略 display config ──
+
+_PREAMBLE_PR8B = f"""
+import os, sys, types, importlib.util
+ROOT = {ROOT!r}
+
+def _attach_getattr(mod):
+    def __getattr__(name):
+        obj = type(name, (), {{}})
+        setattr(mod, name, obj)
+        return obj
+    mod.__getattr__ = __getattr__
+    return mod
+
+def _stub_pkg(name, is_pkg=True):
+    mod = sys.modules.get(name)
+    if mod is None:
+        mod = types.ModuleType(name)
+        sys.modules[name] = mod
+    if is_pkg and not hasattr(mod, "__path__"):
+        mod.__path__ = []
+    return _attach_getattr(mod)
+
+# stub heavy dependencies
+_stub_pkg("requests", is_pkg=False)
+_stub_pkg("trendradar")
+_stub_pkg("trendradar.utils")
+_stub_pkg("trendradar.utils.time")
+_stub_pkg("trendradar.core")
+_stub_pkg("trendradar.core.analyzer")
+_stub_pkg("trendradar.core.scheduler")
+_stub_pkg("trendradar.core.cdn")
+_stub_pkg("trendradar.report")
+_stub_pkg("trendradar.report.newsletter")
+_stub_pkg("trendradar.report.dashboard")
+_stub_pkg("trendradar.report.generator")
+_stub_pkg("trendradar.crawler")
+_stub_pkg("trendradar.storage")
+_stub_pkg("trendradar.ai")
+_stub_pkg("trendradar.ai.filter")
+_stub_pkg("trendradar.notification")
+_stub_pkg("trendradar.telegram_bot")
+_stub_pkg("trendradar.telegram_bot.access")
+
+spec = importlib.util.spec_from_file_location(
+    "trendradar.context", os.path.join(ROOT, "trendradar/context.py")
+)
+_ctx_mod = importlib.util.module_from_spec(spec)
+sys.modules["trendradar.context"] = _ctx_mod
+spec.loader.exec_module(_ctx_mod)
+AppContext = _ctx_mod.AppContext
+"""
+
+
+class TestShowNewSectionAlwaysTrue(unittest.TestCase):
+    """PR8b: show_new_section 始终返回 True，忽略 display config。"""
+
+    def test_new_items_false_ignored(self):
+        """DISPLAY.REGIONS.NEW_ITEMS=false → show_new_section 仍为 True。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({"DISPLAY": {"REGIONS": {"NEW_ITEMS": False}}})
+assert ctx.show_new_section is True, f"Expected True, got {{ctx.show_new_section!r}}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_new_items_true_still_true(self):
+        """DISPLAY.REGIONS.NEW_ITEMS=true → show_new_section 仍为 True。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({"DISPLAY": {"REGIONS": {"NEW_ITEMS": True}}})
+assert ctx.show_new_section is True, f"Expected True, got {{ctx.show_new_section!r}}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_no_display_config_still_true(self):
+        """无 DISPLAY config → show_new_section 仍为 True。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({})
+assert ctx.show_new_section is True, f"Expected True, got {{ctx.show_new_section!r}}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+class TestRegionOrderCanonicalFixed(unittest.TestCase):
+    """PR8b: region_order 返回固定 canonical 顺序，忽略 display config。"""
+
+    def test_custom_region_order_ignored(self):
+        """DISPLAY.REGION_ORDER 反常排序 → region_order 仍为 canonical。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({"DISPLAY": {"REGION_ORDER": ["ai_analysis", "standalone", "new_items", "rss", "hotlist"]}})
+expected = ["hotlist", "rss", "new_items", "ai_analysis"]
+assert ctx.region_order == expected, f"Expected {{expected}}, got {{ctx.region_order!r}}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_empty_region_order_ignored(self):
+        """DISPLAY.REGION_ORDER=[] → region_order 仍为 canonical。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({"DISPLAY": {"REGION_ORDER": []}})
+expected = ["hotlist", "rss", "new_items", "ai_analysis"]
+assert ctx.region_order == expected, f"Expected {{expected}}, got {{ctx.region_order!r}}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_no_region_order_config_still_canonical(self):
+        """无 REGION_ORDER config → region_order 仍为 canonical。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({})
+expected = ["hotlist", "rss", "new_items", "ai_analysis"]
+assert ctx.region_order == expected, f"Expected {{expected}}, got {{ctx.region_order!r}}"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+class TestLegacyConfigNotBreaking(unittest.TestCase):
+    """PR8b: 旧 display config 同时存在时 AppContext 不崩溃。"""
+
+    def test_both_legacy_configs_no_crash(self):
+        """同时设置 NEW_ITEMS=false + 反常 REGION_ORDER → 不崩溃，canonical 输出稳定。"""
+        code = _PREAMBLE_PR8B + """
+ctx = AppContext({
+    "DISPLAY": {
+        "REGIONS": {"NEW_ITEMS": False},
+        "REGION_ORDER": ["ai_analysis", "standalone", "new_items", "rss", "hotlist"],
+    }
+})
+assert ctx.show_new_section is True
+expected_order = ["hotlist", "rss", "new_items", "ai_analysis"]
+assert ctx.region_order == expected_order
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
