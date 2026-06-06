@@ -103,10 +103,6 @@ class _AIResult:
     success = True
 
 
-def _split(*args, **kwargs):
-    return ["content"]
-
-
 def _base_config(**overrides):
     config = {
         "TELEGRAM_BOT_TOKEN": "token",
@@ -133,7 +129,6 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
         return NotificationDispatcher(
             config,
             get_time_func=lambda: datetime(2026, 6, 4, 8, 0, 0),
-            split_content_func=_split,
             storage_backend=backend,
         )
 
