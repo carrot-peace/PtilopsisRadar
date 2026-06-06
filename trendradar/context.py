@@ -127,8 +127,8 @@ class AppContext:
 
     @property
     def display_mode(self) -> str:
-        """获取显示模式 (keyword | platform)"""
-        return self.config.get("DISPLAY_MODE", "keyword")
+        """PR8f: display_mode=platform 已废弃，canonical output 固定为 keyword 模式。"""
+        return "canonical"
 
     @property
     def show_new_section(self) -> bool:
