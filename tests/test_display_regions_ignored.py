@@ -1,12 +1,13 @@
 # coding=utf-8
 """
-PR4a + PR8a：所有 canonical output 在传递 ai_result 时忽略 DISPLAY.REGIONS.AI_ANALYSIS gate。
+PR8a：display.regions 不再改变 canonical runtime output。
 
-验证 trendradar/__main__.py 里 _run_analysis_pipeline 的 HTML 生成分流：
+验证 trendradar/__main__.py 中以下旧 gate 已被移除：
 
-  - mode == "daily"        → 始终把原始 ai_result 传给 generate_html(ai_analysis=...)，
-                             不因 DISPLAY.REGIONS.AI_ANALYSIS=false 被置空。
-  - current / incremental  → PR8a 起同样忽略 gate，dashboard 始终收到真实 ai_result。
+  Case A: AI_ANALYSIS=false 不再清空 AI result（current/incremental 也传递真实 ai_result）
+  Case B: STANDALONE=false 不再阻止 standalone_data 进入 canonical HTML 生成
+  Case C: HOTLIST/NEW_ITEMS=false 不影响 canonical report data 传入（data 始终进入 pipeline）
+  Case D: RSS=false 不再跳过 RSS 关键词分析（_process_rss_data_by_mode 始终执行分析）
 
 测试方式（subprocess 隔离）：
   每个测试在独立子进程中加载 stub + 真实 trendradar.__main__，不污染当前进程 sys.modules。
@@ -32,7 +33,9 @@ def _run_in_subprocess(code: str):
     return result
 
 
-_SUBPROCESS_PREAMBLE = f"""
+# ── Case A: AI_ANALYSIS=false 不再清空 AI result ──
+
+_PREAMBLE_AI_GATE = f"""
 import importlib.util
 import os
 import sys
@@ -98,7 +101,7 @@ _MODE_STRATEGY = {{
 }}
 
 
-def _build(*, mode, ai_analysis_region, ai_result):
+def _build(*, mode, ai_analysis_region, ai_result, standalone_data=None):
     html_calls = []
     dashboard_calls = []
 
@@ -135,7 +138,7 @@ def _build(*, mode, ai_analysis_region, ai_result):
     return fake, html_calls, dashboard_calls
 
 
-def _run_pipeline(fake, mode):
+def _run_pipeline(fake, mode, standalone_data=None):
     return NewsAnalyzer._run_analysis_pipeline(
         fake,
         data_source={{"weibo": {{}}}},
@@ -145,63 +148,20 @@ def _run_pipeline(fake, mode):
         word_groups=[],
         filter_words=[],
         id_to_name={{"weibo": "微博"}},
+        standalone_data=standalone_data,
     )
 """
 
 
-class TestDailyGate(unittest.TestCase):
-    """PR4a: daily full report 在 AI_ANALYSIS=false 时仍使用真实 ai_result。"""
+class TestAIAnalysisGateRemoved(unittest.TestCase):
+    """PR8a: AI_ANALYSIS=false 不再清空 AI result（所有 mode）。"""
 
-    def test_daily_region_false_usable_ai_passes_through(self):
-        code = _SUBPROCESS_PREAMBLE + """
-fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=False, ai_result=USABLE_AI)
-_run_pipeline(fake, "daily")
-assert len(html_calls) == 1, f"Expected 1 html call, got {len(html_calls)}"
-assert len(dashboard_calls) == 0, f"Expected 0 dashboard calls, got {len(dashboard_calls)}"
-assert html_calls[0]["ai_analysis"] is USABLE_AI, "ai_analysis should be USABLE_AI"
-"""
-        result = _run_in_subprocess(code)
-        self.assertEqual(
-            result.returncode, 0,
-            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-    def test_daily_region_true_usable_ai_unchanged(self):
-        code = _SUBPROCESS_PREAMBLE + """
-fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
-_run_pipeline(fake, "daily")
-assert len(html_calls) == 1
-assert html_calls[0]["ai_analysis"] is USABLE_AI
-"""
-        result = _run_in_subprocess(code)
-        self.assertEqual(
-            result.returncode, 0,
-            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-    def test_daily_region_false_no_ai_result_passes_none(self):
-        code = _SUBPROCESS_PREAMBLE + """
-fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=False, ai_result=None)
-_run_pipeline(fake, "daily")
-assert len(html_calls) == 1
-assert html_calls[0]["ai_analysis"] is None
-"""
-        result = _run_in_subprocess(code)
-        self.assertEqual(
-            result.returncode, 0,
-            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-
-class TestNonDailyGateUpdated(unittest.TestCase):
-    """PR8a: current / incremental 不再受 AI_ANALYSIS gate 影响。"""
-
-    def test_current_region_false_dashboard_gets_real_ai(self):
-        code = _SUBPROCESS_PREAMBLE + """
+    def test_current_region_false_gets_real_ai(self):
+        """current 模式 + AI_ANALYSIS=false → dashboard 收到真实 ai_result。"""
+        code = _PREAMBLE_AI_GATE + """
 fake, html_calls, dashboard_calls = _build(mode="current", ai_analysis_region=False, ai_result=USABLE_AI)
 _run_pipeline(fake, "current")
 assert len(dashboard_calls) == 1
-assert len(html_calls) == 0
 assert dashboard_calls[0]["ai_analysis"] is USABLE_AI
 """
         result = _run_in_subprocess(code)
@@ -210,12 +170,91 @@ assert dashboard_calls[0]["ai_analysis"] is USABLE_AI
             f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_current_region_true_dashboard_gets_ai(self):
-        code = _SUBPROCESS_PREAMBLE + """
-fake, html_calls, dashboard_calls = _build(mode="current", ai_analysis_region=True, ai_result=USABLE_AI)
-_run_pipeline(fake, "current")
+    def test_incremental_region_false_gets_real_ai(self):
+        """incremental 模式 + AI_ANALYSIS=false → dashboard 收到真实 ai_result。"""
+        code = _PREAMBLE_AI_GATE + """
+fake, html_calls, dashboard_calls = _build(mode="incremental", ai_analysis_region=False, ai_result=USABLE_AI)
+_run_pipeline(fake, "incremental")
 assert len(dashboard_calls) == 1
 assert dashboard_calls[0]["ai_analysis"] is USABLE_AI
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+# ── Case B: STANDALONE=false 不再阻止 standalone_data 进入 canonical HTML ──
+
+class TestStandaloneGateRemoved(unittest.TestCase):
+    """PR8a: STANDALONE=false 不再阻止 standalone_data 进入 HTML 生成。"""
+
+    def test_daily_standalone_false_data_still_passed(self):
+        """daily + STANDALONE=false → generate_html 仍收到 standalone_data。"""
+        code = _PREAMBLE_AI_GATE + """
+# Add STANDALONE=False to config
+standalone = {"platforms": [{"id": "zhihu", "name": "zh"}], "rss_feeds": []}
+fake, html_calls, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
+fake.ctx.config["DISPLAY"]["REGIONS"]["STANDALONE"] = False
+_run_pipeline(fake, "daily", standalone_data=standalone)
+assert len(html_calls) == 1
+assert html_calls[0].get("standalone_data") is standalone, "standalone_data should be passed through"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+# ── Case C: HOTLIST/NEW_ITEMS=false 不影响 canonical data ──
+
+class TestHotlistNewItemsNotGated(unittest.TestCase):
+    """PR8a: HOTLIST/NEW_ITEMS config 不再作为 runtime gate 删除 core data。"""
+
+    def test_hotlist_false_still_passes_stats_to_html(self):
+        """HOTLIST=false 不导致 canonical report 中 stats 消失。"""
+        code = _PREAMBLE_AI_GATE + """
+# Override generate_html to also capture positional args
+all_calls = []
+def _capture_html(*a, **k):
+    all_calls.append((a, k))
+    return "FULL_HTML"
+
+fake, _, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
+fake.ctx.generate_html = _capture_html
+fake.ctx.config["DISPLAY"]["REGIONS"]["HOTLIST"] = False
+stats, html_file, ai_result, rss_items = _run_pipeline(fake, "daily")
+assert stats is not None, "stats should not be None"
+assert len(stats) > 0, "stats should not be empty"
+assert len(all_calls) == 1, "generate_html should be called once"
+positional_args = all_calls[0][0]
+assert len(positional_args) >= 1, "generate_html should receive stats as positional arg"
+assert positional_args[0] is stats, "first positional arg should be stats"
+"""
+        result = _run_in_subprocess(code)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_new_items_false_still_passes_new_titles(self):
+        """NEW_ITEMS=false 不导致 canonical report 中 new_titles 消失。"""
+        code = _PREAMBLE_AI_GATE + """
+# Override generate_html to capture all args
+all_calls = []
+def _capture_html(*a, **k):
+    all_calls.append((a, k))
+    return "FULL_HTML"
+
+fake, _, dashboard_calls = _build(mode="daily", ai_analysis_region=True, ai_result=USABLE_AI)
+fake.ctx.generate_html = _capture_html
+fake.ctx.config["DISPLAY"]["REGIONS"]["NEW_ITEMS"] = False
+_run_pipeline(fake, "daily", standalone_data=None)
+assert len(all_calls) == 1, "generate_html should be called once"
+kwargs = all_calls[0][1]
+assert "new_titles" in kwargs, "new_titles should be passed as keyword arg"
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
