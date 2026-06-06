@@ -26,8 +26,6 @@ class AIAnalysisResult:
     signals: str = ""                    # 异动与弱信号
     rss_insights: str = ""               # RSS 深度洞察
     outlook_strategy: str = ""           # 研判与策略建议
-    standalone_summaries: Dict[str, str] = field(default_factory=dict)  # 独立展示区概括 {源ID: 概括}
-
     # ── environment 风格：信息环境异常监测（程序定栏定标签，AI 只写文字） ──
     # 注：字段名为数据层 bucket key；呈现层名称见 formatter._SECTION_TITLES。
     overview: str = ""                                                   # 今日盘面（AI 补一句）
@@ -55,10 +53,8 @@ class AIAnalysisResult:
     rss_count: int = 0                   # RSS 新闻数（总数）
     hotlist_analyzed: int = 0            # 热榜实际分析数
     rss_analyzed: int = 0               # RSS 实际分析数
-    standalone_analyzed: int = 0        # 独立展示区实际分析数
     ai_mode: str = ""                    # AI 分析使用的模式 (daily/current/incremental)
     include_rss: bool = True             # 是否启用 RSS 分析
-    include_standalone: bool = False     # 是否启用独立展示区分析
 
 
 class AIAnalyzer:
@@ -97,7 +93,6 @@ class AIAnalyzer:
         self.max_news = analysis_config.get("MAX_NEWS_FOR_ANALYSIS", 50)
         self.include_rss = analysis_config.get("INCLUDE_RSS", True)
         self.include_rank_timeline = analysis_config.get("INCLUDE_RANK_TIMELINE", False)
-        self.include_standalone = analysis_config.get("INCLUDE_STANDALONE", False)
         self.language = analysis_config.get("LANGUAGE", "Chinese")
 
         # 报告风格：environment（信息环境异常监测）。classic 已废弃，统一为 environment。

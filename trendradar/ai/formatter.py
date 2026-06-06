@@ -97,17 +97,6 @@ def _format_list_content(text: str) -> str:
     return result
 
 
-def _format_standalone_summaries(summaries: dict) -> str:
-    """格式化独立展示区概括为纯文本行，每个源名称单独一行"""
-    if not summaries:
-        return ""
-    lines = []
-    for source_name, summary in summaries.items():
-        if summary:
-            lines.append(f"[{source_name}]:\n{summary}")
-    return "\n\n".join(lines)
-
-
 # ════════════════════════════════════════════════════════════════
 # 信息环境异常监测（environment 风格）渲染
 # ════════════════════════════════════════════════════════════════
