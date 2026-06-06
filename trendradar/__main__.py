@@ -21,7 +21,7 @@ import requests
 
 from trendradar.context import AppContext
 from trendradar import __version__
-from trendradar.core import load_config, parse_multi_account_config, validate_paired_configs
+from trendradar.core import load_config, parse_multi_account_config
 from trendradar.core.analyzer import (
     convert_keyword_stats_to_platform_stats,
     strip_background_groups,
@@ -32,6 +32,51 @@ from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_da
 from trendradar.ai import AIAnalyzer, AIAnalysisResult
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.core.cdn import fetch_with_fallback
+from trendradar.telegram_bot.access import build_telegram_access_config
+
+
+LEGACY_NOTIFICATION_CONFIGS = [
+    ("FEISHU_WEBHOOK_URL", "飞书"),
+    ("DINGTALK_WEBHOOK_URL", "钉钉"),
+    ("WEWORK_WEBHOOK_URL", "企业微信"),
+    ("BARK_URL", "Bark"),
+    ("SLACK_WEBHOOK_URL", "Slack"),
+    ("GENERIC_WEBHOOK_URL", "通用Webhook"),
+]
+
+
+def _telegram_receiver_chat_ids(config: Dict) -> List[str]:
+    """Return Telegram receiver chat ids using the same access parser as runtime senders."""
+    tg_access = config.get("TELEGRAM_ACCESS") or {}
+    receivers = tg_access.get("receiver_chat_ids") or []
+    if receivers:
+        return list(receivers)
+
+    try:
+        return list(build_telegram_access_config(config).get("receiver_chat_ids") or [])
+    except Exception:
+        return []
+
+
+def _has_telegram_notification_configured(config: Dict) -> bool:
+    """Runtime notification is Telegram-only: token plus at least one receiver."""
+    return bool(config.get("TELEGRAM_BOT_TOKEN") and _telegram_receiver_chat_ids(config))
+
+
+def _legacy_notification_config_labels(config: Dict) -> List[str]:
+    """Return legacy non-Telegram notification configs that are present but ignored."""
+    labels = []
+    for key, label in LEGACY_NOTIFICATION_CONFIGS:
+        if parse_multi_account_config(config.get(key, "")):
+            labels.append(label)
+
+    if config.get("NTFY_SERVER_URL") or config.get("NTFY_TOPIC") or config.get("NTFY_TOKEN"):
+        labels.append("ntfy")
+
+    if config.get("EMAIL_FROM") or config.get("EMAIL_PASSWORD") or config.get("EMAIL_TO"):
+        labels.append("邮件")
+
+    return labels
 
 
 def _parse_version(version_str: str) -> Tuple[int, int, int]:
@@ -306,26 +351,8 @@ class NewsAnalyzer:
         return self.MODE_STRATEGIES.get(self.report_mode, self.MODE_STRATEGIES["daily"])
 
     def _has_notification_configured(self) -> bool:
-        """检查是否配置了任何通知渠道"""
-        cfg = self.ctx.config
-        telegram_receivers = (cfg.get("TELEGRAM_ACCESS") or {}).get("receiver_chat_ids", [])
-        return any(
-            [
-                cfg["FEISHU_WEBHOOK_URL"],
-                cfg["DINGTALK_WEBHOOK_URL"],
-                cfg["WEWORK_WEBHOOK_URL"],
-                (cfg["TELEGRAM_BOT_TOKEN"] and telegram_receivers),
-                (
-                    cfg["EMAIL_FROM"]
-                    and cfg["EMAIL_PASSWORD"]
-                    and cfg["EMAIL_TO"]
-                ),
-                (cfg["NTFY_SERVER_URL"] and cfg["NTFY_TOPIC"]),
-                cfg["BARK_URL"],
-                cfg["SLACK_WEBHOOK_URL"],
-                cfg["GENERIC_WEBHOOK_URL"],
-            ]
-        )
+        """检查是否配置了运行时通知渠道。当前运行时只支持 Telegram。"""
+        return _has_telegram_notification_configured(self.ctx.config)
 
     def _has_valid_content(
         self, stats: List[Dict], new_titles: Optional[Dict] = None
@@ -1936,85 +1963,45 @@ def _run_doctor(config_path: Optional[str] = None) -> bool:
         except Exception as e:
             _record_doctor_result(results, "fail", "存储配置", f"检查失败: {e}")
 
-        # 7) 通知渠道配置检查
+        # 7) 通知渠道配置检查（运行时只支持 Telegram）
         channel_details = []
         channel_issues = []
-        max_accounts = config.get("MAX_ACCOUNTS_PER_CHANNEL", 3)
-
-        # 普通单值/多值渠道
-        for key, name in [
-            ("FEISHU_WEBHOOK_URL", "飞书"),
-            ("DINGTALK_WEBHOOK_URL", "钉钉"),
-            ("WEWORK_WEBHOOK_URL", "企业微信"),
-            ("BARK_URL", "Bark"),
-            ("SLACK_WEBHOOK_URL", "Slack"),
-            ("GENERIC_WEBHOOK_URL", "通用Webhook"),
-        ]:
-            values = parse_multi_account_config(config.get(key, ""))
-            if values:
-                channel_details.append(f"{name}({min(len(values), max_accounts)}个)")
 
         # Telegram 配置校验
         tg_tokens = parse_multi_account_config(config.get("TELEGRAM_BOT_TOKEN", ""))
-        tg_chats = parse_multi_account_config(config.get("TELEGRAM_CHAT_ID", ""))
-        tg_access = config.get("TELEGRAM_ACCESS") or {}
-        tg_receivers = tg_access.get("receiver_chat_ids", [])
-        has_new_tg_access = bool(
-            config.get("TELEGRAM_OWNER_CHAT_IDS")
+        tg_receivers = _telegram_receiver_chat_ids(config)
+        has_tg_receiver_config = bool(
+            config.get("TELEGRAM_CHAT_ID")
+            or config.get("TELEGRAM_OWNER_CHAT_IDS")
             or config.get("TELEGRAM_RECEIVER_CHAT_IDS")
+            or tg_receivers
         )
-        if tg_tokens and tg_receivers and has_new_tg_access:
+        if tg_tokens and tg_receivers:
             channel_details.append(f"Telegram({len(tg_receivers)}个接收者)")
-        elif tg_tokens or tg_chats:
-            valid, count = validate_paired_configs(
-                {"bot_token": tg_tokens, "chat_id": tg_chats},
-                "Telegram",
-                required_keys=["bot_token", "chat_id"],
-            )
-            if valid and count > 0:
-                channel_details.append(f"Telegram({min(count, max_accounts)}个)")
-            else:
-                channel_issues.append("Telegram bot_token/chat_id 配置不完整或数量不一致")
+        elif tg_tokens or has_tg_receiver_config:
+            channel_issues.append("Telegram bot_token/receiver_chat_ids 配置不完整")
 
-        # ntfy 配对校验（token 可选）
-        ntfy_server = config.get("NTFY_SERVER_URL", "")
-        ntfy_topics = parse_multi_account_config(config.get("NTFY_TOPIC", ""))
-        ntfy_tokens = parse_multi_account_config(config.get("NTFY_TOKEN", ""))
-        if ntfy_server and ntfy_topics:
-            if ntfy_tokens:
-                valid, count = validate_paired_configs(
-                    {"topic": ntfy_topics, "token": ntfy_tokens},
-                    "ntfy",
-                )
-                if valid and count > 0:
-                    channel_details.append(f"ntfy({min(count, max_accounts)}个)")
-                else:
-                    channel_issues.append("ntfy topic/token 数量不一致")
-            else:
-                channel_details.append(f"ntfy({min(len(ntfy_topics), max_accounts)}个)")
-
-        # 邮件配置完整性
-        email_ready = all(
-            [
-                config.get("EMAIL_FROM"),
-                config.get("EMAIL_PASSWORD"),
-                config.get("EMAIL_TO"),
-            ]
-        )
-        if email_ready:
-            channel_details.append("邮件")
-        elif any([config.get("EMAIL_FROM"), config.get("EMAIL_PASSWORD"), config.get("EMAIL_TO")]):
-            channel_issues.append("邮件配置不完整（需要 from/password/to 同时配置）")
+        legacy_labels = _legacy_notification_config_labels(config)
+        legacy_detail = ""
+        if legacy_labels:
+            legacy_detail = f"；旧通知配置已忽略: {', '.join(legacy_labels)}"
 
         if channel_issues and not channel_details:
-            _record_doctor_result(results, "fail", "通知配置", "；".join(channel_issues))
+            _record_doctor_result(results, "fail", "通知配置", "；".join(channel_issues) + legacy_detail)
         elif channel_issues and channel_details:
-            detail = f"可用渠道: {', '.join(channel_details)}；问题: {'；'.join(channel_issues)}"
+            detail = f"可用渠道: {', '.join(channel_details)}；问题: {'；'.join(channel_issues)}{legacy_detail}"
             _record_doctor_result(results, "warn", "通知配置", detail)
         elif channel_details:
-            _record_doctor_result(results, "pass", "通知配置", f"可用渠道: {', '.join(channel_details)}")
+            _record_doctor_result(results, "pass", "通知配置", f"可用渠道: {', '.join(channel_details)}{legacy_detail}")
+        elif legacy_labels:
+            _record_doctor_result(
+                results,
+                "warn",
+                "通知配置",
+                f"未配置 Telegram 通知；旧通知配置已忽略: {', '.join(legacy_labels)}",
+            )
         else:
-            _record_doctor_result(results, "warn", "通知配置", "未配置任何通知渠道")
+            _record_doctor_result(results, "warn", "通知配置", "未配置 Telegram 通知")
 
         # 8) 输出目录可写检查
         try:
@@ -2079,7 +2066,7 @@ def _build_test_report_data(ctx: AppContext) -> Dict:
 
 
 def _create_test_html_file(ctx: AppContext) -> Optional[str]:
-    """创建邮件测试用 HTML 文件"""
+    """创建 Telegram HTML 附件测试文件"""
     try:
         now = ctx.get_time()
         output_dir = Path("output") / "html" / ctx.format_date()
@@ -2091,7 +2078,7 @@ def _create_test_html_file(ctx: AppContext) -> Optional[str]:
 <body>
 <h2>Ptilopsis Radar 通知连通性测试</h2>
 <p>测试时间：{now.strftime('%Y-%m-%d %H:%M:%S')} ({ctx.timezone})</p>
-<p>这是一条测试消息，用于验证邮件渠道是否可达。</p>
+<p>这是一条测试消息，用于验证 Telegram 通知渠道是否可达。</p>
 </body>
 </html>"""
         html_path.write_text(html_content, encoding="utf-8")
@@ -2102,30 +2089,21 @@ def _create_test_html_file(ctx: AppContext) -> Optional[str]:
 
 
 def _run_test_notification(config: Dict) -> bool:
-    """发送测试通知到已配置渠道"""
-    from trendradar.notification import NotificationDispatcher
-
+    """发送测试通知到已配置的 Telegram 渠道"""
     ctx = AppContext(config)
 
     try:
-        # 检查是否配置了通知渠道
-        telegram_receivers = (config.get("TELEGRAM_ACCESS") or {}).get("receiver_chat_ids", [])
-        has_notification = any(
-            [
-                config.get("FEISHU_WEBHOOK_URL"),
-                config.get("DINGTALK_WEBHOOK_URL"),
-                config.get("WEWORK_WEBHOOK_URL"),
-                (config.get("TELEGRAM_BOT_TOKEN") and telegram_receivers),
-                (config.get("EMAIL_FROM") and config.get("EMAIL_PASSWORD") and config.get("EMAIL_TO")),
-                (config.get("NTFY_SERVER_URL") and config.get("NTFY_TOPIC")),
-                config.get("BARK_URL"),
-                config.get("SLACK_WEBHOOK_URL"),
-                config.get("GENERIC_WEBHOOK_URL"),
-            ]
-        )
-        if not has_notification:
-            print("未检测到可用通知渠道，请先在 config.yaml 或环境变量中配置。")
+        # 检查是否配置了运行时通知渠道。当前运行时只支持 Telegram。
+        if not _has_telegram_notification_configured(config):
+            legacy_labels = _legacy_notification_config_labels(config)
+            if legacy_labels:
+                print("未配置 Telegram 通知；非 Telegram 通知配置已不再作为运行时通知渠道。")
+                print(f"已忽略旧通知配置: {', '.join(legacy_labels)}")
+            else:
+                print("未配置 Telegram 通知，请先在 config.yaml 或环境变量中配置。")
             return False
+
+        from trendradar.notification import NotificationDispatcher
 
         # 测试时固定展示区域，避免用户关闭 HOTLIST 导致测试内容为空
         test_config = copy.deepcopy(config)
@@ -2160,7 +2138,7 @@ def _run_test_notification(config: Dict) -> bool:
         html_file_path = _create_test_html_file(ctx)
 
         print("=" * 60)
-        print("通知连通性测试")
+        print("Telegram 通知连通性测试")
         print("=" * 60)
 
         results = dispatcher.dispatch_all(
@@ -2202,13 +2180,13 @@ def main():
   --show-schedule        显示当前调度状态（时间段、行为开关）
 诊断命令:
   --doctor               运行环境与配置体检
-  --test-notification    发送测试通知到已配置渠道
+  --test-notification    发送 Telegram 测试通知
 
 示例:
   python -m trendradar                    # 正常运行
   python -m trendradar --show-schedule    # 查看当前调度状态
   python -m trendradar --doctor           # 运行一键体检
-  python -m trendradar --test-notification # 测试通知渠道连通性
+  python -m trendradar --test-notification # 测试 Telegram 通知连通性
 """
     )
     parser.add_argument(
@@ -2224,7 +2202,7 @@ def main():
     parser.add_argument(
         "--test-notification",
         action="store_true",
-        help="发送测试通知到已配置渠道"
+        help="发送 Telegram 测试通知"
     )
 
     args = parser.parse_args()
