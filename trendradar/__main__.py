@@ -694,10 +694,11 @@ class NewsAnalyzer:
         从原始数据中提取独立展示区数据
 
         纯数据准备方法，不检查 display.regions.standalone 开关。
+        PR8a 起，standalone_data 始终传入 canonical HTML 生成，不再由 display gate 过滤。
         各消费者自行决定是否使用：
         - AI 分析：由 ai.include_standalone 控制（在 _run_ai_analysis 层门控）
-        - HTML 报告 / 邮件：由 display.regions.standalone 控制（在 HTML 生成前过滤）
-        - Webhook 推送：由 display.regions.standalone 控制（在 dispatcher 层门控）
+        - HTML 报告 / 邮件：PR8a 起始终传入（不再由 display.regions.standalone 门控）
+        - Webhook 推送：由 dispatcher 层处理
 
         Args:
             results: 原始爬取结果 {platform_id: {title: title_data}}
@@ -932,8 +933,9 @@ class NewsAnalyzer:
         # HTML生成（如果启用）— 使用翻译后的数据
         html_file = None
         if self.ctx.config["STORAGE"]["FORMATS"]["HTML"]:
-            display_regions = self.ctx.config.get("DISPLAY", {}).get("REGIONS", {})
-            html_standalone = standalone_data if display_regions.get("STANDALONE", False) else None
+            # PR8a: STANDALONE gate removed — standalone_data 始终传入 HTML 生成，
+            # 不再由 display.regions.standalone 决定是否出现在 canonical output。
+            html_standalone = standalone_data
             report_metadata = {
                 "hotlist_total": total_titles,
                 "platform_total": len(self.ctx.platform_ids),
@@ -947,10 +949,9 @@ class NewsAnalyzer:
             #   current/incremental → 轻量盘面 dashboard（不写 full.html）
             # landing（public/index.html）由两条路径各自幂等维护。
             if mode == "daily":
-                # daily full report 是 PtilopsisRadar 的固定产品输出，不应被
-                # DISPLAY.REGIONS.AI_ANALYSIS gate 决定是否拿到真实 AI result。
-                # 始终传入原始 ai_result，由 renderer 自行决定显示 editorial
-                # 还是 no-AI fallback notice。
+                # PR8a: 所有 canonical output 始终传入原始 ai_result，
+                # 不再由 DISPLAY.REGIONS.AI_ANALYSIS gate 决定。
+                # 由 renderer 自行决定显示 editorial 还是 no-AI fallback notice。
                 html_ai = ai_result
                 html_file = self.ctx.generate_html(
                     stats,
@@ -968,8 +969,9 @@ class NewsAnalyzer:
                     report_metadata=report_metadata,
                 )
             else:
-                # current / incremental dashboard 继续遵循旧的 display gate。
-                html_ai = ai_result if display_regions.get("AI_ANALYSIS", True) else None
+                # PR8a: AI_ANALYSIS gate removed — current / incremental dashboard
+                # 始终收到真实 ai_result，与 daily full report 一致。
+                html_ai = ai_result
                 self.ctx.generate_dashboard(
                     mode=mode,
                     ai_analysis=html_ai,
@@ -1300,8 +1302,8 @@ class NewsAnalyzer:
         """
         from trendradar.core.analyzer import count_rss_frequency
 
-        # 从 display.regions.rss 统一控制 RSS 分析和展示
-        rss_display_enabled = self.ctx.config.get("DISPLAY", {}).get("REGIONS", {}).get("RSS", True)
+        # PR8a: display.regions.RSS gate removed — RSS 关键词分析始终执行，
+        # 不再由 display config 决定是否跳过。原始条目和关键词统计都进入 canonical output。
 
         # 加载关键词配置
         try:
@@ -1318,7 +1320,7 @@ class NewsAnalyzer:
         raw_rss_items = None  # 原始 RSS 条目列表（用于独立展示区）
         rss_new_urls = set()  # 原始新增 RSS URLs（未经关键词过滤）
 
-        # 1. 首先获取原始条目（用于独立展示区，不受 display.regions.rss 影响）
+        # 1. 首先获取原始条目（用于独立展示区和 canonical output）
         # 根据模式获取原始条目
         if self.report_mode == "incremental":
             new_items_dict = self.storage_manager.detect_new_rss_items(rss_data)
@@ -1332,10 +1334,6 @@ class NewsAnalyzer:
             all_data = self.storage_manager.get_rss_data(rss_data.date)
             if all_data:
                 raw_rss_items = self._convert_rss_items_to_list(all_data.items, all_data.id_to_name)
-
-        # 如果 RSS 展示未启用，跳过关键词分析，只返回原始条目用于独立展示区
-        if not rss_display_enabled:
-            return None, None, raw_rss_items, rss_new_urls
 
         # 2. 获取新增条目（用于统计）
         new_items_dict = self.storage_manager.detect_new_rss_items(rss_data)
