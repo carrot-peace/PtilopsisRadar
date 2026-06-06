@@ -7,7 +7,15 @@ Ptilopsis Radar - 热点新闻聚合与分析工具
   trendradar                  # 安装后执行
 """
 
-from trendradar.context import AppContext
-
 __version__ = "6.9.0"
 __all__ = ["AppContext", "__version__"]
+
+
+def __getattr__(name):
+    # 惰性导出 AppContext：避免在 import 任意 trendradar.* 子模块时，
+    # 因 package init 提前拉起 trendradar.context → trendradar.notification。
+    if name == "AppContext":
+        from trendradar.context import AppContext
+
+        return AppContext
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
