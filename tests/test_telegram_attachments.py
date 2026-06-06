@@ -46,7 +46,7 @@ def _load_file(name, relpath):
 _ensure_pkg("trendradar.notification")
 _load_file("trendradar.core.config", "trendradar/core/config.py")
 _load_file("trendradar.ai.alert_state", "trendradar/ai/alert_state.py")
-_load_file("trendradar.notification.batch", "trendradar/notification/batch.py")
+_load_file("trendradar.notification.text_utils", "trendradar/notification/text_utils.py")
 _load_file("trendradar.notification.formatters", "trendradar/notification/formatters.py")
 SENDERS = _load_file("trendradar.notification.senders", "trendradar/notification/senders.py")
 DISPATCHER = _load_file("trendradar.notification.dispatcher", "trendradar/notification/dispatcher.py")
