@@ -151,7 +151,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
             calls.append(kwargs["chat_id"])
             return True
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", side_effect=fake_send):
+        with mock.patch.object(DISPATCHER, "send_to_telegram", side_effect=fake_send):
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "daily")
 
         self.assertTrue(ok)
@@ -172,7 +172,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
             calls.append((kwargs["bot_token"], kwargs["chat_id"]))
             return True
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", side_effect=fake_send):
+        with mock.patch.object(DISPATCHER, "send_to_telegram", side_effect=fake_send):
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "daily")
 
         self.assertTrue(ok)
@@ -196,7 +196,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
             calls.append((kwargs["bot_token"], kwargs["chat_id"]))
             return True
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", side_effect=fake_send):
+        with mock.patch.object(DISPATCHER, "send_to_telegram", side_effect=fake_send):
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "daily")
 
         self.assertTrue(ok)
@@ -220,7 +220,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
             calls.append((kwargs["bot_token"], kwargs["chat_id"]))
             return True
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", side_effect=fake_send), \
+        with mock.patch.object(DISPATCHER, "send_to_telegram", side_effect=fake_send), \
                 mock.patch("builtins.print") as print_mock:
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "daily")
 
@@ -244,7 +244,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
             calls.append(kwargs["chat_id"])
             return kwargs["chat_id"] == "222"
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", side_effect=fake_send):
+        with mock.patch.object(DISPATCHER, "send_to_telegram", side_effect=fake_send):
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "daily")
 
         self.assertTrue(ok)
@@ -258,7 +258,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
         )
         dispatcher = self._dispatcher(config)
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", return_value=False):
+        with mock.patch.object(DISPATCHER, "send_to_telegram", return_value=False):
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "daily")
 
         self.assertFalse(ok)
@@ -281,7 +281,7 @@ class TestTelegramDispatcherAccess(unittest.TestCase):
             )
             return True
 
-        with mock.patch("trendradar.notification.dispatcher.send_to_telegram", side_effect=fake_send):
+        with mock.patch.object(DISPATCHER, "send_to_telegram", side_effect=fake_send):
             ok = dispatcher._send_telegram({}, "当前榜单", None, None, "current", ai_analysis=_AIResult())
 
         self.assertTrue(ok)
