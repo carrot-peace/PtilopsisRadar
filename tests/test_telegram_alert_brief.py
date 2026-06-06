@@ -50,6 +50,20 @@ def _load_senders():
 SENDERS = _load_senders()
 
 
+def _ensure_fmt_in_sys_modules():
+    """Restore the bootstrap-loaded trendradar.ai.formatter into sys.modules.
+
+    Earlier-collected test files (test_notification_runtime_detection,
+    test_package_imports) purge all trendradar.* entries from sys.modules.
+    senders.py's lazy import resolves from sys.modules at call time, so we
+    must ensure the bootstrap-loaded module (the one our mock targets)
+    is the live entry.
+    """
+    key = "trendradar.ai.formatter"
+    if sys.modules.get(key) is not FMT:
+        sys.modules[key] = FMT
+
+
 def _load_alert_state():
     """加载纯标准库的 alert_state，并注册到 sys.modules 供 senders 惰性导入。"""
     name = "trendradar.ai.alert_state"
@@ -526,8 +540,16 @@ class TestSendToTelegramRouting(unittest.TestCase):
     def test_environment_daily_renderer_failure_falls_back_to_split(self):
         result = make_env_result()
         split = _SplitTracker()
+        # senders.py lazy-imports render_environment_telegram_daily_digest from
+        # sys.modules["trendradar.ai.formatter"].  Prior tests that purge
+        # trendradar.* from sys.modules may leave that entry missing or replaced
+        # with a fresh module object.  Restore the bootstrap-loaded module (which
+        # holds our mock target) as the live entry before patching.
+        _ensure_fmt_in_sys_modules()
         with mock.patch.object(
-            FMT, "render_environment_telegram_daily_digest", side_effect=RuntimeError("boom")
+            sys.modules["trendradar.ai.formatter"],
+            "render_environment_telegram_daily_digest",
+            side_effect=RuntimeError("boom"),
         ), mock.patch.object(SENDERS.requests, "post", return_value=_ok_response()) as post:
             ok = SENDERS.send_to_telegram(
                 bot_token="token", chat_id="chat",
