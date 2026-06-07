@@ -413,6 +413,7 @@ def count_word_frequency(
                     {
                         "title": title,
                         "source_name": source_name,
+                        "source_id": source_id,
                         "first_time": first_time,
                         "last_time": last_time,
                         "time_display": time_display,
@@ -536,6 +537,7 @@ def count_word_frequency(
             entry = {
                 "title": t,
                 "source_name": source_name,
+                "source_id": sid,
                 "first_time": first_time,
                 "last_time": last_time,
                 "time_display": time_display,
@@ -780,6 +782,7 @@ def count_rss_frequency(
                 title_data = {
                     "title": title,
                     "source_name": item.get("feed_name", item.get("feed_id", "RSS")),
+                    "feed_id": item.get("feed_id", ""),
                     "time_display": time_display,
                     "count": 1,  # RSS 条目通常只出现一次
                     "ranks": [rank],
@@ -788,6 +791,13 @@ def count_rss_frequency(
                     "mobile_url": "",
                     "is_new": is_new,
                 }
+                # pass through raw metadata when available
+                if item.get("published_at"):
+                    title_data["published_at"] = item["published_at"]
+                if item.get("summary"):
+                    title_data["summary"] = item["summary"]
+                if item.get("author"):
+                    title_data["author"] = item["author"]
                 word_stats[group_key]["titles"].append(title_data)
                 break  # 一个条目只匹配第一个词组
 
