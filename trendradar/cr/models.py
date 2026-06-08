@@ -1,0 +1,184 @@
+# coding=utf-8
+"""
+CR primitive data models.
+
+These are adapter-level representations of existing repository stats.
+They are NOT topic-level CR Candidates (that is PR9c's job).
+
+Design reference: docs/Ptilopsis_Radar_Push_System_Design.md v0.4.1 §8.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import List, Literal, Optional
+
+
+# ---------------------------------------------------------------------------
+# Rank sentinel constants
+# ---------------------------------------------------------------------------
+
+RANK_SENTINELS = {0, 99}
+
+
+def is_visible_rank(raw_rank: Optional[int]) -> bool:
+    """Return True when *raw_rank* is a visible (non-sentinel, positive) rank.
+
+    Single source of truth for rank visibility used by both ``_classify_rank``
+    and adapter helpers (``_count_visible_observations``,
+    ``_derive_previous_observation``).
+
+    Rules (design §8.3):
+      None → False
+      0 → False
+      99 → False
+      negative → False
+      positive non-sentinel integer → True
+    """
+    if raw_rank is None:
+        return False
+    return raw_rank > 0 and raw_rank not in RANK_SENTINELS
+
+
+def _classify_rank(raw_rank: Optional[int]) -> tuple[Optional[int], bool, str]:
+    """Normalize a raw rank into (normalized_rank, is_visible, rank_sentinel).
+
+    Delegates visibility check to :func:`is_visible_rank` so that sentinel
+    semantics are defined in exactly one place.
+    """
+    if raw_rank is None:
+        return None, False, "missing"
+    if raw_rank == 0:
+        return None, False, "zero"
+    if raw_rank == 99:
+        return None, False, "ninety_nine"
+    if raw_rank < 0:
+        return None, False, "missing"
+    return raw_rank, is_visible_rank(raw_rank), "none"
+
+
+# ---------------------------------------------------------------------------
+# CRSourceItem
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CRSourceItem:
+    """One observable item (title) from a stats group, normalized for CR.
+
+    Design reference: §8.1, §8.2, §8.3, §8.4, §8.5, §8.6, §8.7, §8.8.
+    """
+
+    # -- identity --
+    source_type: Literal["hotlist", "rss", "unknown"] = "unknown"
+    source_id: Optional[str] = None
+    feed_id: Optional[str] = None
+    source_name: str = ""
+    title: str = ""
+    url: Optional[str] = None
+
+    # -- keyword group linkage (PR9b: single group, may expand in PR9c) --
+    keyword_group: Optional[str] = None
+    keyword_groups: Optional[List[str]] = None
+
+    # -- newness --
+    is_new: Optional[bool] = None
+    is_new_semantics: Literal[
+        "new_titles_detection",
+        "incremental_first_crawl",
+        "unknown",
+    ] = "unknown"
+
+    # -- rank (hotlist only; RSS rank is pseudo-rank) --
+    raw_rank: Optional[int] = None
+    # normalized_rank: best (min) visible rank across all observations.
+    #   Primitive representative rank.  NOT the latest observation rank.
+    normalized_rank: Optional[int] = None
+    is_visible: bool = False
+    rank_sentinel: Literal["none", "zero", "ninety_nine", "missing"] = "missing"
+
+    # -- rank timeline --
+    rank_timeline: List[dict] = field(default_factory=list)
+    has_rank_timeline: bool = False
+    has_reliable_rank_timeline: bool = False
+    visible_observation_count: int = 0
+
+    # -- previous observation (derived from reliable rank_timeline only) --
+    previous_observation_exists: bool = False
+    previous_observation_visible: bool = False
+    previous_visible_rank: Optional[int] = None
+    # current_rank: latest observation rank from reliable rank_timeline.
+    #   Falls back to normalized_rank when no reliable timeline exists.
+    #   Distinct from normalized_rank (best representative rank).
+    current_rank: Optional[int] = None
+    rank_delta: Optional[int] = None  # previous_visible_rank - current_rank; positive = improved
+
+    # -- time signals --
+    first_time: Optional[str] = None
+    last_time: Optional[str] = None
+    has_time_signals: bool = False
+    time_signals_synthetic: bool = False
+    run_time_inferred: bool = False
+
+    # -- first crawl of day --
+    first_crawl_of_day: Optional[bool] = None
+
+    # -- count --
+    count: Optional[int] = None
+    has_count: bool = False
+    count_semantics: Literal[
+        "crawl_count",
+        "rss_item_count",
+        "group_count",
+        "unknown",
+    ] = "unknown"
+
+    # -- RSS metadata (pass-through, not for rank scoring) --
+    published_at: Optional[str] = None
+    summary: Optional[str] = None
+    author: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# CRPrimitiveRecord
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CRPrimitiveRecord:
+    """Adapter-level grouping of source items, still keyword-group based.
+
+    This is NOT a topic-level CR Candidate.  PR9c builds true Candidates
+    by clustering primitive records.
+
+    Design reference: §5.2.
+    """
+
+    keyword_group: Optional[str] = None
+    keyword_groups: List[str] = field(default_factory=list)
+    source_items: List[CRSourceItem] = field(default_factory=list)
+    primary_title: Optional[str] = None
+    representative_url: Optional[str] = None
+    record_source: Literal[
+        "hotlist_stats",
+        "rss_stats",
+        "mixed",
+        "unknown",
+    ] = "unknown"
+
+
+# ---------------------------------------------------------------------------
+# CRRunContext
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CRRunContext:
+    """Run-level context passed into the adapter.
+
+    Design reference: §8.7.
+    """
+
+    mode: Literal["current", "incremental", "daily", "unknown"] = "unknown"
+    run_time: Optional[str] = None
+    first_crawl_of_day: Optional[bool] = None
