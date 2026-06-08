@@ -1,14 +1,14 @@
 # Ptilopsis Radar Push System Design
 
-Status: design draft  
-Version: v0.3  
-Scope: Telegram-first push system, CR/DR product model, archive model, CR scoring boundary, scoring formula status, implementation feasibility review incorporated
+Status: design draft
+Version: v0.4.1
+Scope: Telegram-first push system, CR/DR product model, CR input adapter contract, Growth Raw v0.1, archive model, implementation sequence, minor review fixes
 
 ## 1. Product Boundary
 
 Ptilopsis Radar 的推送系统不是普通的通知出口，而是项目与用户交互的核心界面。
 
-HTML、Markdown、Archive 是展开层、留档层、复盘层；Telegram text 是系统主动触达用户的主要方式。因此本系统的核心目标不是“把报告发出去”，而是：
+HTML、Markdown、Archive 是展开层、留档层、复盘层；Telegram text 是系统主动触达用户的主要方式。因此本系统的核心目标不是"把报告发出去"，而是：
 
 ```text
 在合适的时间，用足够克制、足够解释性的文本，告诉用户：
@@ -18,7 +18,7 @@ HTML、Markdown、Archive 是展开层、留档层、复盘层；Telegram text �
 - 系统不把热度、关键词命中、证据结构等同于事实确认。
 ```
 
-Current phase focuses on push design, not data collection.
+Current phase focuses on push design and CR/DR product structure, not data collection.
 
 信息抓取已经通过关键词重写、hotlist、RSS、source/evidence 等进入可用状态；接下来要优化的是：
 
@@ -42,6 +42,8 @@ CR
 CR-A
 CR-P
 DR
+CR Primitive Record
+CR Source Item
 CR Candidate
 CRCandidate
 CRScoreResult
@@ -97,8 +99,8 @@ CR-P = Current Report Pull
 
 CR MVP must be able to run fully without AI.
 
-CR-A is not based on `AIAnalysisResult`.  
-CR-A is not based on the existing environment alert brief path.  
+CR-A is not based on `AIAnalysisResult`.
+CR-A is not based on the existing environment alert brief path.
 CR-A is triggered by deterministic scoring and decision policy.
 
 ### 2.2 DR: Daily Report
@@ -111,7 +113,7 @@ DR must not be treated as CR-A. DR is a scheduled daily product, not a realtime 
 
 ## 3. Engineering Alignment with Current Repository
 
-The repository has recently been cleaned up toward canonical output. The target baseline assumes the PR6–PR8 cleanup direction:
+The target baseline assumes the PR6–PR8 cleanup direction:
 
 ```text
 non-Telegram runtime channels removed
@@ -165,6 +167,36 @@ CR scoring must not be implemented inside Telegram sender, HTML renderer, archiv
 
 The existing repository contains legacy procedural flows and long parameter chains. PR6–PR8 reduced several legacy runtime surfaces, but CR should not extend the old pattern.
 
+### 3.1 Field Reality
+
+Current repository data is not yet a clean CR Candidate model.
+
+The current main structures are:
+
+```text
+hotlist stats: keyword-group level
+RSS stats: keyword-group level
+title items: item-level metadata inside stats groups
+evidence: mostly keyword-group level
+rank_timeline: within-day item/source level, current/daily only
+```
+
+Therefore, the first CR implementation step must be an adapter layer, not scoring.
+
+### 3.2 Metadata Pass-through Baseline
+
+Low-cost metadata pass-through is allowed and useful before/inside PR9b.
+
+Useful pass-through fields include:
+
+```text
+source_id in hotlist title items
+feed_id in RSS title items
+RSS published_at / summary / author when already available
+```
+
+These fields reduce future adapter guesswork. They must remain passive metadata and must not change report rendering, Telegram behavior, storage schema, or scoring.
+
 ## 4. Artifact and Event Model
 
 The system distinguishes between run, report artifact, push event, and push message.
@@ -180,7 +212,7 @@ Run
 
 ### 4.1 CR Artifacts
 
-Every CR run produces:
+Every CR run eventually produces:
 
 ```text
 CR Candidate set
@@ -190,6 +222,15 @@ CR HTML
 CR Markdown
 optional CR-A text
 future CR-P text
+```
+
+However, implementation proceeds in layers:
+
+```text
+PR9b: CR primitive records / adapter
+PR9c: true topic-level CR Candidates
+PR9d: scoring
+PR9e: decision
 ```
 
 CR has exactly one unified HTML artifact per run.
@@ -214,11 +255,64 @@ DR Telegram text
 
 DR does not generate Markdown in MVP. DR HTML is the permanent daily report.
 
-## 5. CR Candidate Model
+## 5. CR Data Layers
+
+CR must distinguish three layers:
+
+```text
+raw repository stats
+→ CR Primitive Record / CR Source Item
+→ topic-level CR Candidate
+```
+
+### 5.1 Raw Repository Stats
+
+Raw repository stats are existing dictionaries and dataclasses produced by the current pipeline.
+
+Examples:
+
+```text
+stats from count_word_frequency()
+rss_items / rss_new_items from count_rss_frequency()
+title_info
+new_titles
+id_to_name
+source tiers
+evidence output
+```
+
+These are not CR Candidates.
+
+### 5.2 CR Primitive Record
+
+A CR Primitive Record is the adapter-level representation of existing stats.
+
+It may still be keyword-group based.
+
+Purpose:
+
+```text
+preserve fields
+normalize source/item metadata
+record availability flags
+avoid pretending keyword groups are topic clusters
+```
+
+PR9b should produce this layer.
+
+### 5.3 CR Candidate
+
+A CR Candidate is a topic-level cluster.
+
+It is not necessarily a verified real-world event. It is a topic-level information cluster built from one CR run.
+
+PR9c should build true CR Candidates from primitive records.
+
+Before PR9c, code and tests should avoid overclaiming that primitive records represent topic-level Candidates.
+
+## 6. CR Candidate Model
 
 CR Candidate is the unit of current report evaluation.
-
-A CR Candidate is not necessarily a verified real-world event. It is a topic-level information cluster built from one CR run.
 
 Candidate generation uses mixed internal recall but topic-level user presentation.
 
@@ -229,7 +323,7 @@ rewritten keyword hits
 hotlist items
 RSS items
 source/evidence metadata
-run-to-run deltas
+run-local rank/time signals
 title/topic similarity
 ```
 
@@ -241,7 +335,7 @@ Candidate display name rule:
 Choose the hottest / most prominent topic or title inside the topic cluster.
 ```
 
-Heat has priority over source credibility when selecting the visible topic name. This reflects the project’s purpose: Ptilopsis Radar tracks information-environment movement. Even if a high-heat topic later turns out to be false, its spread is still meaningful as an information signal.
+Heat has priority over source credibility when selecting the visible topic name. This reflects the project's purpose: Ptilopsis Radar tracks information-environment movement. Even if a high-heat topic later turns out to be false, its spread is still meaningful as an information signal.
 
 Core principle:
 
@@ -267,13 +361,13 @@ Topic clustering MVP should use deterministic text similarity. A simple implemen
 
 Before implementation, existing topic normalization / dedupe helpers should be audited, but CR Candidate clustering should be an independent CR layer.
 
-## 6. CR Input Adapter
+## 7. CR Input Adapter
 
 CR requires a dedicated input adapter before scoring.
 
 Existing repository data such as hotlist stats, RSS stats, title dictionaries, new title metadata, rank/count/time fields, and source/evidence metadata must be normalized into CR-specific models.
 
-The CR Input Adapter consumes existing canonical run data and produces preliminary `CRCandidate` objects or candidate input records.
+The CR Input Adapter consumes existing canonical run data and produces preliminary primitive records / source items.
 
 It must not:
 
@@ -283,6 +377,7 @@ decide suppress/watch/alert/urgent
 render Telegram text
 write HTML or Markdown
 send notifications
+cluster topics
 ```
 
 Expected inputs may include:
@@ -299,12 +394,197 @@ RSS published time / source / url
 Expected output:
 
 ```text
-CRCandidate input records with stable IDs, source/title data, candidate topic fields, representative links, and raw scoring inputs where available.
+CR primitive records with stable IDs, source/title data, keyword group fields,
+representative links, normalized rank visibility, source type, and availability flags.
 ```
 
 Current repository stats are not the CR Candidate model. They are source data for the adapter.
 
-## 7. CR Decision Levels
+## 8. PR9b CR Input Adapter Contract
+
+PR9b must establish a clean adapter contract.
+
+The adapter contract exists to protect later scoring from repository quirks such as RSS pseudo-ranks, sentinel ranks, synthetic time fields, first crawl `is_new` noise, and keyword-group/topic mismatch.
+
+### 8.1 Required Source Item Fields
+
+A future `CRSourceItem` or equivalent primitive item should include:
+
+```text
+source_type: "hotlist" | "rss" | "unknown"
+source_id: str | None
+feed_id: str | None
+source_name: str
+title: str
+url: str | None
+keyword_group: str | None
+keyword_groups: list[str] | None
+is_new: bool | None
+is_new_semantics: "new_titles_detection" | "incremental_first_crawl" | "unknown"
+```
+
+`keyword_group` may be a single primary group in PR9b. If multiple keyword groups are available, the adapter may preserve them in `keyword_groups` for future clustering/evidence work.
+
+`is_new` must not be consumed without `is_new_semantics`.
+
+```text
+new_titles_detection:
+  is_new comes from normal new title detection.
+
+incremental_first_crawl:
+  is_new may be true because this is the first crawl of the day.
+  It must not contribute to New Burst.
+
+unknown:
+  scoring must be conservative.
+```
+
+For RSS:
+
+```text
+published_at: str | None
+summary: str | None
+author: str | None
+```
+
+For hotlist:
+
+```text
+raw_rank: int | None
+normalized_rank: int | None
+is_visible: bool
+rank_sentinel: "none" | "zero" | "ninety_nine" | "missing"
+```
+
+### 8.2 Source Type Rules
+
+`source_type` must be explicit.
+
+```text
+hotlist: rank can be used for Growth / Current Heat
+rss: rank must not be used as heat rank
+unknown: rank-based scoring disabled
+```
+
+RSS published-order pseudo-rank must never enter Rank Movement or Current Heat rank scoring.
+
+### 8.3 Rank Normalization
+
+Adapter must normalize rank sentinels.
+
+```text
+rank in {0, 99, None, missing} → not visible
+normalized_rank = None
+is_visible = false
+```
+
+A valid visible rank is a positive integer that is not a sentinel.
+
+Scoring must consume `normalized_rank` / `is_visible`, not raw rank directly.
+
+### 8.4 Rank Timeline Contract
+
+Fields:
+
+```text
+rank_timeline: list[dict] | []
+has_rank_timeline: bool
+has_reliable_rank_timeline: bool
+visible_observation_count: int
+```
+
+Current/daily hotlist items may have reliable rank_timeline from storage.
+
+`visible_observation_count` is the count of reliable visible observations in `rank_timeline`. Scoring should consume this field instead of reparsing raw timeline data.
+
+Incremental items may lack rank_timeline or have synthetic title_info. Adapter must mark them unreliable rather than fabricate growth.
+
+### 8.5 Previous Observation Contract
+
+For Growth, previous rank must come from rank_timeline, not from `ranks[-2]`.
+
+`ranks` is a distinct rank list, not a per-observation sequence.
+
+Adapter should expose, when possible:
+
+```text
+previous_observation_exists: bool
+previous_observation_visible: bool
+previous_visible_rank: int | None
+current_rank: int | None
+rank_delta: int | None
+```
+
+`previous_visible_rank` should be derived from the second most recent reliable visible rank observation in rank_timeline, or equivalent reliable timeline logic.
+
+If no reliable rank_timeline exists, previous observation fields should be unavailable.
+
+### 8.6 Time Signal Contract
+
+Fields:
+
+```text
+first_time: str | None
+last_time: str | None
+has_time_signals: bool
+time_signals_synthetic: bool
+run_time_inferred: bool
+```
+
+Incremental synthetic title_info may set first_time == last_time == current time. This must be marked synthetic.
+
+`run_time_inferred = true` is not a penalty by itself. It is expected in the current repository because run_time may often be inferred from max last_time.
+
+### 8.7 First Crawl of Day Contract
+
+Adapter must expose:
+
+```text
+first_crawl_of_day: bool | None
+```
+
+This protects New Burst from `is_new` overfire on the first crawl of a day.
+
+If `first_crawl_of_day` cannot be inferred, adapter should expose unknown and scoring must be conservative.
+
+Rule:
+
+```text
+first_crawl_of_day == true → is_new must not contribute to New Burst
+```
+
+### 8.8 Count Contract
+
+Fields:
+
+```text
+count: int | None
+has_count: bool
+count_semantics: "crawl_count" | "rss_item_count" | "group_count" | "unknown"
+```
+
+Count must not be naked-added across sources.
+
+Count fallback may be used weakly for persistence only when rank_timeline is unavailable.
+
+### 8.9 Availability Flags
+
+Minimum flags:
+
+```text
+source_type
+has_current_rank
+has_rank_timeline
+has_reliable_rank_timeline
+has_time_signals
+time_signals_synthetic
+has_count
+first_crawl_of_day
+```
+
+These flags are not optional debug sugar. They are scoring safety requirements.
+
+## 9. CR Decision Levels
 
 CR uses four Decision levels:
 
@@ -315,7 +595,7 @@ alert
 urgent
 ```
 
-### 7.1 suppress
+### 9.1 suppress
 
 `suppress` is not a low-score range. It is a veto-style presentation label set.
 
@@ -333,7 +613,7 @@ Suppressed candidates are still scored, archived, and retained. Suppress only co
 
 A candidate may have a high score and still be suppressed. This is intentional. It allows later review of whether scoring is over-firing, suppress labels are too aggressive, or a suppressed topic should become watch/alert in future profile versions.
 
-### 7.2 watch
+### 9.2 watch
 
 `watch` means the candidate is visible and has observation value, but is not worth actively interrupting the user.
 
@@ -345,7 +625,7 @@ eligible for CR-P in future
 no automatic push
 ```
 
-### 7.3 alert
+### 9.3 alert
 
 `alert` means the candidate is eligible for automatic CR-A push.
 
@@ -359,7 +639,7 @@ respects cooldown
 
 Alert is primarily driven by high heat or rapid growth. It does not require factual verification or cross-layer confirmation.
 
-### 7.4 urgent
+### 9.4 urgent
 
 `urgent` means the candidate is eligible for CR-A and can bypass quiet hours.
 
@@ -379,27 +659,28 @@ Urgent does not require cross-layer verification.
 
 Cross-Evidence and background support can help upgrade a candidate, but they are not hard requirements for urgent.
 
-## 8. CR Scoring Architecture
+## 10. CR Scoring Architecture
 
 CR scoring must be an independent internal API.
 
 The intended flow:
 
 ```text
-Candidate Builder
+Primitive Input Adapter
+→ Candidate Builder / Clustering
 → Scoring API
 → Decision Policy
 → Presentation Layer
 → Delivery Layer
 ```
 
-### 8.1 Candidate Builder
+### 10.1 Candidate Builder
 
-Candidate Builder constructs CR Candidates from canonical run data.
+Candidate Builder constructs CR Candidates from primitive records.
 
 It does not decide push eligibility. It only produces candidate objects.
 
-### 8.2 Scoring API
+### 10.2 Scoring API
 
 Scoring API computes score results.
 
@@ -428,7 +709,7 @@ decide quiet / cooldown
 decide final push delivery
 ```
 
-### 8.3 Decision Policy
+### 10.3 Decision Policy
 
 Decision Policy consumes:
 
@@ -455,7 +736,7 @@ dedupe key
 trigger reasons
 ```
 
-### 8.4 Presentation Layer
+### 10.4 Presentation Layer
 
 Presentation Layer renders:
 
@@ -468,7 +749,7 @@ CR Markdown
 
 It consumes Candidate + ScoreResult + Decision. It must not recompute scores.
 
-### 8.5 Delivery Layer
+### 10.5 Delivery Layer
 
 Delivery Layer sends:
 
@@ -479,17 +760,17 @@ optional HTML attachment
 
 It must not compute scores or decide push eligibility.
 
-## 9. CR Score Profile v0.1 Draft: Score Budget and Decision Shape
+## 11. CR Score Profile v0.1 Draft: Score Budget and Decision Shape
 
 This is an initial calibration profile, not a permanent product law.
 
-This section defines score components, component caps, and decision thresholds. It does not fully define the concrete scoring formulas.
+This section defines score components, component caps, and decision thresholds. It does not fully define final scoring formulas.
 
-Concrete formulas depend on CR Input Adapter field availability and must be finalized after a repository field audit.
+Concrete formulas depend on CR Input Adapter field availability and must be finalized after adapter contract and clustering are implemented.
 
 Concrete thresholds and weights may change after historical CR archive review. The profile must be versioned.
 
-### 9.1 Score Structure
+### 11.1 Score Structure
 
 CR uses a 100-point capped score profile.
 
@@ -513,9 +794,7 @@ cross_evidence_score = min(20, cross_evidence_raw_score)
 total_score = heat_score + cross_evidence_score
 ```
 
-### 9.2 Heat Score
-
-Heat Score is the primary decision driver.
+### 11.2 Heat Score
 
 Draft score budget:
 
@@ -537,7 +816,7 @@ Very low-base growth must be dampened to avoid low-base ratio noise.
 
 This does not mean low-base growth is worthless. It means extremely low absolute volume should not receive full growth credit solely from a high relative ratio.
 
-### 9.3 Cross-Evidence Score
+### 11.3 Cross-Evidence Score
 
 Cross-Evidence Score is escalation support, not a truth score.
 
@@ -555,7 +834,7 @@ It measures whether the heat signal has additional structure, cross-layer suppor
 
 It can help a high-heat candidate move from alert to urgent, but it cannot replace Heat as the primary driver.
 
-### 9.4 Heat Cap and Urgent Threshold
+### 11.4 Heat Cap and Urgent Threshold
 
 In profile v0.1, Heat Score cap equals the urgent threshold by design.
 
@@ -568,7 +847,7 @@ This is intentional.
 
 Maximum Heat Score alone can produce urgent because CR is a heat-first information-environment radar. Cross-Evidence is not required for the hottest tier.
 
-### 9.5 Thresholds
+### 11.5 Thresholds
 
 Initial configurable thresholds:
 
@@ -589,43 +868,541 @@ CR:
     URGENT_THRESHOLD: 80
 ```
 
-### 9.6 Formula Status
+### 11.6 Formula Status
 
 CR Score Profile v0.1 defines score budgets, caps, and decision thresholds. It does not yet define final concrete scoring formulas.
 
-Formula design is a separate step before implementation and must be based on repository field availability.
+Formula design must be grounded in available repository fields.
 
-### 9.7 Growth Formula Direction
+## 12. Growth Raw v0.1
 
-Growth should compare the current run against both the previous run and a recent rolling baseline.
+Growth Raw v0.1 is field-constrained.
 
-Temporary baseline design:
-
-```text
-growth_baseline = 0.4 * previous_run_value + 0.6 * recent_3_run_average
-```
-
-If recent 3-run history is unavailable, the formula should degrade to previous-run comparison. If previous-run data is also unavailable, growth scoring should be conservative.
-
-Design target:
+It does not use:
 
 ```text
-Growth should consider both rank movement and count/heat delta.
+previous_run_value
+recent_3_run_average
+candidate-level historical baseline
+true count delta
 ```
 
-Implementation constraint:
+It uses available run-local signals:
 
 ```text
-v0.1 must use fields currently available in the repository. If rank movement or count/heat delta is unavailable or unreliable, the formula should degrade gracefully rather than forcing a large data-layer rewrite.
+rank_timeline movement
+is_new
+current rank
+first_time / last_time
+weak count fallback
 ```
 
-### 9.8 Low-base Dampening
+Total budget:
 
-Growth scoring must dampen very low-base ratio growth.
+```text
+Growth Raw Score: 0–60
+```
 
-Low-base candidates must not be hard-blocked. A strong rank jump, cross-source appearance, or other visibility signal may still produce a high Growth Raw Score.
+Subcomponents:
 
-### 9.9 Current Heat Formula Direction
+```text
+Rank Movement:      0–30
+New Burst:          0–15
+Recency Momentum:   0–10
+Weak Persistence:   0–5
+```
+
+Formula:
+
+```text
+growth_raw = (
+    rank_movement_score
+    + new_burst_score
+    + recency_momentum_score
+    + weak_persistence_score
+)
+
+growth_raw = min(60, growth_raw)
+```
+
+### 12.1 Growth Field Guards
+
+Growth scoring must consume adapter-normalized fields.
+
+Required guards:
+
+```text
+source_type == "hotlist" for rank-based scoring
+normalized_rank / is_visible, not raw rank
+has_reliable_rank_timeline for rank movement and timeline persistence
+time_signals_synthetic cap for recency
+first_crawl_of_day guard for New Burst
+```
+
+RSS items must not contribute to Rank Movement or rank-based New Burst.
+
+### 12.2 Rank Movement: 0–30
+
+Purpose:
+
+```text
+Rank Movement measures whether a topic is rising quickly in visible rank position.
+```
+
+Applicable only when:
+
+```text
+source_type == "hotlist"
+has_reliable_rank_timeline == true
+```
+
+Main fields:
+
+```text
+rank_timeline
+current_rank
+previous_observation fields
+```
+
+`previous_rank` must be derived from reliable rank_timeline. It must not be derived from `ranks[-2]`.
+
+#### First-ever entry
+
+If no previous reliable observation exists, and the current observation is visible, this is a first-ever entry.
+
+```text
+entered top 3       → 30
+entered top 10      → 27
+entered top 20      → 23
+entered top 50      → 15
+entered top 100     → 8
+entered below 100   → 3
+```
+
+First-ever entry must apply single-observation confidence dampening unless later calibration proves it too conservative.
+
+Suggested rule:
+
+```text
+if visible_observation_count <= 1 and count <= 1:
+    first-ever entry Rank Movement *= 0.7
+```
+
+This is not a low-base veto. It only reduces one-time observation spikes.
+
+#### Re-entry
+
+If a previous reliable observation exists, the previous observation was not visible, and the current observation is visible, this is a re-entry.
+
+Re-entry may use the same entry bucket:
+
+```text
+re-entered top 3       → 30
+re-entered top 10      → 27
+re-entered top 20      → 23
+re-entered top 50      → 15
+re-entered top 100     → 8
+re-entered below 100   → 3
+```
+
+Re-entry does not automatically receive New Burst. New Burst depends on `is_new` and `is_new_semantics`.
+
+
+#### Rank improvement
+
+If previous observation is visible and current rank improves:
+
+```text
+improved >= 50 places and current top 20  → 28
+improved >= 30 places and current top 20  → 25
+improved >= 20 places                     → 21
+improved >= 10 places                     → 15
+improved >= 5 places                      → 9
+improved < 5 places                       → 0
+```
+
+Visibility gate:
+
+```text
+if current_rank > 100:
+    Rank Movement cap = 6
+elif current_rank > 50:
+    Rank Movement cap = 12
+```
+
+This is a low-visibility dampening rule, not a low-base veto.
+
+#### Stable high rank
+
+Stable high rank should mainly be scored by Current Heat and Weak Persistence, not Rank Movement.
+
+```text
+stable top 10 → Rank Movement 0–3
+stable top 20 → Rank Movement 0–2
+otherwise    → 0
+```
+
+#### Aggregation
+
+Candidate-level aggregation requires PR9c clustering.
+
+Before PR9c, Rank Movement may only be computed per primitive item.
+
+After PR9c:
+
+```text
+Candidate Rank Movement = max(item_rank_movement_scores)
+```
+
+Do not add multiple rank movements across sources.
+
+#### Debug fields
+
+```text
+rank_movement_score
+rank_movement_reason
+rank_movement_source_id
+previous_visible_rank
+current_rank
+rank_delta
+rank_timeline_available
+visible_observation_count
+single_observation_dampening_applied
+```
+
+### 12.3 New Burst: 0–15
+
+Purpose:
+
+```text
+New Burst measures whether the topic has newly appeared / newly expanded.
+```
+
+Applicable only when:
+
+```text
+source_type == "hotlist"
+first_crawl_of_day != true
+```
+
+If `first_crawl_of_day == true`:
+
+```text
+New Burst = 0
+```
+
+Reason: first crawl of day makes many items appear `is_new=true` for system-observation reasons, not because they newly emerged in the information environment.
+
+If `source_type != hotlist`:
+
+```text
+New Burst = 0
+```
+
+RSS newness belongs to evidence/support, not rank-growth scoring.
+
+#### Single item base score
+
+If `is_new = true`:
+
+```text
+new + top 3       → 13
+new + top 10      → 12
+new + top 20      → 10
+new + top 50      → 7
+new + top 100     → 4
+new + below 100   → 2
+```
+
+If `is_new = false`:
+
+```text
+0
+```
+
+#### Multi-source / multi-item new bonus
+
+This requires PR9c clustering.
+
+After PR9c:
+
+```text
+2 new sources/items  → +2
+3 new sources/items  → +3
+4+ new sources/items → +4
+```
+
+Total cap:
+
+```text
+New Burst cap = 15
+```
+
+Before PR9c, do not apply multi-source / multi-item bonus.
+
+#### Low-base dampening
+
+Low-base dampening applies only to burst-like bonus, not to Rank Movement or total Growth.
+
+Suggested soft dampening:
+
+```text
+if single source and current_rank > 100:
+    New Burst *= 0.65
+elif single source and current_rank > 50:
+    New Burst *= 0.8
+else:
+    New Burst unchanged
+```
+
+Low-base topics are not hard-blocked. Strong rank jump, top-N entry, or multi-source visibility may still produce high Growth.
+
+#### Aggregation
+
+Candidate-level aggregation requires PR9c.
+
+After PR9c:
+
+```text
+New Burst = max(item_new_burst_scores) + multi_new_bonus
+New Burst capped at 15
+```
+
+Before PR9c, New Burst is per primitive item.
+
+#### Debug fields
+
+```text
+new_burst_score
+new_burst_reason
+new_item_count
+new_source_count
+first_crawl_of_day
+low_base_dampening_applied
+low_base_dampening_factor
+```
+
+### 12.4 Recency Momentum: 0–10
+
+Purpose:
+
+```text
+Recency Momentum measures whether the topic recently appeared and remains visible in the current window.
+```
+
+Main fields:
+
+```text
+first_time
+last_time
+run_time
+is_new
+```
+
+If time fields are synthetic, especially in incremental mode:
+
+```text
+if time_signals_synthetic:
+    Recency Momentum cap = 3
+```
+
+`run_time_inferred = true` is expected in the current repository and must not be penalized by itself.
+
+Scoring with reliable time fields:
+
+```text
+first seen within 30 min and last seen in current run/window → 10
+first seen within 1 hour and still visible                  → 8
+first seen within 3 hours and still visible                 → 6
+first seen within 6 hours and still visible                 → 4
+seen today but not fresh                                    → 1–2
+stale / not currently visible                               → 0
+```
+
+If exact run_time is missing, may infer from max last_time, but must mark:
+
+```text
+run_time_inferred = true
+```
+
+Current repository storage is today-scoped. Cross-midnight continuity is not guaranteed in v0.1.
+
+#### Aggregation
+
+Candidate-level aggregation requires PR9c.
+
+After PR9c:
+
+```text
+Recency Momentum = max(item_recency_scores)
+```
+
+Before PR9c, Recency Momentum is per primitive item.
+
+#### Debug fields
+
+```text
+recency_momentum_score
+first_time
+last_time
+run_time
+time_signals_synthetic
+run_time_inferred
+recency_reason
+```
+
+### 12.5 Weak Persistence: 0–5
+
+Purpose:
+
+```text
+Weak Persistence lightly rewards topics that remain visible across observations, especially if they are high rank but not moving much.
+```
+
+Main fields:
+
+```text
+rank_timeline
+count
+first_time / last_time
+```
+
+Only score if currently visible. If not currently visible or no reliable current rank:
+
+```text
+0
+```
+
+#### rank_timeline scoring
+
+Only when:
+
+```text
+has_reliable_rank_timeline == true
+```
+
+Rules:
+
+```text
+visible in >= 3 observations and latest rank top 20  → 5
+visible in >= 3 observations and latest rank top 50  → 4
+visible in >= 2 observations and latest rank top 50  → 3
+visible in >= 2 observations and latest rank top 100 → 2
+otherwise                                           → 0
+```
+
+#### count fallback
+
+If no reliable rank_timeline but count exists:
+
+```text
+count >= 5 → 3
+count >= 3 → 2
+count >= 2 → 1
+```
+
+But count fallback must remain weak:
+
+```text
+count fallback cap = 3
+```
+
+Incremental synthetic count may be constant or weak. Availability flags must protect against over-scoring.
+
+#### Aggregation
+
+Candidate-level aggregation requires PR9c.
+
+After PR9c:
+
+```text
+Weak Persistence = max(item_persistence_scores)
+```
+
+Before PR9c, Weak Persistence is per primitive item.
+
+#### Debug fields
+
+```text
+weak_persistence_score
+visible_observation_count
+latest_rank
+count_fallback_used
+persistence_reason
+```
+
+### 12.6 Expected Behavior Examples
+
+Case A1: re-enters top 10 after previous non-visible observation
+
+```text
+Rank Movement: 27
+New Burst: 0
+Recency Momentum: 4–8
+Weak Persistence: 0
+Growth Raw: 31–35
+```
+
+Case A2: first-ever top 10 observation
+
+```text
+Rank Movement: 27 * 0.7 = 18.9
+New Burst: 12
+Recency Momentum: 8
+Weak Persistence: 0
+Growth Raw: about 39
+```
+
+Case B: single-source low-rank new item
+
+```text
+Rank Movement: 3–8
+New Burst: 2 * 0.65 = 1.3
+Recency Momentum: 2–4
+Weak Persistence: 0
+Growth Raw: 6–13
+```
+
+Case C: from rank 40 to rank 8
+
+```text
+Rank Movement: 25
+New Burst: 0
+Recency Momentum: 4–6
+Weak Persistence: 2–3
+Growth Raw: 31–34
+```
+
+Case D: stable top 5
+
+```text
+Rank Movement: 0–3
+New Burst: 0
+Recency Momentum: 0–2
+Weak Persistence: 5
+Growth Raw: 5–10
+```
+
+Case E: incremental mode without reliable timeline
+
+```text
+Rank Movement: unavailable → 0
+New Burst: guarded by source_type / first_crawl_of_day / is_new
+Recency Momentum: synthetic time cap 3
+Weak Persistence: count fallback cap 3
+Growth Raw: conservative
+```
+
+Case F: first crawl of day
+
+```text
+New Burst: 0
+Rank Movement: only if reliable prior observation exists
+Recency Momentum: synthetic/reliable time rules apply
+Current Heat remains available
+```
+
+## 13. Current Heat Formula Direction
 
 Current Heat should reflect current visibility.
 
@@ -654,7 +1431,18 @@ Implementation constraint:
 Avoid building a full per-platform scoring system unless the current repository already provides enough metadata. Prefer simple, explainable normalization first.
 ```
 
-### 9.10 Cross-Evidence Formula Direction
+Current Heat v0.1 likely uses:
+
+```text
+rank/top-N normalized score
+distinct source coverage
+capped same-group item count
+small is_new / recency tie-breaker
+```
+
+RSS should not contribute rank heat.
+
+## 14. Cross-Evidence Formula Direction
 
 Cross-Evidence Score should measure structure, not truth.
 
@@ -669,66 +1457,49 @@ background support linked to the same topic cluster
 
 Cross-Evidence must not make a low-heat candidate important by itself. It supports escalation when Heat already indicates visibility.
 
-### 9.11 Field Audit Requirement
+### 14.1 Cross-Evidence v0.1
 
-Before implementing CR Scoring Formula v0.1, PR9b must audit which fields are available from current repository data structures.
+Before PR9c topic clustering matures, Cross-Evidence v0.1 is weak support.
 
-The audit should classify each field by:
-
-```text
-source location
-available modes
-available source types
-stability
-candidate-level availability
-usable score component
-fallback behavior
-```
-
-Candidate fields to audit include, but are not limited to:
+Allowed v0.1 signals:
 
 ```text
-rank
-count
-first_time
-last_time
-is_new
-rank_timeline
-source_name
-url
-rss_published_at
-keyword_group
-source_tier
-evidence_count
-previous_run_value
-recent_3_run_average
+hotlist + RSS same keyword/group co-occurrence
+source-tier diversity
+capped source/evidence count
 ```
 
-### 9.12 Calibration Warning
+These are not topic-level evidence.
 
-The numbers in profile v0.1 are calibration defaults, not permanent product law.
+### 14.2 Background Support
 
-Future calibration should avoid overfitting to a small set of historical cases. Calibration should also evaluate distribution shape, such as:
+Background Support Raw Score remains in the design budget:
 
 ```text
-How often does urgent occur?
-How often does alert occur?
-How many high-score candidates are suppressed?
-How often does low-base growth overfire?
-How often does a high-heat topic fail to reach alert?
+Background Support Raw Score: 0–10
 ```
 
-## 10. CR Decision Order
+But it is not implemented in v0.1.
+
+Reason:
+
+```text
+current background support is not a stable topic-level data model
+forcing it into scoring would create pseudo-context
+```
+
+## 15. CR Decision Order
 
 CR Decision calculation order:
 
 ```text
-1. Build CRCandidate
-2. Score Candidate
-3. Compute suppress labels
-4. Apply Decision Policy
-5. Archive all candidates
-6. Text push consumes eligible decisions
+1. Build primitive records
+2. Build / cluster CR Candidates
+3. Score Candidate
+4. Compute suppress labels
+5. Apply Decision Policy
+6. Archive all candidates
+7. Text push consumes eligible decisions
 ```
 
 Decision rule draft:
@@ -766,7 +1537,7 @@ Decision: suppress
 Suppress Labels: ...
 ```
 
-### 10.1 High-score Suppressed Observability
+### 15.1 High-score Suppressed Observability
 
 Each CR run should expose high-score suppressed count for observability.
 
@@ -780,9 +1551,9 @@ This helps detect over-aggressive suppress labels or scoring drift.
 
 This count should appear in CR HTML and CR Markdown. It does not need to appear in Telegram text.
 
-## 11. Runtime State and Terms
+## 16. Runtime State and Terms
 
-### 11.1 quiet
+### 16.1 quiet
 
 `quiet` means a configured time period where automatic CR-A should not interrupt the user unless the candidate is urgent.
 
@@ -790,7 +1561,7 @@ CR-P is manual and is not subject to quiet.
 
 DR follows its scheduled delivery policy and should be scheduled outside quiet periods when possible.
 
-### 11.2 cooldown
+### 16.2 cooldown
 
 `cooldown` means suppressing repeated automatic pushes for the same or similar CR Candidate within a configured interval.
 
@@ -798,13 +1569,13 @@ Alert respects cooldown.
 
 Urgent may bypass quiet, but still respects dedupe and minimum cooldown.
 
-### 11.3 minimum cooldown
+### 16.3 minimum cooldown
 
 `minimum cooldown` is the shortest interval during which even urgent should not repeatedly push the same dedupe key.
 
 This prevents urgent topics from spamming Telegram every run.
 
-### 11.4 dedupe key
+### 16.4 dedupe key
 
 `dedupe key` is a stable key representing a candidate/event identity for push suppression.
 
@@ -820,7 +1591,7 @@ CR-A event namespace
 profile version when necessary
 ```
 
-### 11.5 alert_state
+### 16.5 alert_state
 
 `alert_state` is runtime state used to remember recent pushed events and enforce cooldown/dedupe.
 
@@ -836,13 +1607,13 @@ dedupe_key
 last_sent_at
 ```
 
-### 11.6 successful CR
+### 16.6 successful CR
 
 A successful CR is a run that produced a valid CR data object and at least one CR artifact.
 
 A CR can be successful even if no CR-A push is sent.
 
-### 11.7 Candidate ordering
+### 16.7 Candidate ordering
 
 Candidate ordering is:
 
@@ -861,21 +1632,21 @@ Heat Score descending
 Current Heat / Growth tie-breakers as defined by the active profile
 ```
 
-### 11.8 Growth measurement
+### 16.8 Growth measurement
 
 Growth measurement is profile-defined.
 
-It should consider current run, previous run, and/or a rolling window depending on available data.
+In v0.1 it uses run-local fields and within-day rank_timeline where reliable.
 
-Growth scoring must dampen very low-base growth.
+Growth scoring must dampen very low-base growth but must not become a reverse blacklist.
 
-### 11.9 CR-A message part semantics
+### 16.9 CR-A message part semantics
 
 For multi-message CR-A, `Candidates: N` means the total number of candidates in the CR-A push event, not the number in the current message part.
 
 `Part: i/n` means this Telegram message is part `i` of `n` structured CR-A messages.
 
-## 12. CR HTML
+## 17. CR HTML
 
 CR HTML is the unified full current artifact.
 
@@ -908,7 +1679,7 @@ CR HTML is the expansion layer for CR-A and CR-P.
 
 CR HTML is the default attachment for CR-A and CR-P, subject to configuration.
 
-## 13. CR-A: Current Report Alert
+## 18. CR-A: Current Report Alert
 
 CR-A is the automatic alert push.
 
@@ -934,7 +1705,7 @@ urgent
 
 `suppress` and `watch` never enter CR-A text.
 
-### 13.1 CR-A Text Grammar
+### 18.1 CR-A Text Grammar
 
 CR-A uses structured candidate text.
 
@@ -967,7 +1738,7 @@ no boundary note
 
 Boundary notes should not appear in runtime text or HTML. The assumption that Ptilopsis Radar tracks information-environment movement rather than factual confirmation is a system-level principle, not repeated in every output.
 
-### 13.2 Multi-message CR-A
+### 18.2 Multi-message CR-A
 
 Target design: CR-A supports structured multi-message delivery.
 
@@ -986,7 +1757,7 @@ Chunking details are an open implementation detail.
 
 No generic text split path should be reintroduced. No silent truncation should hide selected candidates without making the CR HTML the complete expansion layer.
 
-## 14. CR-P: Current Report Pull
+## 19. CR-P: Current Report Pull
 
 CR-P is designed but deferred.
 
@@ -1000,7 +1771,7 @@ not implemented in current phase
 requires future Telegram bot command runtime
 ```
 
-### 14.1 Command Shape
+### 19.1 Command Shape
 
 Intended command:
 
@@ -1010,9 +1781,9 @@ Intended command:
 
 `pull` means retrieving an existing artifact. It must not trigger a new CR run.
 
-Future commands for “run immediately” must use a different verb.
+Future commands for "run immediately" must use a different verb.
 
-### 14.2 Target Artifact
+### 19.2 Target Artifact
 
 Default target:
 
@@ -1029,7 +1800,7 @@ Future extension may support:
 
 If `latest` is specified, it must return the latest successful CR artifact, not the latest alert-worthy CR.
 
-### 14.3 Permission
+### 19.3 Permission
 
 Allowed:
 
@@ -1040,7 +1811,7 @@ command chats
 
 Passive receivers do not automatically have command permission.
 
-### 14.4 Runtime Behavior
+### 19.4 Runtime Behavior
 
 ```text
 reply only to requesting chat
@@ -1059,7 +1830,7 @@ CR-P: watch / alert / urgent
 suppress: never enters text
 ```
 
-## 15. DR: Daily Report
+## 20. DR: Daily Report
 
 DR is the daily report product.
 
@@ -1075,7 +1846,7 @@ AI Brief is the main content of DR text. MVP directly reuses the existing genera
 
 DR and CR share the same underlying source data family, but at different time scales. DR should not be expected to mirror every CR Decision. DR is a daily-scale product that may aggregate, reinterpret, or omit topics according to daily report logic.
 
-### 15.1 DR Text Grammar
+### 20.1 DR Text Grammar
 
 Template:
 
@@ -1106,7 +1877,7 @@ no links in DR text
 
 DR text only lists topic names after AI Brief. Briefs, source links, evidence, and details live in DR HTML.
 
-### 15.2 DR HTML
+### 20.2 DR HTML
 
 DR HTML follows daily sections, not CR four-level sections.
 
@@ -1129,7 +1900,7 @@ source links must be included in HTML
 source links may be collapsed by default
 ```
 
-### 15.3 DR Fallback
+### 20.3 DR Fallback
 
 If AI or DR text rendering fails, the system must not fabricate AI conclusions.
 
@@ -1144,7 +1915,7 @@ Daily text is temporarily unavailable. DR HTML has been generated and attached w
 
 DR HTML should still be attached when available.
 
-## 16. Artifact Registry and Path Resolver
+## 21. Artifact Registry and Path Resolver
 
 The design requires a small artifact/path abstraction.
 
@@ -1174,11 +1945,11 @@ DR Archive
 CR Archive
 ```
 
-## 17. Archive and Retention
+## 22. Archive and Retention
 
 CR and DR have separate archive models.
 
-### 17.1 Archive Separation
+### 22.1 Archive Separation
 
 Archive folders should be separated:
 
@@ -1190,7 +1961,7 @@ archive/
 
 Exact paths may be refined during implementation, but CR Archive and DR Archive must remain conceptually separate.
 
-### 17.2 DR Archive
+### 22.2 DR Archive
 
 DR HTML:
 
@@ -1205,7 +1976,7 @@ moving to Archive does not alter content or format
 
 DR is a daily finished product, so HTML is the permanent DR archive format.
 
-### 17.3 CR Archive
+### 22.3 CR Archive
 
 Every CR run generates:
 
@@ -1237,7 +2008,7 @@ after 7 days consolidated by day
 after consolidation original per-run HTML is deleted
 ```
 
-### 17.4 CR Daily HTML Consolidation
+### 22.4 CR Daily HTML Consolidation
 
 Target design: expired CR HTML is consolidated by day.
 
@@ -1258,7 +2029,7 @@ Archive job should avoid DR generation time and must not block DR generation.
 
 Implementation detail remains open. The target behavior is retained, but first implementation may focus on per-run CR Markdown and recent CR HTML before implementing daily consolidation.
 
-## 18. Attachment Rules
+## 23. Attachment Rules
 
 Default:
 
@@ -1279,7 +2050,7 @@ Attachment success = enhancement
 
 Markdown archive is local archive only and is not sent through Telegram in MVP.
 
-## 19. Configuration Surface
+## 24. Configuration Surface
 
 Configuration should be organized by product object.
 
@@ -1315,7 +2086,7 @@ Config keys use English uppercase.
 
 CR-P config is not required in the current implementation phase because CR-P is deferred until Telegram bot command runtime exists.
 
-## 20. Future AI-Assisted CR
+## 25. Future AI-Assisted CR
 
 CR MVP is no-AI.
 
@@ -1323,7 +2094,7 @@ Future AI participation must not invalidate the no-AI baseline. AI can only be a
 
 Possible future modes:
 
-### 20.1 Additive Scoring
+### 25.1 Additive Scoring
 
 ```text
 program_score + ai_score = total_score
@@ -1331,7 +2102,7 @@ program_score + ai_score = total_score
 
 If used, score scale and thresholds must be recalibrated. AI score scale must not be casually chosen because 0–10 and 0–100 have different calibration behavior.
 
-### 20.2 AI Second Review
+### 25.2 AI Second Review
 
 Program policy produces the baseline decision first.
 
@@ -1349,21 +2120,34 @@ This mode is useful for handling accidental high scores caused by rigid keyword 
 
 AI failure must not block no-AI CR baseline.
 
-## 21. Known Risks and Open Design Items
+## 26. Known Risks and Open Design Items
 
-### 21.1 Scoring Risks
+### 26.1 Scoring Risks
 
 ```text
-Concrete scoring formulas are not finalized.
-Growth formula may over-score low-base growth.
+Concrete Current Heat and Cross-Evidence formulas are still not finalized.
+Growth v0.1 is run-local and within-day; it is not true historical growth.
 Score profile v0.1 uses calibration numbers that must be tested against archive distribution.
 Cross-Evidence Score is escalation support and may strongly affect alert→urgent upgrades.
 Heat cap equals urgent threshold intentionally, but this should be monitored.
 Raw score redundancy is retained but may need simplification after implementation.
 Platform/source normalization may be complex and must be grounded in actual repository fields.
+Current Heat v0.1 and Cross-Evidence v0.1 still need separate concrete formula specs before implementation.
 ```
 
-### 21.2 Archive Risks
+### 26.2 Adapter Risks
+
+```text
+RSS pseudo-rank may pollute rank scoring unless source_type is explicit.
+rank sentinels must be normalized before scoring.
+first_crawl_of_day must prevent is_new overfire.
+incremental synthetic time fields must be marked.
+candidate-level aggregation requires clustering.
+Candidate-level scoring may combine max sub-scores from different source items after PR9c; this may overstate Growth unless calibrated.
+Recency buckets are cadence-bound; minute thresholds approximate how many runs ago an item first appeared.
+```
+
+### 26.3 Archive Risks
 
 ```text
 CR daily HTML consolidation is target design but implementation details remain open.
@@ -1371,7 +2155,7 @@ Duplicate merge must preserve frequency and peak state.
 Per-run Markdown is the precise audit source.
 ```
 
-### 21.3 Message Risks
+### 26.4 Message Risks
 
 ```text
 CR-A structured multi-message delivery is target design.
@@ -1379,52 +2163,71 @@ Chunking details remain open.
 No generic text split path should be reintroduced.
 ```
 
-### 21.4 Remaining Open Items
+### 26.5 Remaining Open Items
 
 ```text
+CRPrimitiveRecord field schema
+CRSourceItem field schema
 CRCandidate field schema
 CRScoreResult field schema
 CRDecision field schema
 CRDecisionPolicy schema
 suppress label set
 Candidate clustering algorithm
-Growth Raw Score formula
 Current Heat Raw Score formula
 Cross-layer Raw Score formula
-Background Support Raw Score formula
+Background Support Raw Score future design
 CR-A multi-message chunking details
 CR HTML / Markdown path naming
 DR AI Brief source field mapping
 CR-P bot command runtime
 ```
 
-## 22. Suggested Implementation Order
+## 27. Suggested Implementation Order
 
 Recommended order:
 
 ```text
 PR9a: Design manual only
 
-PR9b: CR domain model + input adapter + scoring field audit
-- CRCandidate
-- CRRunContext
-- adapter from existing stats/rss/new_titles/title_info
-- field availability audit for future scoring formula
+PR9-pre-a: low-cost metadata pass-through
+- status: landed directly on master as commit 1b7a342
+- preserves source_id / feed_id / RSS metadata
+- no CR module
 - no scoring
+- no Telegram
+
+PR9b: CR primitive model + input adapter
+- trendradar/cr/models.py
+- trendradar/cr/adapter.py
+- trendradar/cr/__init__.py
+- CRSourceItem / primitive records
+- source_type
+- normalized_rank / visibility
+- rank sentinel normalization
+- first_crawl_of_day flag
+- rank_timeline reliability flags
+- time synthetic flags
+- no scoring
+- no decision
 - no Telegram
 
 PR9c: CR deterministic clustering + normalization
 - normalized title/topic tokens
 - cluster_key
 - heat-first display title selection
-- no scoring
+- source item aggregation
+- true topic-level CRCandidate
+- no scoring if possible
 
 PR9d: CR scoring API
 - CRScoringProfile
 - CRScoreResult
-- concrete formula based on PR9b field audit
-- capped Heat / Cross-Evidence score profile
-- low-base growth dampening requirement
+- Growth Raw v0.1
+- Current Heat v0.1
+- weak Cross-Evidence v0.1
+- candidate-level scoring depends on PR9c clustering output
+- Current Heat and Cross-Evidence require concrete v0.1 formula specs before implementation
 - no Telegram
 - no final push decision
 
