@@ -12,6 +12,8 @@ from trendradar.cr.models import (
     CRSourceItem,
     CRPrimitiveRecord,
     CRRunContext,
+    CRCandidate,
+    CRClusterConfig,
     RANK_SENTINELS,
     is_visible_rank,
 )
@@ -19,13 +21,25 @@ from trendradar.cr.adapter import (
     adapt_hotlist_stats,
     adapt_rss_stats,
 )
+from trendradar.cr.cluster import (
+    build_cr_candidates,
+    normalize_topic_text,
+    extract_topic_tokens,
+    title_similarity,
+)
 
 __all__ = [
     "CRSourceItem",
     "CRPrimitiveRecord",
     "CRRunContext",
+    "CRCandidate",
+    "CRClusterConfig",
     "RANK_SENTINELS",
     "is_visible_rank",
     "adapt_hotlist_stats",
     "adapt_rss_stats",
+    "build_cr_candidates",
+    "normalize_topic_text",
+    "extract_topic_tokens",
+    "title_similarity",
 ]
