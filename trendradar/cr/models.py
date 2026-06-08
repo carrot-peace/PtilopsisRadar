@@ -11,7 +11,7 @@ Design reference: docs/Ptilopsis_Radar_Push_System_Design.md v0.4.1 §8.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Sequence
 
 
 # ---------------------------------------------------------------------------
@@ -182,3 +182,65 @@ class CRRunContext:
     mode: Literal["current", "incremental", "daily", "unknown"] = "unknown"
     run_time: Optional[str] = None
     first_crawl_of_day: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# CRCandidate
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CRCandidate:
+    """Topic-level information cluster built by PR9c.
+
+    A candidate aggregates multiple source items that refer to the same topic.
+    It is NOT a scored result (PR9d) and NOT a decision (PR9e).
+
+    Design reference: PR9c clustering.
+    """
+
+    # -- identity (deterministic) --
+    candidate_id: str = ""
+    cluster_key: str = ""
+
+    # -- display --
+    display_title: str = ""
+
+    # -- aggregated items --
+    source_items: List[CRSourceItem] = field(default_factory=list)
+
+    # -- aggregated metadata --
+    keyword_groups: List[str] = field(default_factory=list)
+    representative_url: Optional[str] = None
+    source_types: List[str] = field(default_factory=list)
+    source_names: List[str] = field(default_factory=list)
+    source_ids: List[str] = field(default_factory=list)
+    feed_ids: List[str] = field(default_factory=list)
+
+    # -- source composition flags --
+    has_hotlist: bool = False
+    has_rss: bool = False
+    primary_source_type: Literal["hotlist", "rss", "mixed", "unknown"] = "unknown"
+
+    # -- rank aggregates (hotlist only; RSS pseudo-rank excluded) --
+    best_normalized_rank: Optional[int] = None
+    best_current_rank: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# CRClusterConfig
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CRClusterConfig:
+    """Lightweight config for PR9c clustering.
+
+    This is a function-parameter default only; it does NOT connect to
+    the project runtime config (config.yaml).
+    """
+
+    min_shared_tokens: int = 2
+    min_similarity: float = 0.55
+    use_url_match: bool = True
+    use_exact_title_match: bool = True
