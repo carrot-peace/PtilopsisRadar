@@ -302,14 +302,24 @@ def _build_cluster_key(cluster: List[CRSourceItem]) -> str:
     """Build a deterministic cluster key from normalized titles and URLs.
 
     The key is stable regardless of input order or which item is selected
-    as display title.
+    as display title.  Falls back to source metadata when titles and URLs
+    are all empty, so distinct clusters never collide on "empty".
     """
     sig_titles = sorted(
         {normalize_topic_text(it.title) for it in cluster if it.title}
     )
     sig_urls = sorted({it.url for it in cluster if it.url})
     parts = sig_titles + sig_urls
-    return "||".join(parts) if parts else "empty"
+    if parts:
+        return "||".join(parts)
+
+    # Fallback: use source metadata to avoid all-empty collision.
+    fallback = sorted(
+        (it.source_type, it.source_id or "", it.feed_id or "",
+         it.source_name or "", it.keyword_group or "")
+        for it in cluster
+    )
+    return "||".join(":".join(seg for seg in row) for row in fallback)
 
 
 def _compute_candidate_id(cluster_key: str, salt: str = "pr9c") -> str:
@@ -380,11 +390,14 @@ def build_candidate_from_cluster(
     cluster_key = _build_cluster_key(cluster)
     candidate_id = _compute_candidate_id(cluster_key, salt=salt)
 
+    # Sort source_items by deterministic key so order is stable.
+    sorted_items = sorted(cluster, key=_item_sort_key)
+
     return CRCandidate(
         candidate_id=candidate_id,
         cluster_key=cluster_key,
         display_title=display_title,
-        source_items=list(cluster),
+        source_items=sorted_items,
         keyword_groups=sorted(all_kg),
         representative_url=representative_url,
         source_types=source_types,
