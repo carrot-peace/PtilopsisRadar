@@ -23,9 +23,6 @@ from trendradar.cr.adapter import (
 )
 from trendradar.cr.cluster import (
     build_cr_candidates,
-    normalize_topic_text,
-    extract_topic_tokens,
-    title_similarity,
 )
 
 __all__ = [
@@ -39,7 +36,4 @@ __all__ = [
     "adapt_hotlist_stats",
     "adapt_rss_stats",
     "build_cr_candidates",
-    "normalize_topic_text",
-    "extract_topic_tokens",
-    "title_similarity",
 ]

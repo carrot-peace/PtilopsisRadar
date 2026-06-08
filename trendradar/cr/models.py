@@ -11,7 +11,7 @@ Design reference: docs/Ptilopsis_Radar_Push_System_Design.md v0.4.1 §8.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Sequence
+from typing import List, Literal, Optional
 
 
 # ---------------------------------------------------------------------------
