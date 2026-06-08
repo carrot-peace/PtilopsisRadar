@@ -260,7 +260,7 @@ class TestExactClustering(unittest.TestCase):
         self.assertEqual(len(clusters), 1)
 
 
-# Import the internal clustering function for direct testing.
+# Internal helper imported intentionally to test clustering invariants.
 from trendradar.cr.cluster import _cluster_source_items
 
 
