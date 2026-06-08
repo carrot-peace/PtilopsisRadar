@@ -646,6 +646,42 @@ class TestStableID(unittest.TestCase):
             item_titles_rev = sorted(it.title for it in cr.source_items)
             self.assertEqual(item_titles_fwd, item_titles_rev)
 
+    def test_source_items_order_deterministic(self):
+        """source_items list order is the same regardless of input order."""
+        items_fwd = [
+            _hotlist_item(title="Zebra", current_rank=20, normalized_rank=10, count=1),
+            _hotlist_item(title="Apple", current_rank=5, normalized_rank=3, count=5),
+            _hotlist_item(title="Middle", current_rank=10, normalized_rank=5, count=3),
+        ]
+        items_rev = list(reversed(items_fwd))
+
+        cand_fwd = build_candidate_from_cluster(items_fwd, CRClusterConfig())
+        cand_rev = build_candidate_from_cluster(items_rev, CRClusterConfig())
+
+        titles_fwd = [it.title for it in cand_fwd.source_items]
+        titles_rev = [it.title for it in cand_rev.source_items]
+        self.assertEqual(titles_fwd, titles_rev)
+
+    def test_empty_title_url_clusters_not_colliding(self):
+        """Different clusters with all-empty titles/URLs get different candidate_ids."""
+        # Two items with empty titles, empty URLs, but different source metadata.
+        item_a = CRSourceItem(
+            source_type="hotlist", source_id="weibo", source_name="weibo",
+            title="", url=None, keyword_group="AI",
+        )
+        item_b = CRSourceItem(
+            source_type="rss", feed_id="hacker-news", source_name="HN",
+            title="", url=None, keyword_group="Tech",
+        )
+        # They won't merge (no title/URL/token overlap) → separate clusters.
+        records = [_primitive_record(source_items=[item_a, item_b])]
+        candidates = build_cr_candidates(records)
+        self.assertEqual(len(candidates), 2)
+        self.assertNotEqual(candidates[0].candidate_id, candidates[1].candidate_id)
+        self.assertNotEqual(candidates[0].cluster_key, candidates[1].cluster_key)
+        self.assertNotEqual(candidates[0].cluster_key, "empty")
+        self.assertNotEqual(candidates[1].cluster_key, "empty")
+
 
 # ---------------------------------------------------------------------------
 # H. Transitive merge (chain similarity)
