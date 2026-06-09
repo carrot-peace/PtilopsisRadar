@@ -69,7 +69,12 @@ class CRPresentedCandidate:
 
 @dataclass
 class CRPresentationRun:
-    """Run-level presentation container."""
+    """Run-level presentation container.
+
+    ``candidates`` contains already-selected candidates for this presentation
+    output (i.e. the result of :func:`select_cr_a_candidates` or equivalent).
+    The renderer renders exactly these candidates without further filtering.
+    """
 
     run_label: str
     candidates: list[CRPresentedCandidate]
@@ -257,27 +262,31 @@ def render_cr_a_text(
 ) -> str:
     """Render CR-A text output from a presentation run.
 
+    Renders exactly ``run.candidates`` — does NOT filter, select, sort,
+    re-score, or re-decide.  Selection must happen before constructing
+    the ``CRPresentationRun``.
+
     Deterministic, no emoji, English system terms.
     Does NOT fabricate summaries or show scores by default.
     """
     if config is None:
         config = _DEFAULT_CONFIG
 
-    selected = select_cr_a_candidates(run.candidates, config=config)
+    candidates = run.candidates
     lines: list[str] = []
 
     # Header.
     lines.append(config.title)
     lines.append(f"Run: {run.run_label}")
-    lines.append(f"Candidates: {len(selected)}")
+    lines.append(f"Candidates: {len(candidates)}")
     lines.append("")
 
-    if not selected:
+    if not candidates:
         lines.append("No alert candidates.")
         return "\n".join(lines)
 
     # Candidates.
-    for idx, pc in enumerate(selected, start=1):
+    for idx, pc in enumerate(candidates, start=1):
         lines.append(f"{idx}. {pc.display_title}")
         lines.append(f"Decision: {pc.decision_level}")
 
@@ -296,7 +305,7 @@ def render_cr_a_text(
             lines.append(f"Link: {pc.representative_url}")
 
         # Blank line between candidates (but not after last).
-        if idx < len(selected):
+        if idx < len(candidates):
             lines.append("")
 
     return "\n".join(lines)
@@ -315,15 +324,16 @@ def render_cr_a_text_from_parts(
     run_label: str,
     config: CRTextPresentationConfig | None = None,
 ) -> str:
-    """Convenience: bind → select → render in one call.
+    """Convenience: bind → select → run → render in one call.
 
     Validates binding consistency (may raise ValueError).
     """
     presented = bind_cr_presented_candidates(
         candidates, score_results, decisions
     )
+    selected = select_cr_a_candidates(presented, config=config)
     run = CRPresentationRun(
         run_label=run_label,
-        candidates=presented,
+        candidates=selected,
     )
     return render_cr_a_text(run, config=config)
