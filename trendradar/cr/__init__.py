@@ -7,6 +7,7 @@ PR9c: topic clustering / true CRCandidate.
 PR9d: scoring.
 PR9e: decision policy.
 PR9f: presentation layer.
+PR9g: Markdown audit renderer.
 """
 
 from trendradar.cr.models import (
@@ -57,6 +58,10 @@ from trendradar.cr.presentation import (
     render_cr_a_text,
     render_cr_a_text_from_parts,
 )
+from trendradar.cr.markdown import (
+    CRMarkdownRenderConfig,
+    render_cr_markdown_audit,
+)
 
 __all__ = [
     "CRSourceItem",
@@ -95,4 +100,6 @@ __all__ = [
     "select_cr_a_candidates",
     "render_cr_a_text",
     "render_cr_a_text_from_parts",
+    "CRMarkdownRenderConfig",
+    "render_cr_markdown_audit",
 ]
