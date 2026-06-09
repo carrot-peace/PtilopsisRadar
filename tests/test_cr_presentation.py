@@ -611,8 +611,9 @@ class TestEmptyCRAText(unittest.TestCase):
         self.assertIsInstance(text, str)
         self.assertTrue(len(text) > 0)
 
-    def test_no_eligible_candidates(self):
-        """When no candidates are push_eligible, shows empty."""
+    def test_renders_exactly_what_run_gives(self):
+        """render_cr_a_text renders exactly run.candidates, no filtering."""
+        # A watch-level candidate — renderer does NOT filter it out.
         pc = CRPresentedCandidate(
             candidate=_make_candidate("c1", "k1", "Topic"),
             score_result=_make_score("c1", "k1"),
@@ -628,8 +629,8 @@ class TestEmptyCRAText(unittest.TestCase):
         )
         run = CRPresentationRun(run_label="T", candidates=[pc])
         text = render_cr_a_text(run)
-        self.assertIn("Candidates: 0", text)
-        self.assertIn("No alert candidates.", text)
+        self.assertIn("Candidates: 1", text)
+        self.assertIn("1. Topic", text)
 
 
 # ===========================================================================
@@ -641,16 +642,17 @@ class TestRenderCRATextFromParts(unittest.TestCase):
     """F. Convenience helper tests."""
 
     def test_same_result_as_manual(self):
-        """render_cr_a_text_from_parts produces same result as manual."""
+        """render_cr_a_text_from_parts produces same as manual bind→select→run→render."""
         c = _make_candidate("c1", "k1", "Topic A", "https://a.com")
         s = _make_score("c1", "k1", 80.0, ["heat"])
         d = _make_decision(
             "c1", "k1", DECISION_URGENT, 80.0, True, ["heat"]
         )
 
-        # Manual path.
+        # Manual path: bind → select → run(selected) → render.
         presented = bind_cr_presented_candidates([c], [s], [d])
-        run = CRPresentationRun(run_label="Test Run", candidates=presented)
+        selected = select_cr_a_candidates(presented)
+        run = CRPresentationRun(run_label="Test Run", candidates=selected)
         manual_text = render_cr_a_text(run)
 
         # Convenience path.
@@ -680,6 +682,32 @@ class TestRenderCRATextFromParts(unittest.TestCase):
             [c], [s], [d], run_label="T", config=config
         )
         self.assertIn("Score: 85.0", text)
+
+    def test_watch_not_in_output(self):
+        """watch candidates do not appear in render_cr_a_text_from_parts output."""
+        c = _make_candidate("c1", "k1", "Watched Topic")
+        s = _make_score("c1", "k1", 40.0)
+        d = _make_decision(
+            "c1", "k1", DECISION_WATCH, 40.0, push_eligible=False
+        )
+        text = render_cr_a_text_from_parts(
+            [c], [s], [d], run_label="T"
+        )
+        self.assertIn("Candidates: 0", text)
+        self.assertNotIn("Watched Topic", text)
+
+    def test_suppress_not_in_output(self):
+        """suppress candidates do not appear in render_cr_a_text_from_parts output."""
+        c = _make_candidate("c1", "k1", "Suppressed Topic")
+        s = _make_score("c1", "k1", 90.0)
+        d = _make_decision(
+            "c1", "k1", DECISION_SUPPRESS, 90.0, push_eligible=False
+        )
+        text = render_cr_a_text_from_parts(
+            [c], [s], [d], run_label="T"
+        )
+        self.assertIn("Candidates: 0", text)
+        self.assertNotIn("Suppressed Topic", text)
 
 
 # ===========================================================================
