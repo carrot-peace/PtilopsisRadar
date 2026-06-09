@@ -6,6 +6,7 @@ PR9b: primitive models + input adapter.
 PR9c: topic clustering / true CRCandidate.
 PR9d: scoring.
 PR9e: decision policy.
+PR9f: presentation layer.
 """
 
 from trendradar.cr.models import (
@@ -46,6 +47,16 @@ from trendradar.cr.decision import (
     decide_cr_candidates,
     count_high_score_suppressed,
 )
+from trendradar.cr.presentation import (
+    CRPresentedCandidate,
+    CRPresentationRun,
+    CRTextPresentationConfig,
+    bind_cr_presented_candidates,
+    sort_cr_presented_candidates,
+    select_cr_a_candidates,
+    render_cr_a_text,
+    render_cr_a_text_from_parts,
+)
 
 __all__ = [
     "CRSourceItem",
@@ -76,4 +87,12 @@ __all__ = [
     "apply_cr_decision",
     "decide_cr_candidates",
     "count_high_score_suppressed",
+    "CRPresentedCandidate",
+    "CRPresentationRun",
+    "CRTextPresentationConfig",
+    "bind_cr_presented_candidates",
+    "sort_cr_presented_candidates",
+    "select_cr_a_candidates",
+    "render_cr_a_text",
+    "render_cr_a_text_from_parts",
 ]
