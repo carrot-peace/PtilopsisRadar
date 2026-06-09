@@ -37,6 +37,15 @@ from trendradar.cr.scoring import (
     combine_cr_scores,
     score_cr_candidate,
 )
+from trendradar.cr.decision import (
+    CRDecisionPolicy,
+    CRDecision,
+    CRDecisionLevel,
+    DEFAULT_CR_DECISION_POLICY,
+    apply_cr_decision,
+    decide_cr_candidates,
+    count_high_score_suppressed,
+)
 
 __all__ = [
     "CRSourceItem",
@@ -60,4 +69,11 @@ __all__ = [
     "score_cross_layer_raw",
     "combine_cr_scores",
     "score_cr_candidate",
+    "CRDecisionPolicy",
+    "CRDecision",
+    "CRDecisionLevel",
+    "DEFAULT_CR_DECISION_POLICY",
+    "apply_cr_decision",
+    "decide_cr_candidates",
+    "count_high_score_suppressed",
 ]
