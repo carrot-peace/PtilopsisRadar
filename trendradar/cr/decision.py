@@ -13,7 +13,7 @@ Design reference: PR9e.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 from trendradar.cr.scoring import CRScoreResult
 
@@ -55,7 +55,6 @@ class CRDecisionPolicy:
     urgent_bypasses_quiet: bool = True
 
     watch_push_eligible: bool = False
-    suppress_push_eligible: bool = False
 
 
 DEFAULT_CR_DECISION_POLICY = CRDecisionPolicy()
