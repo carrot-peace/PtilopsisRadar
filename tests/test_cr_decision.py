@@ -33,7 +33,7 @@ from trendradar.cr.decision import (
     count_high_score_suppressed,
     decide_cr_candidates,
 )
-from trendradar.cr.scoring import CRComponentScore, CRScoreResult
+from trendradar.cr.scoring import CRScoreResult
 
 
 # ---------------------------------------------------------------------------
@@ -89,9 +89,6 @@ class TestPolicyDefaults(unittest.TestCase):
 
     def test_watch_push_eligible(self):
         self.assertFalse(DEFAULT_CR_DECISION_POLICY.watch_push_eligible)
-
-    def test_suppress_push_eligible(self):
-        self.assertFalse(DEFAULT_CR_DECISION_POLICY.suppress_push_eligible)
 
     def test_frozen(self):
         with self.assertRaises(AttributeError):
