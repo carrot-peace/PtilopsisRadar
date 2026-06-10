@@ -793,6 +793,23 @@ class NewsAnalyzer:
                     rss_items=rss_items,
                 )
 
+        # CR runtime dry-run hook (PR9k) — inert by default.
+        # Only fires when PTILOPSIS_CR_DRY_RUN=1.  Writes CR Markdown / HTML
+        # audit artifacts from the current hotlist / RSS stats; sends nothing,
+        # persists no state, and does not alter normal runtime behavior.
+        if os.environ.get("PTILOPSIS_CR_DRY_RUN") == "1":
+            from trendradar.cr.models import CRRunContext
+            from trendradar.cr.runtime_dry_run import (
+                build_and_write_cr_runtime_dry_run,
+            )
+
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=stats,
+                rss_stats=rss_items,
+                run_label=f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}",
+                run_context=CRRunContext(mode=mode),
+            )
+
         return stats, html_file, ai_result, rss_items
 
     def _send_notification_if_needed(

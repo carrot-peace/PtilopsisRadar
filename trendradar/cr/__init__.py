@@ -88,6 +88,10 @@ from trendradar.cr.pipeline import (
     write_cr_pipeline_artifacts,
     build_and_write_cr_pipeline_from_primitives,
 )
+from trendradar.cr.runtime_dry_run import (
+    CRRuntimeDryRunResult,
+    build_and_write_cr_runtime_dry_run,
+)
 
 __all__ = [
     "CRSourceItem",
@@ -146,4 +150,6 @@ __all__ = [
     "build_cr_pipeline_from_primitives",
     "write_cr_pipeline_artifacts",
     "build_and_write_cr_pipeline_from_primitives",
+    "CRRuntimeDryRunResult",
+    "build_and_write_cr_runtime_dry_run",
 ]
