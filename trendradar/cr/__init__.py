@@ -79,6 +79,15 @@ from trendradar.cr.artifacts import (
     write_cr_html_artifact,
     render_and_write_cr_artifacts,
 )
+from trendradar.cr.pipeline import (
+    CRPipelineRenderConfig,
+    CRPipelineConfig,
+    CRPipelineResult,
+    CRPipelineArtifactResult,
+    build_cr_pipeline_from_primitives,
+    write_cr_pipeline_artifacts,
+    build_and_write_cr_pipeline_from_primitives,
+)
 
 __all__ = [
     "CRSourceItem",
@@ -130,4 +139,11 @@ __all__ = [
     "write_cr_markdown_audit_artifact",
     "write_cr_html_artifact",
     "render_and_write_cr_artifacts",
+    "CRPipelineRenderConfig",
+    "CRPipelineConfig",
+    "CRPipelineResult",
+    "CRPipelineArtifactResult",
+    "build_cr_pipeline_from_primitives",
+    "write_cr_pipeline_artifacts",
+    "build_and_write_cr_pipeline_from_primitives",
 ]
