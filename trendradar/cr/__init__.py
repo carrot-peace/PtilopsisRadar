@@ -108,6 +108,11 @@ from trendradar.cr.telegram_sink import (
     CRUrllibTelegramHTTPClient,
     CRTelegramSink,
 )
+from trendradar.cr.telegram_env import (
+    cr_telegram_send_enabled,
+    build_cr_telegram_sink_config_from_env,
+    build_cr_telegram_sink_from_env,
+)
 from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
     build_and_write_cr_runtime_dry_run,
@@ -184,6 +189,9 @@ __all__ = [
     "CRTelegramHTTPClient",
     "CRUrllibTelegramHTTPClient",
     "CRTelegramSink",
+    "cr_telegram_send_enabled",
+    "build_cr_telegram_sink_config_from_env",
+    "build_cr_telegram_sink_from_env",
     "CRRuntimeDryRunResult",
     "build_and_write_cr_runtime_dry_run",
 ]
