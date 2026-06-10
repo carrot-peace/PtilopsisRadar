@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trendradar.cr.artifacts import CRArtifactConfig, CRArtifactPaths
+from trendradar.cr.dispatch_plan import CRDispatchPlan
 from trendradar.cr.pipeline import CRPipelineResult
 from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
@@ -177,6 +178,19 @@ class TestRuntimeDryRunModel(unittest.TestCase):
                 artifact_config=_artifact_config(tmp),
             )
             self.assertIsInstance(result.artifact_paths, CRArtifactPaths)
+
+    def test_dispatch_plan_is_dispatch_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+            )
+            self.assertIsInstance(result.dispatch_plan, CRDispatchPlan)
+            # Dry-run is pure planning — plan refers to the same run.
+            self.assertEqual(
+                result.dispatch_plan.run_label, result.pipeline.run_label
+            )
 
 
 # ---------------------------------------------------------------------------
