@@ -97,6 +97,18 @@ def _escape_markdown_text(text: str) -> str:
     return text.replace("\n", " ").strip().replace("|", "\\|")
 
 
+def _format_field_value(value: object) -> str:
+    """Format a metadata field value for Markdown output.
+
+    String values are escaped via :func:`_escape_markdown_text` so that
+    metadata containing ``|`` or newlines cannot pollute the audit output.
+    Non-string values (ints, bools, ...) are rendered with ``str()``.
+    """
+    if isinstance(value, str):
+        return _escape_markdown_text(value)
+    return str(value)
+
+
 def _format_score(v: float) -> str:
     """Format a score value to one decimal place."""
     return f"{v:.1f}"
@@ -143,7 +155,7 @@ def _render_source_item(item: CRSourceItem, index: int) -> list[str]:
             continue
         if isinstance(value, str) and value == "":
             continue
-        lines.append(f"   - {label}: {value}")
+        lines.append(f"   - {label}: {_format_field_value(value)}")
 
     return lines
 
@@ -230,9 +242,9 @@ def render_cr_markdown_audit(
     lines: list[str] = []
 
     # --- Header ---
-    lines.append(f"# {config.title}")
+    lines.append(f"# {_escape_markdown_text(config.title)}")
     lines.append("")
-    lines.append(f"Run: {run_label}")
+    lines.append(f"Run: {_escape_markdown_text(run_label)}")
     lines.append(f"Candidates: {len(sorted_candidates)}")
     lines.append(f"High-score suppressed candidates: {high_score_suppressed}")
 
@@ -250,9 +262,9 @@ def render_cr_markdown_audit(
         for idx, pc in enumerate(section_candidates, start=1):
             lines.append(f"### {idx}. {_escape_markdown_text(pc.display_title)}")
             lines.append("")
-            lines.append(f"Candidate ID: {pc.candidate_id}")
-            lines.append(f"Cluster Key: {pc.cluster_key}")
-            lines.append(f"Decision: {pc.decision_level}")
+            lines.append(f"Candidate ID: {_escape_markdown_text(pc.candidate_id)}")
+            lines.append(f"Cluster Key: {_escape_markdown_text(pc.cluster_key)}")
+            lines.append(f"Decision: {_escape_markdown_text(pc.decision_level)}")
             lines.append(f"Total Score: {_format_score(pc.total_score)}")
 
             # Triggers.
