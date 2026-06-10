@@ -19,6 +19,7 @@ from trendradar.cr.decision import (
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
     _escape_markdown_text,
+    _format_field_value,
     render_cr_markdown_audit,
 )
 from trendradar.cr.models import CRCandidate, CRSourceItem
@@ -518,6 +519,93 @@ class TestMarkdownSafety(unittest.TestCase):
         self.assertEqual(_escape_markdown_text("a|b"), "a\\|b")
         self.assertEqual(_escape_markdown_text("a\nb"), "a b")
         self.assertEqual(_escape_markdown_text("  hello  "), "hello")
+
+
+# ===========================================================================
+# G2. Metadata / field-level escaping (PR9g cleanup)
+# ===========================================================================
+
+
+class TestFieldValueEscaping(unittest.TestCase):
+    """G2. Field-level escaping via _format_field_value and metadata output."""
+
+    def test_format_field_value_escapes_strings(self):
+        """_format_field_value escapes string values."""
+        self.assertEqual(_format_field_value("a|b"), "a\\|b")
+        self.assertEqual(_format_field_value("a\nb"), "a b")
+        self.assertEqual(_format_field_value("  x  "), "x")
+
+    def test_format_field_value_numeric_passthrough(self):
+        """_format_field_value renders numbers with str()."""
+        self.assertEqual(_format_field_value(3), "3")
+        self.assertEqual(_format_field_value(1), "1")
+
+    def test_format_field_value_bool_passthrough(self):
+        """_format_field_value renders bools with str()."""
+        self.assertEqual(_format_field_value(True), "True")
+        self.assertEqual(_format_field_value(False), "False")
+
+    def test_source_name_pipe_escaped(self):
+        """source_name containing '|' is escaped."""
+        si = _make_source_item(source_name="weibo|hot")
+        pc = _make_presented(source_items=[si])
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Source Name: weibo\\|hot", text)
+
+    def test_source_name_newline_collapsed(self):
+        """source_name containing a newline is collapsed to a space."""
+        si = _make_source_item(source_name="weibo\nhot")
+        pc = _make_presented(source_items=[si])
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Source Name: weibo hot", text)
+        self.assertNotIn("Source Name: weibo\nhot", text)
+
+    def test_source_id_feed_id_escaped(self):
+        """source_id / feed_id string values are escaped."""
+        si = _make_source_item(source_id="id|x", feed_id="feed|y")
+        pc = _make_presented(source_items=[si])
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Source ID: id\\|x", text)
+        self.assertIn("Feed ID: feed\\|y", text)
+
+    def test_numeric_metadata_renders_normally(self):
+        """Numeric metadata values render normally."""
+        si = _make_source_item(current_rank=3, normalized_rank=1)
+        pc = _make_presented(source_items=[si])
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Current Rank: 3", text)
+        self.assertIn("Normalized Rank: 1", text)
+
+    def test_boolean_metadata_renders_normally(self):
+        """Boolean metadata values render normally."""
+        si = _make_source_item(is_new=True)
+        pc = _make_presented(source_items=[si])
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Is New: True", text)
+
+    def test_cluster_key_pipe_escaped(self):
+        """cluster_key containing '|' is escaped."""
+        pc = _make_presented(cluster_key="key|a")
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Cluster Key: key\\|a", text)
+
+    def test_candidate_id_pipe_escaped(self):
+        """candidate_id containing '|' is escaped."""
+        pc = _make_presented(candidate_id="c|1")
+        text = render_cr_markdown_audit([pc], run_label="T")
+        self.assertIn("Candidate ID: c\\|1", text)
+
+    def test_run_label_newline_collapsed(self):
+        """run_label newline is collapsed to a space."""
+        text = render_cr_markdown_audit([], run_label="2026-06-09\n23:30")
+        self.assertIn("Run: 2026-06-09 23:30", text)
+        self.assertNotIn("Run: 2026-06-09\n23:30", text)
+
+    def test_config_title_pipe_escaped(self):
+        """config.title pipe is escaped."""
+        config = CRMarkdownRenderConfig(title="Radar | Audit")
+        text = render_cr_markdown_audit([], run_label="T", config=config)
+        self.assertIn("# Radar \\| Audit", text)
 
 
 # ===========================================================================
