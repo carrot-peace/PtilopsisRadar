@@ -88,6 +88,11 @@ from trendradar.cr.pipeline import (
     write_cr_pipeline_artifacts,
     build_and_write_cr_pipeline_from_primitives,
 )
+from trendradar.cr.dispatch_plan import (
+    CRDispatchMessage,
+    CRDispatchPlan,
+    build_cr_a_dispatch_plan,
+)
 from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
     build_and_write_cr_runtime_dry_run,
@@ -150,6 +155,9 @@ __all__ = [
     "build_cr_pipeline_from_primitives",
     "write_cr_pipeline_artifacts",
     "build_and_write_cr_pipeline_from_primitives",
+    "CRDispatchMessage",
+    "CRDispatchPlan",
+    "build_cr_a_dispatch_plan",
     "CRRuntimeDryRunResult",
     "build_and_write_cr_runtime_dry_run",
 ]
