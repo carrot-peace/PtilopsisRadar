@@ -1,0 +1,425 @@
+# coding=utf-8
+"""
+Canonical CR HTML audit renderer (PR9i).
+
+Renders all presented candidates into a single self-contained HTML document
+string.  Includes every decision level (urgent / alert / watch / suppress)
+without filtering.  Purely internal — does NOT use the existing dashboard /
+report generator, does NOT write files, does NOT call runtime, and does NOT
+send messages.  No external CSS/JS assets.
+
+Design reference: PR9i.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from html import escape
+
+from trendradar.cr.decision import (
+    DECISION_ALERT,
+    DECISION_SUPPRESS,
+    DECISION_URGENT,
+    DECISION_WATCH,
+)
+from trendradar.cr.presentation import (
+    CRPresentedCandidate,
+    sort_cr_presented_candidates,
+)
+from trendradar.cr.scoring import CRScoreResult
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CRHTMLRenderConfig:
+    """Configuration for CR HTML audit rendering."""
+
+    title: str = "Ptilopsis Radar｜CR HTML Audit"
+    include_debug: bool = True
+    include_source_items: bool = True
+    include_score_components: bool = True
+    collapse_suppress: bool = True
+    collapse_watch: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_SECTION_ORDER: list[str] = [
+    DECISION_URGENT,
+    DECISION_ALERT,
+    DECISION_WATCH,
+    DECISION_SUPPRESS,
+]
+
+_COMPONENT_ORDER: list[str] = [
+    "growth_raw",
+    "current_heat_raw",
+    "heat",
+    "cross_layer_raw",
+    "background_support_raw",
+    "cross_evidence",
+]
+
+_COMPONENT_DISPLAY: dict[str, str] = {
+    "growth_raw": "Growth Raw",
+    "current_heat_raw": "Current Heat Raw",
+    "heat": "Heat",
+    "cross_layer_raw": "Cross Layer Raw",
+    "background_support_raw": "Background Support Raw",
+    "cross_evidence": "Cross Evidence",
+}
+
+_SOURCE_ITEM_FIELDS: list[tuple[str, str]] = [
+    ("source_type", "Source Type"),
+    ("source_name", "Source Name"),
+    ("source_id", "Source ID"),
+    ("feed_id", "Feed ID"),
+    ("current_rank", "Current Rank"),
+    ("normalized_rank", "Normalized Rank"),
+    ("is_new", "Is New"),
+    ("is_new_semantics", "Is New Semantics"),
+    ("first_time", "First Time"),
+    ("last_time", "Last Time"),
+    ("published_at", "Published At"),
+]
+
+# Minimal inline stylesheet — no external assets, no JavaScript.
+_STYLE = (
+    "body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;"
+    "margin:0;padding:1.5rem;color:#1a1a1a;background:#fafafa;line-height:1.5}"
+    "main{max-width:880px;margin:0 auto}"
+    "h1{font-size:1.5rem}h2{font-size:1.2rem;text-transform:uppercase;"
+    "letter-spacing:0.04em}"
+    ".run-meta p{margin:0.1rem 0}"
+    ".decision-section{margin:1.25rem 0;padding:0.5rem 0;border-top:1px solid #ddd}"
+    ".candidate-card{border:1px solid #ddd;border-radius:6px;padding:0.75rem 1rem;"
+    "margin:0.75rem 0;background:#fff}"
+    ".candidate-card h3{margin:0 0 0.5rem 0;font-size:1.05rem}"
+    "dl{display:grid;grid-template-columns:max-content 1fr;gap:0.15rem 0.75rem;margin:0.5rem 0}"
+    "dt{font-weight:600;color:#555}dd{margin:0}"
+    "table.score-components{border-collapse:collapse;margin:0.5rem 0;width:100%}"
+    "table.score-components th,table.score-components td{border:1px solid #ddd;"
+    "padding:0.2rem 0.5rem;text-align:right}"
+    "table.score-components th:first-child,table.score-components td:first-child{text-align:left}"
+    ".source-items ol{margin:0.3rem 0;padding-left:1.4rem}"
+    ".debug pre{background:#f0f0f0;padding:0.5rem;overflow:auto;font-size:0.85rem}"
+    ".decision-urgent>h2{color:#b00020}.decision-alert>h2{color:#c25e00}"
+    ".decision-watch>h2{color:#1a6b1a}.decision-suppress>h2{color:#666}"
+)
+
+
+# ---------------------------------------------------------------------------
+# Escaping / formatting helpers
+# ---------------------------------------------------------------------------
+
+
+def _escape_html_text(value: object) -> str:
+    """Escape *value* for safe HTML text content (no quote escaping)."""
+    return escape(str(value), quote=False)
+
+
+def _escape_html_attr(value: object) -> str:
+    """Escape *value* for safe HTML attribute content (quotes escaped)."""
+    return escape(str(value), quote=True)
+
+
+def _format_score(v: float) -> str:
+    """Format a score value to one decimal place (stable, no float noise)."""
+    return f"{v:.1f}"
+
+
+# ---------------------------------------------------------------------------
+# Fragment renderers
+# ---------------------------------------------------------------------------
+
+
+def _render_score_components_table(sr: CRScoreResult) -> list[str]:
+    """Render the score components table for one candidate."""
+    lines: list[str] = []
+    lines.append('      <table class="score-components">')
+    lines.append("        <thead>")
+    lines.append(
+        "          <tr><th>Component</th><th>Raw</th><th>Capped</th><th>Cap</th></tr>"
+    )
+    lines.append("        </thead>")
+    lines.append("        <tbody>")
+    for name in _COMPONENT_ORDER:
+        cs = getattr(sr, name, None)
+        if cs is None:
+            continue
+        display = _COMPONENT_DISPLAY.get(name, name)
+        lines.append(
+            f"          <tr><td>{_escape_html_text(display)}</td>"
+            f"<td>{_format_score(cs.raw_score)}</td>"
+            f"<td>{_format_score(cs.capped_score)}</td>"
+            f"<td>{_format_score(cs.cap)}</td></tr>"
+        )
+    lines.append("        </tbody>")
+    lines.append("      </table>")
+    return lines
+
+
+def _render_source_item(item) -> list[str]:
+    """Render one source item as an ``<li>`` entry with a metadata ``<dl>``."""
+    lines: list[str] = []
+
+    title = item.title or "(untitled)"
+    if item.url:
+        href = _escape_html_attr(item.url)
+        lines.append(
+            f'        <li><a href="{href}">{_escape_html_text(title)}</a>'
+        )
+    else:
+        lines.append(f"        <li>{_escape_html_text(title)}")
+
+    meta_parts: list[str] = []
+    for attr, label in _SOURCE_ITEM_FIELDS:
+        value = getattr(item, attr, None)
+        if value is None:
+            continue
+        if isinstance(value, str) and value == "":
+            continue
+        meta_parts.append(
+            f"<dt>{_escape_html_text(label)}</dt>"
+            f"<dd>{_escape_html_text(value)}</dd>"
+        )
+    if meta_parts:
+        lines.append("          <dl>" + "".join(meta_parts) + "</dl>")
+    lines.append("        </li>")
+    return lines
+
+
+def _render_source_items(items) -> list[str]:
+    """Render the source-item section for one candidate."""
+    lines: list[str] = []
+    lines.append('      <section class="source-items">')
+    lines.append("        <h4>Source Items</h4>")
+    lines.append("        <ol>")
+    for item in items:
+        lines.extend(_render_source_item(item))
+    lines.append("        </ol>")
+    lines.append("      </section>")
+    return lines
+
+
+def _render_debug(pc: CRPresentedCandidate) -> list[str]:
+    """Render a minimal collapsible debug block (top-level primitives only)."""
+    debug_lines: list[str] = []
+
+    sr_debug = pc.score_result.debug
+    if sr_debug:
+        for k, v in sr_debug.items():
+            if isinstance(v, (str, int, float, bool)):
+                debug_lines.append(f"score.{k}: {v}")
+
+    dec_debug = pc.decision.debug
+    if dec_debug:
+        for k, v in dec_debug.items():
+            if isinstance(v, (str, int, float, bool)):
+                debug_lines.append(f"decision.{k}: {v}")
+
+    lines: list[str] = []
+    lines.append('      <details class="debug">')
+    lines.append("        <summary>Debug</summary>")
+    lines.append(f"        <pre>{_escape_html_text(chr(10).join(debug_lines))}</pre>")
+    lines.append("      </details>")
+    return lines
+
+
+def _render_candidate_card(
+    pc: CRPresentedCandidate, config: CRHTMLRenderConfig
+) -> list[str]:
+    """Render a single candidate card."""
+    lines: list[str] = []
+    level = pc.decision_level
+
+    lines.append(
+        f'    <article class="candidate-card decision-{_escape_html_attr(level)}" '
+        f'id="candidate-{_escape_html_attr(pc.candidate_id)}">'
+    )
+    lines.append(f"      <h3>{_escape_html_text(pc.display_title)}</h3>")
+    lines.append("      <dl>")
+    lines.append(
+        f"        <dt>Candidate ID</dt><dd>{_escape_html_text(pc.candidate_id)}</dd>"
+    )
+    lines.append(
+        f"        <dt>Cluster Key</dt><dd>{_escape_html_text(pc.cluster_key)}</dd>"
+    )
+    lines.append(f"        <dt>Decision</dt><dd>{_escape_html_text(level)}</dd>")
+    lines.append(
+        f"        <dt>Total Score</dt><dd>{_format_score(pc.total_score)}</dd>"
+    )
+
+    # Triggers.
+    if pc.trigger_reasons:
+        triggers = "; ".join(_escape_html_text(r) for r in pc.trigger_reasons)
+    else:
+        triggers = "score threshold"
+    lines.append(f"        <dt>Triggers</dt><dd>{triggers}</dd>")
+
+    # Suppress labels — only when present.
+    if pc.suppress_labels:
+        labels = "; ".join(_escape_html_text(l) for l in pc.suppress_labels)
+        lines.append(f"        <dt>Suppress Labels</dt><dd>{labels}</dd>")
+
+    # Link — only when present.
+    if pc.representative_url:
+        href = _escape_html_attr(pc.representative_url)
+        text = _escape_html_text(pc.representative_url)
+        lines.append(f'        <dt>Link</dt><dd><a href="{href}">{text}</a></dd>')
+
+    lines.append("      </dl>")
+
+    if config.include_score_components:
+        lines.extend(_render_score_components_table(pc.score_result))
+
+    if config.include_source_items and pc.candidate.source_items:
+        lines.extend(_render_source_items(pc.candidate.source_items))
+
+    if config.include_debug:
+        lines.extend(_render_debug(pc))
+
+    lines.append("    </article>")
+    return lines
+
+
+def _render_section_body(
+    candidates: list[CRPresentedCandidate], config: CRHTMLRenderConfig
+) -> list[str]:
+    """Render the body of a decision section (cards or empty notice)."""
+    if not candidates:
+        return ["      <p><em>No candidates.</em></p>"]
+    lines: list[str] = []
+    for pc in candidates:
+        lines.extend(_render_candidate_card(pc, config))
+    return lines
+
+
+def _render_section(
+    level: str,
+    candidates: list[CRPresentedCandidate],
+    config: CRHTMLRenderConfig,
+) -> list[str]:
+    """Render one decision section, optionally collapsing its contents."""
+    lines: list[str] = []
+    lines.append(
+        f'    <section class="decision-section decision-{_escape_html_attr(level)}">'
+    )
+    lines.append(f"      <h2>{_escape_html_text(level)}</h2>")
+
+    collapse = (level == DECISION_SUPPRESS and config.collapse_suppress) or (
+        level == DECISION_WATCH and config.collapse_watch
+    )
+
+    if collapse:
+        lines.append('      <details class="section-collapse">')
+        lines.append(
+            f"        <summary>{_escape_html_text(level)} "
+            f"({len(candidates)})</summary>"
+        )
+        lines.extend(_render_section_body(candidates, config))
+        lines.append("      </details>")
+    else:
+        lines.extend(_render_section_body(candidates, config))
+
+    lines.append("    </section>")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def render_cr_html_audit(
+    candidates: list[CRPresentedCandidate],
+    *,
+    run_label: str,
+    config: CRHTMLRenderConfig | None = None,
+    urgent_threshold: float = 80.0,
+) -> str:
+    """Render all presented candidates as a single HTML audit document.
+
+    Includes every decision level (urgent / alert / watch / suppress) without
+    filtering.  Does NOT re-score, re-decide, filter, or write files.
+
+    Parameters
+    ----------
+    candidates:
+        All presented candidates — not just CR-A selected ones.
+    run_label:
+        Human-readable run label (e.g. ``"2026-06-09 23:30"``).
+    config:
+        Rendering config.  Defaults to ``CRHTMLRenderConfig()``.
+    urgent_threshold:
+        Score threshold for counting high-score suppressed candidates.
+        Defaults to 80.0.
+
+    Returns
+    -------
+    str
+        Self-contained HTML document text (no external assets).
+    """
+    if config is None:
+        config = CRHTMLRenderConfig()
+
+    # Sort using existing PR9f sort (returns new list, does not mutate).
+    sorted_candidates = sort_cr_presented_candidates(candidates)
+
+    # High-score suppressed count.
+    high_score_suppressed = sum(
+        1
+        for pc in sorted_candidates
+        if pc.decision_level == DECISION_SUPPRESS
+        and pc.total_score >= urgent_threshold
+    )
+
+    # Group by level.
+    by_level: dict[str, list[CRPresentedCandidate]] = {
+        lv: [] for lv in _SECTION_ORDER
+    }
+    for pc in sorted_candidates:
+        if pc.decision_level in by_level:
+            by_level[pc.decision_level].append(pc)
+
+    title_text = _escape_html_text(config.title)
+
+    lines: list[str] = []
+    lines.append("<!doctype html>")
+    lines.append('<html lang="en">')
+    lines.append("<head>")
+    lines.append('  <meta charset="utf-8">')
+    lines.append('  <meta name="viewport" content="width=device-width, initial-scale=1">')
+    lines.append(f"  <title>{title_text}</title>")
+    lines.append(f"  <style>{_STYLE}</style>")
+    lines.append("</head>")
+    lines.append("<body>")
+    lines.append("  <main>")
+    lines.append(f"    <h1>{title_text}</h1>")
+    lines.append('    <section class="run-meta">')
+    lines.append(
+        f"      <p><strong>Run:</strong> {_escape_html_text(run_label)}</p>"
+    )
+    lines.append(
+        f"      <p><strong>Candidates:</strong> {len(sorted_candidates)}</p>"
+    )
+    lines.append(
+        "      <p><strong>High-score suppressed candidates:</strong> "
+        f"{high_score_suppressed}</p>"
+    )
+    lines.append("    </section>")
+
+    for level in _SECTION_ORDER:
+        lines.extend(_render_section(level, by_level[level], config))
+
+    lines.append("  </main>")
+    lines.append("</body>")
+    lines.append("</html>")
+
+    return "\n".join(lines)

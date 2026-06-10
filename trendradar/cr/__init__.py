@@ -8,6 +8,8 @@ PR9d: scoring.
 PR9e: decision policy.
 PR9f: presentation layer.
 PR9g: Markdown audit renderer.
+PR9h: artifact path resolver / writer.
+PR9i: canonical HTML audit renderer.
 """
 
 from trendradar.cr.models import (
@@ -62,6 +64,21 @@ from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
     render_cr_markdown_audit,
 )
+from trendradar.cr.html import (
+    CRHTMLRenderConfig,
+    render_cr_html_audit,
+)
+from trendradar.cr.artifacts import (
+    CRArtifactConfig,
+    CRArtifactPaths,
+    sanitize_artifact_label,
+    resolve_cr_artifact_paths,
+    write_text_artifact,
+    write_cr_artifact_bundle,
+    write_cr_markdown_audit_artifact,
+    write_cr_html_artifact,
+    render_and_write_cr_artifacts,
+)
 
 __all__ = [
     "CRSourceItem",
@@ -102,4 +119,15 @@ __all__ = [
     "render_cr_a_text_from_parts",
     "CRMarkdownRenderConfig",
     "render_cr_markdown_audit",
+    "CRHTMLRenderConfig",
+    "render_cr_html_audit",
+    "CRArtifactConfig",
+    "CRArtifactPaths",
+    "sanitize_artifact_label",
+    "resolve_cr_artifact_paths",
+    "write_text_artifact",
+    "write_cr_artifact_bundle",
+    "write_cr_markdown_audit_artifact",
+    "write_cr_html_artifact",
+    "render_and_write_cr_artifacts",
 ]
