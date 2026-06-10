@@ -101,6 +101,13 @@ from trendradar.cr.dispatch_executor import (
     CRNoopDispatchSink,
     execute_cr_dispatch_plan,
 )
+from trendradar.cr.telegram_sink import (
+    CRTelegramSinkConfig,
+    CRTelegramHTTPResponse,
+    CRTelegramHTTPClient,
+    CRUrllibTelegramHTTPClient,
+    CRTelegramSink,
+)
 from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
     build_and_write_cr_runtime_dry_run,
@@ -172,6 +179,11 @@ __all__ = [
     "CRMemoryDispatchSink",
     "CRNoopDispatchSink",
     "execute_cr_dispatch_plan",
+    "CRTelegramSinkConfig",
+    "CRTelegramHTTPResponse",
+    "CRTelegramHTTPClient",
+    "CRUrllibTelegramHTTPClient",
+    "CRTelegramSink",
     "CRRuntimeDryRunResult",
     "build_and_write_cr_runtime_dry_run",
 ]
