@@ -27,6 +27,50 @@ from trendradar.cr.presentation import CRPresentedCandidate
 
 
 # ---------------------------------------------------------------------------
+# Config validation helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_relative_dirname(value: str, field_name: str) -> None:
+    """Validate a config dirname: relative, multi-segment allowed.
+
+    Rejects absolute paths, backslashes, and any segment that is empty,
+    ``"."``, or ``".."`` so configured dirnames cannot escape ``root_dir``.
+    """
+    if "\\" in value:
+        raise ValueError(
+            f"{field_name} must not contain backslashes: {value!r}"
+        )
+    p = Path(value)
+    if p.is_absolute():
+        raise ValueError(f"{field_name} must be a relative path: {value!r}")
+    if not p.parts:
+        raise ValueError(f"{field_name} must not be empty: {value!r}")
+    for part in p.parts:
+        if part in ("", ".", ".."):
+            raise ValueError(
+                f"{field_name} contains invalid segment {part!r}: {value!r}"
+            )
+
+
+def _validate_filename(value: str, field_name: str) -> None:
+    """Validate a config filename: a single, relative path component.
+
+    Rejects absolute paths, ``/`` and ``\\`` separators, and ``""`` /
+    ``"."`` / ``".."`` so configured filenames cannot escape their directory.
+    """
+    if value in ("", ".", ".."):
+        raise ValueError(f"{field_name} must be a valid filename: {value!r}")
+    if "/" in value or "\\" in value:
+        raise ValueError(
+            f"{field_name} must be a single filename without separators: "
+            f"{value!r}"
+        )
+    if Path(value).is_absolute():
+        raise ValueError(f"{field_name} must not be absolute: {value!r}")
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -37,6 +81,11 @@ class CRArtifactConfig:
 
     ``root_dir`` is dedicated to CR artifacts only; it must not reuse existing
     report paths.  No config.yaml wiring.
+
+    Dirnames must be relative (multi-segment like ``archive/markdown`` is
+    fine) with no ``""`` / ``"."`` / ``".."`` segments; filenames must be a
+    single path component.  Invalid values raise :class:`ValueError` at
+    construction time.
     """
 
     root_dir: Path | str = Path("output/cr")
@@ -46,6 +95,17 @@ class CRArtifactConfig:
     markdown_filename: str = "cr_markdown.md"
     html_filename: str = "cr.html"
     encoding: str = "utf-8"
+
+    def __post_init__(self) -> None:
+        _validate_relative_dirname(
+            self.markdown_archive_dirname, "markdown_archive_dirname"
+        )
+        _validate_relative_dirname(
+            self.html_archive_dirname, "html_archive_dirname"
+        )
+        _validate_relative_dirname(self.latest_dirname, "latest_dirname")
+        _validate_filename(self.markdown_filename, "markdown_filename")
+        _validate_filename(self.html_filename, "html_filename")
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +201,9 @@ def resolve_cr_artifact_paths(
             cr_markdown.md
             cr.html
 
-    Returns paths only — does NOT create directories.  All returned paths stay
-    under ``config.root_dir`` because the sanitized label can never contain a
-    path separator.
+    Returns paths only — does NOT create directories.  All returned paths are
+    verified to stay under ``config.root_dir``; a path that would escape the
+    root raises :class:`ValueError`.
     """
     if config is None:
         config = CRArtifactConfig()
@@ -155,12 +215,27 @@ def resolve_cr_artifact_paths(
     html_archive_dir = root / config.html_archive_dirname
     latest_dir = root / config.latest_dirname
 
-    return CRArtifactPaths(
+    paths = CRArtifactPaths(
         markdown_archive_path=markdown_archive_dir / f"{safe}.md",
         html_archive_path=html_archive_dir / f"{safe}.html",
         latest_markdown_path=latest_dir / config.markdown_filename,
         latest_html_path=latest_dir / config.html_filename,
     )
+
+    # Root containment check — resolved comparison, not string prefixes.
+    root_resolved = root.resolve()
+    for p in (
+        paths.markdown_archive_path,
+        paths.html_archive_path,
+        paths.latest_markdown_path,
+        paths.latest_html_path,
+    ):
+        if not p.resolve().is_relative_to(root_resolved):
+            raise ValueError(
+                f"Artifact path escapes root_dir {root_resolved}: {p}"
+            )
+
+    return paths
 
 
 # ---------------------------------------------------------------------------

@@ -552,6 +552,75 @@ class TestHTMLSafety(unittest.TestCase):
 
 
 # ===========================================================================
+# H2. Href Scheme Safety
+# ===========================================================================
+
+
+class TestHrefSchemeSafety(unittest.TestCase):
+    """H2. Only http/https URLs become anchors; other schemes stay text."""
+
+    def test_javascript_representative_url_no_href(self):
+        """representative_url='javascript:...' does not produce an href."""
+        pc = _make_presented(representative_url="javascript:alert(1)")
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertNotIn('href="javascript:alert(1)"', html)
+        self.assertNotIn("href=\"javascript:", html)
+        # Text itself is preserved (escaped) for audit tracking.
+        self.assertIn("javascript:alert(1)", html)
+
+    def test_data_source_item_url_no_href(self):
+        """Source item url='data:...' does not produce an href."""
+        si = _make_source_item(url="data:text/html,<script>x</script>")
+        pc = _make_presented(source_items=[si])
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertNotIn('href="data:', html)
+        self.assertNotIn("<script>", html)
+        # Title is still rendered.
+        self.assertIn("Source A", html)
+
+    def test_https_representative_url_still_anchor(self):
+        """https URL still produces an anchor."""
+        pc = _make_presented(representative_url="https://example.com/x")
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertIn('<a href="https://example.com/x">', html)
+
+    def test_http_representative_url_still_anchor(self):
+        """http URL still produces an anchor."""
+        pc = _make_presented(representative_url="http://example.com/x")
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertIn('<a href="http://example.com/x">', html)
+
+    def test_https_source_item_url_still_anchor(self):
+        """https source item URL still produces an anchor."""
+        si = _make_source_item(url="https://source.example.com/a")
+        pc = _make_presented(source_items=[si])
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertIn('<a href="https://source.example.com/a">', html)
+
+    def test_https_url_with_quotes_and_amp_attribute_escaped(self):
+        """https URL containing quotes and & is still attribute-escaped."""
+        pc = _make_presented(representative_url='https://e.com/?a="x"&b=1')
+        html = render_cr_html_audit([pc], run_label="T")
+        # Still an anchor (safe scheme) ...
+        self.assertIn('<a href="https://e.com/?a=&quot;x&quot;&amp;b=1">', html)
+        # ... and never the raw unescaped attribute.
+        self.assertNotIn('href="https://e.com/?a="x"&b=1"', html)
+
+    def test_scheme_case_and_whitespace_normalized(self):
+        """Scheme check is case-insensitive and ignores surrounding spaces."""
+        pc = _make_presented(representative_url="  HTTPS://example.com/x  ")
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertIn("<a href=", html)
+
+    def test_javascript_scheme_uppercase_blocked(self):
+        """Uppercase JavaScript: scheme is also blocked."""
+        pc = _make_presented(representative_url="JavaScript:alert(1)")
+        html = render_cr_html_audit([pc], run_label="T")
+        self.assertNotIn("href=\"JavaScript:", html)
+        self.assertNotIn("href=\"javascript:", html)
+
+
+# ===========================================================================
 # I. Suppress Audit
 # ===========================================================================
 

@@ -248,7 +248,7 @@ class TestPathResolution(unittest.TestCase):
                 paths.latest_html_path,
             ):
                 self.assertTrue(
-                    str(p.resolve()).startswith(str(root)),
+                    p.resolve().is_relative_to(root),
                     f"{p} not under {root}",
                 )
 
@@ -284,6 +284,95 @@ class TestPathResolution(unittest.TestCase):
         self.assertEqual(
             paths.latest_html_path, Path("some/root") / "latest" / "cr.html"
         )
+
+
+# ===========================================================================
+# C2. Config Path Safety
+# ===========================================================================
+
+
+class TestConfigPathSafety(unittest.TestCase):
+    """C2. Config dirnames/filenames cannot escape root_dir."""
+
+    def test_parent_traversal_dirname_rejected(self):
+        """latest_dirname='../../bad' raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(latest_dirname="../../bad")
+
+    def test_absolute_dirname_rejected(self):
+        """html_archive_dirname='/tmp/bad' raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(html_archive_dirname="/tmp/bad")
+
+    def test_markdown_archive_dirname_traversal_rejected(self):
+        """markdown_archive_dirname with '..' segment raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(markdown_archive_dirname="archive/../bad")
+
+    def test_dot_dirname_rejected(self):
+        """Dirname '.' raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(latest_dirname=".")
+
+    def test_empty_dirname_rejected(self):
+        """Empty dirname raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(latest_dirname="")
+
+    def test_backslash_dirname_rejected(self):
+        """Dirname containing backslash raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(latest_dirname="a\\b")
+
+    def test_filename_with_traversal_rejected(self):
+        """markdown_filename='../x.md' raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(markdown_filename="../x.md")
+
+    def test_filename_with_nested_path_rejected(self):
+        """html_filename='nested/x.html' raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(html_filename="nested/x.html")
+
+    def test_absolute_filename_rejected(self):
+        """Absolute filename raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(html_filename="/tmp/x.html")
+
+    def test_filename_with_backslash_rejected(self):
+        """Filename containing backslash raises ValueError."""
+        with self.assertRaises(ValueError):
+            CRArtifactConfig(markdown_filename="a\\b.md")
+
+    def test_empty_and_dot_filenames_rejected(self):
+        """Filenames '', '.', '..' raise ValueError."""
+        for bad in ("", ".", ".."):
+            with self.assertRaises(ValueError):
+                CRArtifactConfig(markdown_filename=bad)
+
+    def test_nested_relative_dirname_allowed(self):
+        """Nested relative dirname like 'archive/markdown' is allowed."""
+        cfg = CRArtifactConfig(
+            markdown_archive_dirname="archive/markdown",
+            html_archive_dirname="archive/html",
+        )
+        self.assertEqual(cfg.markdown_archive_dirname, "archive/markdown")
+
+    def test_resolved_paths_under_root_is_relative_to(self):
+        """Resolved paths verified under root via is_relative_to."""
+        with tempfile.TemporaryDirectory() as d:
+            cfg = CRArtifactConfig(root_dir=d)
+            paths = resolve_cr_artifact_paths(run_label="R1", config=cfg)
+            root = Path(d).resolve()
+            for p in (
+                paths.markdown_archive_path,
+                paths.html_archive_path,
+                paths.latest_markdown_path,
+                paths.latest_html_path,
+            ):
+                self.assertTrue(p.resolve().is_relative_to(root))
+                # relative_to does not raise either.
+                p.resolve().relative_to(root)
 
 
 # ===========================================================================

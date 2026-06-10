@@ -129,6 +129,17 @@ def _escape_html_attr(value: object) -> str:
     return escape(str(value), quote=True)
 
 
+def _is_safe_href(url: str) -> bool:
+    """Return True when *url* is safe to use as an anchor href.
+
+    Only ``http://`` and ``https://`` schemes are allowed.  Anything else
+    (``javascript:``, ``data:``, scheme-relative, ...) must NOT be rendered
+    as a link — render the text alone instead so the audit trail is kept.
+    """
+    normalized = url.strip().lower()
+    return normalized.startswith("http://") or normalized.startswith("https://")
+
+
 def _format_score(v: float) -> str:
     """Format a score value to one decimal place (stable, no float noise)."""
     return f"{v:.1f}"
@@ -170,10 +181,16 @@ def _render_source_item(item) -> list[str]:
     lines: list[str] = []
 
     title = item.title or "(untitled)"
-    if item.url:
+    if item.url and _is_safe_href(item.url):
         href = _escape_html_attr(item.url)
         lines.append(
             f'        <li><a href="{href}">{_escape_html_text(title)}</a>'
+        )
+    elif item.url:
+        # Unsafe scheme — keep title and URL as plain escaped text for audit.
+        lines.append(
+            f"        <li>{_escape_html_text(title)} "
+            f"({_escape_html_text(item.url)})"
         )
     else:
         lines.append(f"        <li>{_escape_html_text(title)}")
@@ -268,11 +285,18 @@ def _render_candidate_card(
         labels = "; ".join(_escape_html_text(l) for l in pc.suppress_labels)
         lines.append(f"        <dt>Suppress Labels</dt><dd>{labels}</dd>")
 
-    # Link — only when present.
+    # Link — only when present.  Unsafe schemes (javascript:, data:, ...)
+    # are rendered as plain escaped text without an anchor so the audit
+    # trail is preserved.
     if pc.representative_url:
-        href = _escape_html_attr(pc.representative_url)
         text = _escape_html_text(pc.representative_url)
-        lines.append(f'        <dt>Link</dt><dd><a href="{href}">{text}</a></dd>')
+        if _is_safe_href(pc.representative_url):
+            href = _escape_html_attr(pc.representative_url)
+            lines.append(
+                f'        <dt>Link</dt><dd><a href="{href}">{text}</a></dd>'
+            )
+        else:
+            lines.append(f"        <dt>Link</dt><dd>{text}</dd>")
 
     lines.append("      </dl>")
 
