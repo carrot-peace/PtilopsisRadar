@@ -25,6 +25,11 @@ from dataclasses import dataclass
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
 from trendradar.cr.artifacts import CRArtifactConfig, CRArtifactPaths
+from trendradar.cr.dispatch_executor import (
+    CRDispatchExecutionResult,
+    CRDispatchSink,
+    execute_cr_dispatch_plan,
+)
 from trendradar.cr.dispatch_plan import CRDispatchPlan, build_cr_a_dispatch_plan
 from trendradar.cr.models import CRPrimitiveRecord, CRRunContext
 from trendradar.cr.pipeline import (
@@ -47,12 +52,18 @@ class CRRuntimeDryRunResult:
     Bundles the combined primitives, the full pipeline result, the resolved
     artifact paths that were written, and the CR-A dispatch plan (pure
     planning — nothing is sent).
+
+    ``dispatch_execution`` is populated only when a local ``dispatch_sink`` is
+    supplied to :func:`build_and_write_cr_runtime_dry_run`; it remains ``None``
+    otherwise.  Execution targets the injected local sink only — no real
+    delivery.
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
     pipeline: CRPipelineResult
     artifact_paths: CRArtifactPaths
     dispatch_plan: CRDispatchPlan
+    dispatch_execution: CRDispatchExecutionResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +80,7 @@ def build_and_write_cr_runtime_dry_run(
     pipeline_config: CRPipelineConfig | None = None,
     artifact_config: CRArtifactConfig | None = None,
     urgent_threshold: float = 80.0,
+    dispatch_sink: CRDispatchSink | None = None,
 ) -> CRRuntimeDryRunResult:
     """Convert real runtime stats and write CR audit artifacts (dry-run).
 
@@ -80,7 +92,9 @@ def build_and_write_cr_runtime_dry_run(
       5. Write artifacts via :func:`write_cr_pipeline_artifacts`.
       6. Plan CR-A dispatch via :func:`build_cr_a_dispatch_plan` (pure — sends
          nothing).
-      7. Return a :class:`CRRuntimeDryRunResult`.
+      7. Optionally execute the plan against a local ``dispatch_sink`` when one
+         is supplied (injected local sink only — no real delivery).
+      8. Return a :class:`CRRuntimeDryRunResult`.
 
     Parameters
     ----------
@@ -101,6 +115,11 @@ def build_and_write_cr_runtime_dry_run(
         Optional artifact config; CR artifact defaults are used when ``None``.
     urgent_threshold:
         Score threshold passed through to the pipeline.
+    dispatch_sink:
+        Optional injected local sink.  When provided, the dispatch plan is
+        executed against it and the result is stored in ``dispatch_execution``.
+        When ``None`` (default), dispatch is not executed and
+        ``dispatch_execution`` is ``None``.  No real delivery either way.
 
     Returns
     -------
@@ -148,10 +167,18 @@ def build_and_write_cr_runtime_dry_run(
     # 6. Plan CR-A dispatch (pure — nothing is sent).
     dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
 
-    # 7. Return.
+    # 7. Optionally execute against an injected local sink (no real delivery).
+    dispatch_execution = None
+    if dispatch_sink is not None:
+        dispatch_execution = execute_cr_dispatch_plan(
+            dispatch_plan, sink=dispatch_sink
+        )
+
+    # 8. Return.
     return CRRuntimeDryRunResult(
         primitives=primitives_tuple,
         pipeline=pipeline_result,
         artifact_paths=artifact_paths,
         dispatch_plan=dispatch_plan,
+        dispatch_execution=dispatch_execution,
     )

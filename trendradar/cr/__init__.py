@@ -93,6 +93,14 @@ from trendradar.cr.dispatch_plan import (
     CRDispatchPlan,
     build_cr_a_dispatch_plan,
 )
+from trendradar.cr.dispatch_executor import (
+    CRDispatchReceipt,
+    CRDispatchExecutionResult,
+    CRDispatchSink,
+    CRMemoryDispatchSink,
+    CRNoopDispatchSink,
+    execute_cr_dispatch_plan,
+)
 from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
     build_and_write_cr_runtime_dry_run,
@@ -158,6 +166,12 @@ __all__ = [
     "CRDispatchMessage",
     "CRDispatchPlan",
     "build_cr_a_dispatch_plan",
+    "CRDispatchReceipt",
+    "CRDispatchExecutionResult",
+    "CRDispatchSink",
+    "CRMemoryDispatchSink",
+    "CRNoopDispatchSink",
+    "execute_cr_dispatch_plan",
     "CRRuntimeDryRunResult",
     "build_and_write_cr_runtime_dry_run",
 ]
