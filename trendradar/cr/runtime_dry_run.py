@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
 from trendradar.cr.artifacts import CRArtifactConfig, CRArtifactPaths
+from trendradar.cr.dispatch_plan import CRDispatchPlan, build_cr_a_dispatch_plan
 from trendradar.cr.models import CRPrimitiveRecord, CRRunContext
 from trendradar.cr.pipeline import (
     CRPipelineConfig,
@@ -43,13 +44,15 @@ from trendradar.cr.pipeline import (
 class CRRuntimeDryRunResult:
     """Result of a single CR runtime dry-run.
 
-    Bundles the combined primitives, the full pipeline result, and the
-    resolved artifact paths that were written.
+    Bundles the combined primitives, the full pipeline result, the resolved
+    artifact paths that were written, and the CR-A dispatch plan (pure
+    planning — nothing is sent).
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
     pipeline: CRPipelineResult
     artifact_paths: CRArtifactPaths
+    dispatch_plan: CRDispatchPlan
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +78,9 @@ def build_and_write_cr_runtime_dry_run(
       3. Combine deterministically (hotlist first, then RSS).
       4. Build the CR pipeline via :func:`build_cr_pipeline_from_primitives`.
       5. Write artifacts via :func:`write_cr_pipeline_artifacts`.
-      6. Return a :class:`CRRuntimeDryRunResult`.
+      6. Plan CR-A dispatch via :func:`build_cr_a_dispatch_plan` (pure — sends
+         nothing).
+      7. Return a :class:`CRRuntimeDryRunResult`.
 
     Parameters
     ----------
@@ -140,9 +145,13 @@ def build_and_write_cr_runtime_dry_run(
         pipeline_result, artifact_config=artifact_config
     )
 
-    # 6. Return.
+    # 6. Plan CR-A dispatch (pure — nothing is sent).
+    dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
+
+    # 7. Return.
     return CRRuntimeDryRunResult(
         primitives=primitives_tuple,
         pipeline=pipeline_result,
         artifact_paths=artifact_paths,
+        dispatch_plan=dispatch_plan,
     )
