@@ -14,6 +14,9 @@ identity evidence visible in the audit trail.
 See also the design input that motivated this work:
 [pr10_design_input_run2.md](pr10_design_input_run2.md).
 
+PR10b builds on this identity evidence with repeat preview classification:
+[cr_repeat_preview.md](cr_repeat_preview.md).
+
 ## 2. Run-2 motivation
 
 Deployment Run-2 (true 90-minute artifact-only monitoring) produced the
@@ -90,7 +93,9 @@ visible as evidence.
 Recommended next steps, building on this evidence:
 
 - **PR10b**: use event identity evidence to *preview* repeats/escalation in
-  artifacts (still observability; no suppression).
+  artifacts (implemented in
+  [cr_repeat_preview.md](cr_repeat_preview.md); still observability, no
+  suppression).
 - **PR10c**: persist `event_key` state across runs (state boundary).
 - **PR10d**: cooldown / escalation policy (the first actual enforcement layer),
   informed by the 30–60 minute cooldown range discussed in the Run-2 design

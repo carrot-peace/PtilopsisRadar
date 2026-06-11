@@ -114,20 +114,26 @@ starts hiding repeated events.
 ## 5. Recommended PR10 Sequence
 
 ```text
-PR10a: expose repeat/state evidence in artifacts or dry-run report
-PR10b: add dedupe/cooldown decision layer
+PR10a: expose event identity evidence in artifacts
+PR10b: expose repeat preview evidence in artifacts
 PR10c: add state persistence boundary
-PR10d: add transport/retry/error sanitization hardening
-PR10e: guarded production enablement
+PR10d: add cooldown policy / enforcement
+PR10e: add transport/retry/error sanitization hardening
+PR10f: guarded production enablement
 ```
 
-PR10a should improve observability first. PR10b/c should implement actual
-suppression and persistence later. Avoid making the alert system a black box
-too early.
+PR10a/PR10b should improve observability first. PR10c/PR10d should implement
+actual persistence and suppression later. Avoid making the alert system a
+black box too early.
 
 PR10a is implemented: see
 [cr_event_identity_evidence.md](cr_event_identity_evidence.md) for the event
 identity evidence now exposed in CR audit artifacts.
+
+PR10b is implemented as repeat preview evidence: see
+[cr_repeat_preview.md](cr_repeat_preview.md). It classifies same-level repeat,
+meaningful escalation, deescalation, new, and not-evaluated states without
+enforcing suppression or cooldown.
 
 ## 6. Non-Goals
 
