@@ -7,6 +7,12 @@ to guide PR10 planning.
 
 This document is design input, not implementation.
 
+Specifically:
+
+- This is not a feature spec.
+- This is not runtime behavior.
+- This is evidence for future PR10 work.
+
 It should help PR10 start from observed CR-A behavior instead of assumptions
 from short local bursts or static code review alone.
 
@@ -66,7 +72,8 @@ watch -> watch -> urgent -> alert -> watch -> watch
 
 The same event can move between watch, urgent, alert, and back to watch. PR10
 must not treat alert state as a one-time static label. Future logic should
-consider score and decision-level changes.
+consider score and decision-level changes. Repeat logic should distinguish
+"same event, same level" from "same event, meaningful escalation".
 
 ### cooldown evidence is real but still limited
 
@@ -136,8 +143,10 @@ too early.
 - How aggressive should title normalization be?
 - Should semantically similar title variants collapse into the same event?
 - How should score changes affect repeat notification?
+- Should urgent escalation bypass cooldown?
 - When should an already-seen event be allowed to notify again?
 - How many more observation windows are needed before production defaults?
+- Should source/platform expansion update evidence without changing identity?
 
 ## 8. Closing Statement
 
