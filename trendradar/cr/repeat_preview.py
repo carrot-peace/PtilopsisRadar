@@ -151,6 +151,15 @@ def preview_cr_repeat(
             current_score=current_score,
         )
 
+    if seen_state.event_key != event_key:
+        return CRRepeatPreview(
+            event_key=event_key,
+            status="new",
+            reason="seen state event key does not match current event key",
+            current_decision_level=current_level,
+            current_score=current_score,
+        )
+
     previous_level = normalize_cr_decision_level(seen_state.decision_level)
     comparison = compare_cr_decision_level(previous_level, current_level)
 
