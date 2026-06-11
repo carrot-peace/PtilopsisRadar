@@ -797,17 +797,24 @@ class NewsAnalyzer:
         # Only fires when PTILOPSIS_CR_DRY_RUN=1.  Writes CR Markdown / HTML
         # audit artifacts from the current hotlist / RSS stats; sends nothing,
         # persists no state, and does not alter normal runtime behavior.
+        # PR9p: the PR9o env factory may additionally supply a Telegram
+        # dispatch sink.  The factory returns None unless its own send env
+        # gate is enabled, so this hook still dispatches nothing by default.
         if os.environ.get("PTILOPSIS_CR_DRY_RUN") == "1":
             from trendradar.cr.models import CRRunContext
             from trendradar.cr.runtime_dry_run import (
                 build_and_write_cr_runtime_dry_run,
             )
+            from trendradar.cr.telegram_env import build_cr_telegram_sink_from_env
+
+            dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
 
             build_and_write_cr_runtime_dry_run(
                 hotlist_stats=stats,
                 rss_stats=rss_items,
                 run_label=f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}",
                 run_context=CRRunContext(mode=mode),
+                dispatch_sink=dispatch_sink,
             )
 
         return stats, html_file, ai_result, rss_items

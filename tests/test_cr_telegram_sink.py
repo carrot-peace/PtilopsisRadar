@@ -411,8 +411,14 @@ class TestSourceBoundary(unittest.TestCase):
         self.assertNotIn("telegram_sink", source)
 
     def test_main_does_not_import_telegram_sink(self):
+        # PR9p: __main__ may reference the env factory name (which contains
+        # the substring "telegram_sink"), but must never import the sink
+        # module directly — sink construction goes through the PR9o env
+        # factory only.
         source = self._read("trendradar", "__main__.py")
-        self.assertNotIn("telegram_sink", source)
+        self.assertNotIn("trendradar.cr.telegram_sink", source)
+        self.assertNotIn("from trendradar.cr import telegram_sink", source)
+        self.assertNotIn("CRTelegramSink(", source)
 
     def test_tests_use_only_fake_token(self):
         # This very test file must not contain a real-looking bot token.
