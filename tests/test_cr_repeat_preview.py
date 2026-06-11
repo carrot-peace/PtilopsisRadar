@@ -123,6 +123,27 @@ class TestSinglePreview(unittest.TestCase):
         )
         self.assertEqual(preview.status, "same_event_repeat")
 
+    def test_seen_state_event_key_mismatch_is_new(self):
+        state = CRSeenEventState(
+            event_key="different-event",
+            decision_level="urgent",
+            score=90.0,
+        )
+        preview = preview_cr_repeat(
+            event_key="e1",
+            current_decision_level="alert",
+            current_score=70.0,
+            seen_state=state,
+            prior_state_snapshot_provided=True,
+        )
+        self.assertEqual(preview.status, "new")
+        self.assertEqual(
+            preview.reason,
+            "seen state event key does not match current event key",
+        )
+        self.assertIsNone(preview.previous_decision_level)
+        self.assertIsNone(preview.previous_score)
+
     def test_seen_state_is_not_mutated(self):
         state = CRSeenEventState(
             event_key="e1",
@@ -162,6 +183,22 @@ class TestBatchPreview(unittest.TestCase):
             seen_states={},
         )
         self.assertEqual(previews[0].status, "new")
+
+    def test_mismatched_seen_state_value_is_new(self):
+        previews = preview_cr_repeats(
+            (("e1", "alert", 70.0),),
+            seen_states={
+                "e1": CRSeenEventState(
+                    event_key="different-event",
+                    decision_level="urgent",
+                )
+            },
+        )
+        self.assertEqual(previews[0].status, "new")
+        self.assertEqual(
+            previews[0].reason,
+            "seen state event key does not match current event key",
+        )
 
     def test_all_not_evaluated_when_snapshot_is_none(self):
         previews = preview_cr_repeats(
