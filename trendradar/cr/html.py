@@ -22,6 +22,7 @@ from trendradar.cr.decision import (
     DECISION_URGENT,
     DECISION_WATCH,
 )
+from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
 from trendradar.cr.presentation import (
     CRPresentedCandidate,
     sort_cr_presented_candidates,
@@ -42,6 +43,7 @@ class CRHTMLRenderConfig:
     include_debug: bool = True
     include_source_items: bool = True
     include_score_components: bool = True
+    include_event_identity: bool = True
     collapse_suppress: bool = True
     collapse_watch: bool = False
 
@@ -249,6 +251,45 @@ def _render_debug(pc: CRPresentedCandidate) -> list[str]:
     return lines
 
 
+def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
+    """Render audit-only event identity evidence for one candidate.
+
+    Observability only — no dedupe/cooldown enforcement, no dispatch effect.
+    Every value is HTML-escaped text content; no anchors/hrefs are added and
+    the raw verbose ``cluster_key`` is never emitted (only its fingerprint).
+    """
+    identity = build_cr_event_identity_from_candidate(pc.candidate)
+    rows: list[tuple[str, str | None]] = [
+        ("Event Key", identity.event_key),
+        ("Key Basis", identity.key_basis),
+        ("Normalized Title", identity.normalized_title),
+        ("Candidate ID (evidence)", identity.candidate_id),
+        ("Cluster Key Fingerprint (evidence)", identity.cluster_key_fingerprint),
+        ("Title Fingerprint", identity.title_fingerprint),
+        ("Platform Fingerprint", identity.platform_fingerprint),
+        ("Source Fingerprint", identity.source_fingerprint),
+    ]
+
+    lines: list[str] = []
+    lines.append('      <section class="event-identity">')
+    lines.append("        <h4>Event Identity</h4>")
+    lines.append(
+        '        <p><em>Identity evidence for future dedupe/cooldown '
+        "(PR10b/c); not enforced here.</em></p>"
+    )
+    lines.append("        <dl>")
+    for label, value in rows:
+        if value is None:
+            continue
+        lines.append(
+            f"          <dt>{_escape_html_text(label)}</dt>"
+            f"<dd>{_escape_html_text(value)}</dd>"
+        )
+    lines.append("        </dl>")
+    lines.append("      </section>")
+    return lines
+
+
 def _render_candidate_card(
     pc: CRPresentedCandidate, config: CRHTMLRenderConfig
 ) -> list[str]:
@@ -299,6 +340,9 @@ def _render_candidate_card(
             lines.append(f"        <dt>Link</dt><dd>{text}</dd>")
 
     lines.append("      </dl>")
+
+    if config.include_event_identity:
+        lines.extend(_render_event_identity(pc))
 
     if config.include_score_components:
         lines.extend(_render_score_components_table(pc.score_result))
