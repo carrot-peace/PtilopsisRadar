@@ -13,6 +13,7 @@ Design reference: PR9g.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 from trendradar.cr.decision import (
     DECISION_ALERT,
@@ -25,6 +26,11 @@ from trendradar.cr.models import CRSourceItem
 from trendradar.cr.presentation import (
     CRPresentedCandidate,
     sort_cr_presented_candidates,
+)
+from trendradar.cr.repeat_preview import (
+    CRRepeatPreview,
+    CRSeenEventState,
+    preview_cr_repeat,
 )
 from trendradar.cr.scoring import CRScoreResult
 
@@ -43,6 +49,8 @@ class CRMarkdownRenderConfig:
     include_source_items: bool = True
     include_score_components: bool = True
     include_event_identity: bool = True
+    include_repeat_preview: bool = False
+    seen_event_states: Mapping[str, CRSeenEventState] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +243,37 @@ def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
     return lines
 
 
+def _render_repeat_preview(preview: CRRepeatPreview) -> list[str]:
+    """Render audit-only repeat preview evidence for one candidate."""
+    lines: list[str] = []
+    lines.append("#### Repeat Preview")
+    lines.append("")
+    lines.append(f"- Status: `{_escape_markdown_text(preview.status)}`")
+    if preview.reason:
+        lines.append(f"- Reason: {_escape_markdown_text(preview.reason)}")
+    has_prior_detail = preview.previous_decision_level is not None
+    if preview.previous_decision_level is not None:
+        lines.append(
+            f"- Previous Level: "
+            f"`{_escape_markdown_text(preview.previous_decision_level)}`"
+        )
+    if has_prior_detail and preview.current_decision_level is not None:
+        lines.append(
+            f"- Current Level: "
+            f"`{_escape_markdown_text(preview.current_decision_level)}`"
+        )
+    if preview.previous_score is not None:
+        lines.append(f"- Previous Score: `{_format_score(preview.previous_score)}`")
+    if preview.previous_score is not None and preview.current_score is not None:
+        lines.append(f"- Current Score: `{_format_score(preview.current_score)}`")
+    if preview.previous_seen_at:
+        lines.append(
+            f"- Previous Seen At: "
+            f"`{_escape_markdown_text(preview.previous_seen_at)}`"
+        )
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -339,6 +378,26 @@ def render_cr_markdown_audit(
             if config.include_event_identity:
                 lines.append("")
                 lines.extend(_render_event_identity(pc))
+
+            # Repeat preview evidence (audit-only; no enforcement).
+            if config.include_repeat_preview:
+                identity = build_cr_event_identity_from_candidate(pc.candidate)
+                seen_state = (
+                    config.seen_event_states.get(identity.event_key)
+                    if config.seen_event_states is not None
+                    else None
+                )
+                preview = preview_cr_repeat(
+                    event_key=identity.event_key,
+                    current_decision_level=pc.decision_level,
+                    current_score=pc.total_score,
+                    seen_state=seen_state,
+                    prior_state_snapshot_provided=(
+                        config.seen_event_states is not None
+                    ),
+                )
+                lines.append("")
+                lines.extend(_render_repeat_preview(preview))
 
             # Score components.
             if config.include_score_components:
