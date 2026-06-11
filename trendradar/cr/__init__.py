@@ -60,6 +60,15 @@ from trendradar.cr.presentation import (
     render_cr_a_text,
     render_cr_a_text_from_parts,
 )
+from trendradar.cr.event_identity import (
+    CR_EVENT_IDENTITY_KEY_VERSION,
+    CREventIdentityInput,
+    CREventIdentity,
+    normalize_cr_event_title,
+    normalize_cr_event_url,
+    build_cr_event_identity_from_input,
+    build_cr_event_identity_from_candidate,
+)
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
     render_cr_markdown_audit,
@@ -147,6 +156,13 @@ __all__ = [
     "apply_cr_decision",
     "decide_cr_candidates",
     "count_high_score_suppressed",
+    "CR_EVENT_IDENTITY_KEY_VERSION",
+    "CREventIdentityInput",
+    "CREventIdentity",
+    "normalize_cr_event_title",
+    "normalize_cr_event_url",
+    "build_cr_event_identity_from_input",
+    "build_cr_event_identity_from_candidate",
     "CRPresentedCandidate",
     "CRPresentationRun",
     "CRTextPresentationConfig",
