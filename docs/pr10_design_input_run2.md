@@ -125,6 +125,10 @@ PR10a should improve observability first. PR10b/c should implement actual
 suppression and persistence later. Avoid making the alert system a black box
 too early.
 
+PR10a is implemented: see
+[cr_event_identity_evidence.md](cr_event_identity_evidence.md) for the event
+identity evidence now exposed in CR audit artifacts.
+
 ## 6. Non-Goals
 
 - no runtime behavior change

@@ -20,6 +20,7 @@ from trendradar.cr.decision import (
     DECISION_URGENT,
     DECISION_WATCH,
 )
+from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
 from trendradar.cr.models import CRSourceItem
 from trendradar.cr.presentation import (
     CRPresentedCandidate,
@@ -41,6 +42,7 @@ class CRMarkdownRenderConfig:
     include_debug: bool = True
     include_source_items: bool = True
     include_score_components: bool = True
+    include_event_identity: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +187,54 @@ def _render_debug(pc: CRPresentedCandidate) -> list[str]:
     return lines
 
 
+def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
+    """Render audit-only event identity evidence for one candidate.
+
+    Observability only: this evidence exists so future PR10b/c work can ask
+    "is this the same event as before, and did it merely repeat or escalate?"
+    It does NOT enforce dedupe or cooldown and does NOT affect dispatch.
+
+    The raw, verbose ``cluster_key`` is intentionally NOT emitted here — only
+    its short fingerprint — to keep the section readable.
+    """
+    identity = build_cr_event_identity_from_candidate(pc.candidate)
+    lines: list[str] = []
+    lines.append("#### Event Identity")
+    lines.append("")
+    lines.append(
+        "_Identity evidence for future dedupe/cooldown (PR10b/c); "
+        "not enforced here._"
+    )
+    lines.append("")
+    lines.append(f"- Event Key: `{_escape_markdown_text(identity.event_key)}`")
+    lines.append(f"- Key Basis: {_escape_markdown_text(identity.key_basis)}")
+    lines.append(
+        f"- Normalized Title: {_escape_markdown_text(identity.normalized_title)}"
+    )
+    if identity.candidate_id:
+        lines.append(
+            f"- Candidate ID (evidence): "
+            f"{_escape_markdown_text(identity.candidate_id)}"
+        )
+    if identity.cluster_key_fingerprint:
+        lines.append(
+            f"- Cluster Key Fingerprint (evidence): "
+            f"`{_escape_markdown_text(identity.cluster_key_fingerprint)}`"
+        )
+    lines.append(
+        f"- Title Fingerprint: `{_escape_markdown_text(identity.title_fingerprint)}`"
+    )
+    lines.append(
+        f"- Platform Fingerprint: "
+        f"`{_escape_markdown_text(identity.platform_fingerprint)}`"
+    )
+    lines.append(
+        f"- Source Fingerprint: "
+        f"`{_escape_markdown_text(identity.source_fingerprint)}`"
+    )
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -284,6 +334,11 @@ def render_cr_markdown_audit(
             # Link.
             if pc.representative_url:
                 lines.append(f"Link: {pc.representative_url}")
+
+            # Event identity evidence (audit-only; no enforcement).
+            if config.include_event_identity:
+                lines.append("")
+                lines.extend(_render_event_identity(pc))
 
             # Score components.
             if config.include_score_components:
