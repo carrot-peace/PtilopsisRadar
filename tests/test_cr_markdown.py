@@ -25,6 +25,14 @@ from trendradar.cr.markdown import (
 from trendradar.cr.models import CRCandidate, CRSourceItem
 from trendradar.cr.presentation import CRPresentedCandidate
 from trendradar.cr.scoring import CRComponentScore, CRScoreResult
+from trendradar.cr.state_snapshot import (
+    CR_EVENT_STATE_SCHEMA_VERSION,
+    CREventStateEntry,
+    CREventStateSnapshot,
+)
+from trendradar.cr.state_transition_preview import (
+    CREventStateTransitionPreview,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -673,8 +681,71 @@ class TestSuppressAudit(unittest.TestCase):
 # ===========================================================================
 
 
+class TestStateTransitionPreviewRendering(unittest.TestCase):
+    """I. Optional state transition preview rendering."""
+
+    def test_default_does_not_render_state_transition_preview(self):
+        text = render_cr_markdown_audit([], run_label="T")
+        self.assertNotIn("State Transition Preview", text)
+
+    def test_config_renders_state_transition_preview(self):
+        preview = CREventStateTransitionPreview(
+            prior_snapshot_available=True,
+            prior_snapshot_loaded=True,
+            prior_snapshot_error=None,
+            update_count=2,
+            next_snapshot=CREventStateSnapshot(
+                schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
+                entries=(
+                    CREventStateEntry(event_key="event-a"),
+                    CREventStateEntry(event_key="event-b"),
+                    CREventStateEntry(event_key="event-c"),
+                ),
+            ),
+            reason="prior snapshot merged with current state updates",
+        )
+        config = CRMarkdownRenderConfig(
+            include_state_transition_preview=True,
+            state_transition_preview=preview,
+        )
+
+        text = render_cr_markdown_audit([], run_label="T", config=config)
+
+        self.assertIn("#### State Transition Preview", text)
+        self.assertIn("- Prior Source: `loaded`", text)
+        self.assertIn("- Prior Loaded: `True`", text)
+        self.assertIn("- Update Count: `2`", text)
+        self.assertIn("- Next Snapshot Preview: `available`", text)
+        self.assertIn("- Next Snapshot Entry Count: `3`", text)
+
+    def test_config_renders_suppressed_state_transition_preview(self):
+        preview = CREventStateTransitionPreview(
+            prior_snapshot_available=False,
+            prior_snapshot_loaded=False,
+            prior_snapshot_error="invalid event state snapshot",
+            update_count=1,
+            next_snapshot=None,
+            reason="prior snapshot failed to load; next-state preview suppressed",
+        )
+        config = CRMarkdownRenderConfig(
+            include_state_transition_preview=True,
+            state_transition_preview=preview,
+        )
+
+        text = render_cr_markdown_audit([], run_label="T", config=config)
+
+        self.assertIn("- Prior Source: `error`", text)
+        self.assertIn("- Prior Error: `invalid event state snapshot`", text)
+        self.assertIn("- Next Snapshot Preview: `suppressed`", text)
+
+
+# ===========================================================================
+# J. No Forbidden Behavior
+# ===========================================================================
+
+
 class TestNoForbiddenBehavior(unittest.TestCase):
-    """I. Module does not import forbidden modules or do I/O."""
+    """J. Module does not import forbidden modules or do I/O."""
 
     def _read_source(self) -> str:
         import trendradar.cr.markdown as mod

@@ -38,6 +38,9 @@ from trendradar.cr.repeat_preview import (
     preview_cr_repeat,
 )
 from trendradar.cr.scoring import CRScoreResult
+from trendradar.cr.state_transition_preview import (
+    CREventStateTransitionPreview,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +61,8 @@ class CRMarkdownRenderConfig:
     seen_event_states: Mapping[str, CRSeenEventState] | None = None
     include_cooldown_decision: bool = False
     cooldown_policy: CRCooldownPolicy | None = None
+    include_state_transition_preview: bool = False
+    state_transition_preview: CREventStateTransitionPreview | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +307,54 @@ def _render_cooldown_decision(decision: CRCooldownDecision) -> list[str]:
     return lines
 
 
+def _format_prior_source_status(
+    preview: CREventStateTransitionPreview,
+) -> str:
+    if preview.prior_snapshot_error is not None:
+        return "error"
+    if preview.prior_snapshot_loaded is True:
+        return "loaded"
+    if preview.prior_snapshot_loaded is False:
+        return "missing"
+    if preview.prior_snapshot_available:
+        return "supplied"
+    return "not_supplied"
+
+
+def _render_state_transition_preview(
+    preview: CREventStateTransitionPreview,
+) -> list[str]:
+    """Render run-level state transition preview metadata.
+
+    Preview-only: shows counts and status, not raw snapshot JSON.
+    """
+    lines: list[str] = []
+    lines.append("#### State Transition Preview")
+    lines.append("")
+    lines.append(
+        f"- Prior Source: `{_escape_markdown_text(_format_prior_source_status(preview))}`"
+    )
+    if preview.prior_snapshot_loaded is not None:
+        lines.append(f"- Prior Loaded: `{preview.prior_snapshot_loaded}`")
+    if preview.prior_snapshot_error is not None:
+        lines.append(
+            f"- Prior Error: "
+            f"`{_escape_markdown_text(preview.prior_snapshot_error)}`"
+        )
+    lines.append(f"- Update Count: `{preview.update_count}`")
+    if preview.next_snapshot is not None:
+        lines.append(
+            f"- Next Snapshot Preview: `available`"
+        )
+        lines.append(
+            f"- Next Snapshot Entry Count: `{len(preview.next_snapshot.entries)}`"
+        )
+    else:
+        lines.append("- Next Snapshot Preview: `suppressed`")
+    lines.append(f"- Reason: {_escape_markdown_text(preview.reason)}")
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -364,6 +417,15 @@ def render_cr_markdown_audit(
     lines.append(f"Run: {_escape_markdown_text(run_label)}")
     lines.append(f"Candidates: {len(sorted_candidates)}")
     lines.append(f"High-score suppressed candidates: {high_score_suppressed}")
+
+    if (
+        config.include_state_transition_preview
+        and config.state_transition_preview is not None
+    ):
+        lines.append("")
+        lines.extend(
+            _render_state_transition_preview(config.state_transition_preview)
+        )
 
     # --- Sections ---
     for level in _SECTION_ORDER:
