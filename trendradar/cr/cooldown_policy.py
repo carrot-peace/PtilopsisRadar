@@ -156,6 +156,15 @@ def decide_cr_cooldown(
         previous_score=repeat_preview.previous_score,
     )
 
+    # Fail-closed: a repeat preview built for a different event must never
+    # produce an allow/cooldown verdict for this event. Decline instead.
+    if repeat_preview.event_key != event_key:
+        return CRCooldownDecision(
+            action=ACTION_NOT_EVALUATED,
+            reason="repeat preview event key does not match current event key",
+            **base,
+        )
+
     if status == "not_evaluated":
         return CRCooldownDecision(
             action=ACTION_NOT_EVALUATED,
