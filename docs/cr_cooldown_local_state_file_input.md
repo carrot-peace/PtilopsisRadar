@@ -20,8 +20,9 @@ The path is explicit by design:
 - no production enablement
 
 The dry-run calls `load_cr_event_state_snapshot(path)` through the existing
-explicit-path state-store boundary. It imports only the load side of that
-boundary. It does not import or call `save_cr_event_state_snapshot`.
+explicit-path state-store boundary. In PR10h this was read-only. PR10j adds a
+separate explicit next-state output path; it still does not make the prior path
+a write-back path.
 
 ## 3. Missing vs malformed semantics
 
@@ -70,12 +71,9 @@ read.
 
 ## 5. Handoff
 
-Future PRs may add:
-
-- explicit local-only write-back in dry-run
-- production integration behind hard gates
-
 PR10i adds artifact-only state transition preview, including load-result
 metadata and in-memory next-state preview; see
 [cr_state_transition_preview.md](cr_state_transition_preview.md).
-Write-back and production integration remain intentionally separate.
+PR10j adds explicit local-only next-state write-back for dry-runs; see
+[cr_cooldown_local_state_writeback.md](cr_cooldown_local_state_writeback.md).
+Production integration remains intentionally separate.

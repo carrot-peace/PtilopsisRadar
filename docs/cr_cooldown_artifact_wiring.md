@@ -71,5 +71,7 @@ artifact dry-runs; see
 PR10i adds artifact-only state transition preview for load status, proposed
 updates, and in-memory next snapshot metadata; see
 [cr_state_transition_preview.md](cr_state_transition_preview.md).
+PR10j adds explicit local-only next-state write-back for artifact dry-runs; see
+[cr_cooldown_local_state_writeback.md](cr_cooldown_local_state_writeback.md).
 Production enforcement (suppressing dispatch, writing state, reading a clock)
 still requires a separate, explicitly gated PR.
