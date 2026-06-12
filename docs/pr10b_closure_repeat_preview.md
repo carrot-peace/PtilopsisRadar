@@ -79,7 +79,9 @@ PR10c defines the event state snapshot boundary in
 cooldown policy decision layer in
 [cr_cooldown_policy.md](cr_cooldown_policy.md). PR10e assembles these into an
 audit-only context in
-[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md).
+[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md), and PR10f wires
+that context into dry-run artifacts in
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md).
 
 Recommended next PR:
 
