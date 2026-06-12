@@ -106,7 +106,9 @@ enforcement. PR10d's pure cooldown policy decision layer is documented in
 [cr_cooldown_policy.md](cr_cooldown_policy.md); it previews decisions only and
 does not yet read or write this state. PR10e assembles these primitives into an
 audit-only context and proposes (but never writes) next-state entries; see
-[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md).
+[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md). PR10f surfaces
+that context in dry-run artifacts (opt-in, no state read/write); see
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md).
 
 Open questions for PR10d:
 

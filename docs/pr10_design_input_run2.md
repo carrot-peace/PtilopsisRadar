@@ -170,4 +170,6 @@ next step should preserve this evidence trail before implementing enforcement.
 PR10d adds a pure cooldown policy decision layer (preview only, no
 enforcement); see [cr_cooldown_policy.md](cr_cooldown_policy.md). PR10e
 assembles these primitives into an audit-only context; see
-[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md).
+[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md). PR10f wires that
+context into dry-run artifacts (opt-in, artifact-only); see
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md).
