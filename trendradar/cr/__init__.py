@@ -10,6 +10,7 @@ PR9f: presentation layer.
 PR9g: Markdown audit renderer.
 PR9h: artifact path resolver / writer.
 PR9i: canonical HTML audit renderer.
+PR10c: CR-A event state snapshot boundary.
 """
 
 from trendradar.cr.models import (
@@ -78,6 +79,24 @@ from trendradar.cr.repeat_preview import (
     compare_cr_decision_level,
     preview_cr_repeat,
     preview_cr_repeats,
+)
+from trendradar.cr.state_snapshot import (
+    CR_EVENT_STATE_SCHEMA_VERSION,
+    CREventStateEntry,
+    CREventStateSnapshot,
+    empty_cr_event_state_snapshot,
+    cr_event_state_snapshot_to_seen_states,
+    cr_event_state_snapshot_to_json_dict,
+    cr_event_state_snapshot_from_json_dict,
+    merge_cr_event_state_entries,
+    build_cr_event_state_entry_from_presented_candidate,
+    build_cr_event_state_entries_from_presented_candidates,
+)
+from trendradar.cr.state_store import (
+    CREventStateLoadResult,
+    CREventStateSaveResult,
+    load_cr_event_state_snapshot,
+    save_cr_event_state_snapshot,
 )
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -181,6 +200,20 @@ __all__ = [
     "compare_cr_decision_level",
     "preview_cr_repeat",
     "preview_cr_repeats",
+    "CR_EVENT_STATE_SCHEMA_VERSION",
+    "CREventStateEntry",
+    "CREventStateSnapshot",
+    "empty_cr_event_state_snapshot",
+    "cr_event_state_snapshot_to_seen_states",
+    "cr_event_state_snapshot_to_json_dict",
+    "cr_event_state_snapshot_from_json_dict",
+    "merge_cr_event_state_entries",
+    "build_cr_event_state_entry_from_presented_candidate",
+    "build_cr_event_state_entries_from_presented_candidates",
+    "CREventStateLoadResult",
+    "CREventStateSaveResult",
+    "load_cr_event_state_snapshot",
+    "save_cr_event_state_snapshot",
     "CRPresentedCandidate",
     "CRPresentationRun",
     "CRTextPresentationConfig",
