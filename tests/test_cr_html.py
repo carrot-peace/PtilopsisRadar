@@ -23,6 +23,14 @@ from trendradar.cr.html import (
 from trendradar.cr.models import CRCandidate, CRSourceItem
 from trendradar.cr.presentation import CRPresentedCandidate
 from trendradar.cr.scoring import CRScoreResult
+from trendradar.cr.state_snapshot import (
+    CR_EVENT_STATE_SCHEMA_VERSION,
+    CREventStateEntry,
+    CREventStateSnapshot,
+)
+from trendradar.cr.state_transition_preview import (
+    CREventStateTransitionPreview,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -666,12 +674,77 @@ class TestSuppressAudit(unittest.TestCase):
 
 
 # ===========================================================================
-# J. No Forbidden Behavior
+# J. State Transition Preview
+# ===========================================================================
+
+
+class TestStateTransitionPreviewRendering(unittest.TestCase):
+    """J. Optional state transition preview rendering."""
+
+    def test_default_does_not_render_state_transition_preview(self):
+        html = render_cr_html_audit([], run_label="T")
+        self.assertNotIn("State Transition Preview", html)
+        self.assertNotIn("state-transition-preview", html)
+
+    def test_config_renders_state_transition_preview(self):
+        preview = CREventStateTransitionPreview(
+            prior_snapshot_available=True,
+            prior_snapshot_loaded=True,
+            prior_snapshot_error=None,
+            update_count=2,
+            next_snapshot=CREventStateSnapshot(
+                schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
+                entries=(
+                    CREventStateEntry(event_key="event-a"),
+                    CREventStateEntry(event_key="event-b"),
+                    CREventStateEntry(event_key="event-c"),
+                ),
+            ),
+            reason="prior snapshot merged with current state updates",
+        )
+        config = CRHTMLRenderConfig(
+            include_state_transition_preview=True,
+            state_transition_preview=preview,
+        )
+
+        html = render_cr_html_audit([], run_label="T", config=config)
+
+        self.assertIn('<section class="state-transition-preview">', html)
+        self.assertIn("<dt>Prior Source</dt><dd>loaded</dd>", html)
+        self.assertIn("<dt>Prior Loaded</dt><dd>True</dd>", html)
+        self.assertIn("<dt>Update Count</dt><dd>2</dd>", html)
+        self.assertIn("<dt>Next Snapshot Preview</dt><dd>available</dd>", html)
+        self.assertIn("<dt>Next Snapshot Entry Count</dt><dd>3</dd>", html)
+
+    def test_config_renders_suppressed_state_transition_preview(self):
+        preview = CREventStateTransitionPreview(
+            prior_snapshot_available=False,
+            prior_snapshot_loaded=False,
+            prior_snapshot_error="<invalid>",
+            update_count=1,
+            next_snapshot=None,
+            reason="prior snapshot failed to load; next-state preview suppressed",
+        )
+        config = CRHTMLRenderConfig(
+            include_state_transition_preview=True,
+            state_transition_preview=preview,
+        )
+
+        html = render_cr_html_audit([], run_label="T", config=config)
+
+        self.assertIn("<dt>Prior Source</dt><dd>error</dd>", html)
+        self.assertIn("<dt>Prior Error</dt><dd>&lt;invalid&gt;</dd>", html)
+        self.assertIn("<dt>Next Snapshot Preview</dt><dd>suppressed</dd>", html)
+        self.assertNotIn("<dt>Next Snapshot Entry Count</dt>", html)
+
+
+# ===========================================================================
+# K. No Forbidden Behavior
 # ===========================================================================
 
 
 class TestNoForbiddenBehavior(unittest.TestCase):
-    """J. html.py does not import forbidden modules or do I/O."""
+    """K. html.py does not import forbidden modules or do I/O."""
 
     def _read_source(self) -> str:
         import trendradar.cr.html as mod

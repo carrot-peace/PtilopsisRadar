@@ -39,6 +39,9 @@ from trendradar.cr.repeat_preview import (
     preview_cr_repeat,
 )
 from trendradar.cr.scoring import CRScoreResult
+from trendradar.cr.state_transition_preview import (
+    CREventStateTransitionPreview,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +62,8 @@ class CRHTMLRenderConfig:
     seen_event_states: Mapping[str, CRSeenEventState] | None = None
     include_cooldown_decision: bool = False
     cooldown_policy: CRCooldownPolicy | None = None
+    include_state_transition_preview: bool = False
+    state_transition_preview: CREventStateTransitionPreview | None = None
     collapse_suppress: bool = True
     collapse_watch: bool = False
 
@@ -382,6 +387,63 @@ def _render_cooldown_decision(decision: CRCooldownDecision) -> list[str]:
     return lines
 
 
+def _format_prior_source_status(
+    preview: CREventStateTransitionPreview,
+) -> str:
+    if preview.prior_snapshot_error is not None:
+        return "error"
+    if preview.prior_snapshot_loaded is True:
+        return "loaded"
+    if preview.prior_snapshot_loaded is False:
+        return "missing"
+    if preview.prior_snapshot_available:
+        return "supplied"
+    return "not_supplied"
+
+
+def _render_state_transition_preview(
+    preview: CREventStateTransitionPreview,
+) -> list[str]:
+    """Render run-level state transition preview metadata."""
+    next_snapshot_status = (
+        "available" if preview.next_snapshot is not None else "suppressed"
+    )
+    next_entry_count = (
+        str(len(preview.next_snapshot.entries))
+        if preview.next_snapshot is not None
+        else None
+    )
+    rows: list[tuple[str, str | None]] = [
+        ("Prior Source", _format_prior_source_status(preview)),
+        (
+            "Prior Loaded",
+            str(preview.prior_snapshot_loaded)
+            if preview.prior_snapshot_loaded is not None
+            else None,
+        ),
+        ("Prior Error", preview.prior_snapshot_error),
+        ("Update Count", str(preview.update_count)),
+        ("Next Snapshot Preview", next_snapshot_status),
+        ("Next Snapshot Entry Count", next_entry_count),
+        ("Reason", preview.reason),
+    ]
+
+    lines: list[str] = []
+    lines.append('    <section class="state-transition-preview">')
+    lines.append("      <h4>State Transition Preview</h4>")
+    lines.append("      <dl>")
+    for label, value in rows:
+        if value is None or value == "":
+            continue
+        lines.append(
+            f"        <dt>{_escape_html_text(label)}</dt>"
+            f"<dd>{_escape_html_text(value)}</dd>"
+        )
+    lines.append("      </dl>")
+    lines.append("    </section>")
+    return lines
+
+
 def _render_candidate_card(
     pc: CRPresentedCandidate, config: CRHTMLRenderConfig
 ) -> list[str]:
@@ -600,6 +662,14 @@ def render_cr_html_audit(
         f"{high_score_suppressed}</p>"
     )
     lines.append("    </section>")
+
+    if (
+        config.include_state_transition_preview
+        and config.state_transition_preview is not None
+    ):
+        lines.extend(
+            _render_state_transition_preview(config.state_transition_preview)
+        )
 
     for level in _SECTION_ORDER:
         lines.extend(_render_section(level, by_level[level], config))

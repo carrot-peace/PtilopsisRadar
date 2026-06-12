@@ -13,6 +13,7 @@ PR9i: canonical HTML audit renderer.
 PR10c: CR-A event state snapshot boundary.
 PR10d: CR-A cooldown policy decision layer.
 PR10e: CR-A cooldown audit assembly.
+PR10i: CR-A state transition preview.
 """
 
 from trendradar.cr.models import (
@@ -112,6 +113,10 @@ from trendradar.cr.cooldown_audit import (
     CRCooldownAuditCandidate,
     CRCooldownAuditContext,
     build_cr_cooldown_audit_context,
+)
+from trendradar.cr.state_transition_preview import (
+    CREventStateTransitionPreview,
+    build_cr_event_state_transition_preview,
 )
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -238,6 +243,8 @@ __all__ = [
     "CRCooldownAuditCandidate",
     "CRCooldownAuditContext",
     "build_cr_cooldown_audit_context",
+    "CREventStateTransitionPreview",
+    "build_cr_event_state_transition_preview",
     "CRPresentedCandidate",
     "CRPresentationRun",
     "CRTextPresentationConfig",
