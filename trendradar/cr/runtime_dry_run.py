@@ -22,6 +22,7 @@ Design reference: PR9k.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
 from trendradar.cr.artifacts import CRArtifactConfig, CRArtifactPaths
@@ -51,6 +52,10 @@ from trendradar.cr.state_snapshot import (
     CREventStateSnapshot,
     cr_event_state_snapshot_to_seen_states,
 )
+from trendradar.cr.state_store import (
+    CREventStateLoadResult,
+    load_cr_event_state_snapshot,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +78,21 @@ class CRRuntimeDryRunResult:
 
     ``cooldown_audit`` is populated only when ``include_cooldown_audit=True``;
     it remains ``None`` otherwise.  It is an audit-only assembly (PR10e) built
-    in memory from the presented candidates — it enforces nothing, reads no
-    state file, and writes no state.  The proposed next-state entries it holds
-    are never persisted.  When an explicit in-memory ``cooldown_prior_snapshot``
-    is supplied (PR10g), the assembly evaluates each candidate against it so the
-    artifacts can show real repeat / cooldown decisions; the snapshot is still
-    caller-provided in memory only and is never read from or written to disk.
+    in memory from the presented candidates — it enforces nothing and writes no
+    state.  The proposed next-state entries it holds are never persisted.  When
+    an explicit in-memory ``cooldown_prior_snapshot`` is supplied (PR10g), the
+    assembly evaluates each candidate against it so the artifacts can show real
+    repeat / cooldown decisions.  When an explicit local
+    ``cooldown_prior_snapshot_path`` is supplied (PR10h), the snapshot is loaded
+    read-only from that caller-provided path through the explicit state-store
+    boundary.  No default path, environment/config path, or write-back is used.
+
+    ``cooldown_prior_snapshot_load`` is populated only when
+    ``include_cooldown_audit=True`` and a local snapshot path was explicitly
+    supplied.  Missing files produce a load result with ``loaded=False`` and
+    ``error=None`` and are treated as known-empty prior state.  Malformed or
+    invalid files produce ``loaded=False`` with an error and fail closed to no
+    prior snapshot.
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
@@ -87,6 +101,7 @@ class CRRuntimeDryRunResult:
     dispatch_plan: CRDispatchPlan
     dispatch_execution: CRDispatchExecutionResult | None = None
     cooldown_audit: CRCooldownAuditContext | None = None
+    cooldown_prior_snapshot_load: CREventStateLoadResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -107,13 +122,13 @@ def _pipeline_config_with_cooldown_audit(
     ``include_cooldown_decision`` on, attaches the cooldown ``policy``, and
     threads through the caller-provided ``seen_event_states``.
 
-    ``seen_event_states`` is derived only from an explicit in-memory prior
-    snapshot (never a state file).  When it is ``None`` (no prior snapshot),
-    the rendered repeat/cooldown evidence is ``not_evaluated`` — matching the
-    audit context built with ``prior_snapshot=None``.  When it is provided, the
-    artifacts can show real ``same_level_repeat`` / ``meaningful_escalation``
-    evidence.  Either way this reads no state file and changes neither the CR-A
-    text config nor any dispatch behavior.
+    ``seen_event_states`` is derived only from an explicit prior snapshot,
+    either supplied in memory or loaded read-only from a caller-provided local
+    path.  When it is ``None`` (no usable prior snapshot), the rendered
+    repeat/cooldown evidence is ``not_evaluated`` — matching the audit context
+    built with ``prior_snapshot=None``.  When it is provided, the artifacts can
+    show real ``same_level_repeat`` / ``meaningful_escalation`` evidence.  This
+    changes neither the CR-A text config nor any dispatch behavior.
     """
     base_render = (
         pipeline_config.render
@@ -170,6 +185,7 @@ def build_and_write_cr_runtime_dry_run(
     include_cooldown_audit: bool = False,
     cooldown_policy: CRCooldownPolicy | None = None,
     cooldown_prior_snapshot: CREventStateSnapshot | None = None,
+    cooldown_prior_snapshot_path: str | Path | None = None,
 ) -> CRRuntimeDryRunResult:
     """Convert real runtime stats and write CR audit artifacts (dry-run).
 
@@ -226,10 +242,18 @@ def build_and_write_cr_runtime_dry_run(
         candidate's repeat preview and cooldown decision are evaluated against
         it, so the artifacts can show real ``same_level_repeat`` /
         ``meaningful_escalation`` evidence.  When ``None`` (default), behavior
-        is identical to PR10f (``not_evaluated``).  This snapshot is always
-        caller-provided in memory — it is never read from or written to disk,
-        and no on-disk event state layer is used.  Ignored when
+        is identical to PR10f (``not_evaluated``) unless
+        ``cooldown_prior_snapshot_path`` is supplied.  Ignored when
         ``include_cooldown_audit`` is ``False``.
+    cooldown_prior_snapshot_path:
+        Optional explicit local JSON path (PR10h) used only when
+        ``include_cooldown_audit`` is ``True`` and
+        ``cooldown_prior_snapshot`` is ``None``.  The path is loaded read-only
+        through ``load_cr_event_state_snapshot``.  Missing files are treated as
+        a known-empty prior state; malformed or invalid files fail closed to no
+        prior snapshot.  No default path, environment/config path, or
+        write-back is used.  Ignored when ``include_cooldown_audit`` is
+        ``False``.
 
     Returns
     -------
@@ -262,19 +286,39 @@ def build_and_write_cr_runtime_dry_run(
 
     # 3b. Optionally enable audit-only cooldown evidence in the artifact render
     #     configs.  This is the only effect of ``include_cooldown_audit`` on
-    #     rendering; it never touches CR-A text or dispatch and reads no state.
-    #     When an explicit in-memory prior snapshot is supplied, it is converted
-    #     to seen-event-states (a pure transform — no file I/O) so the artifacts
-    #     can show real repeat / cooldown decisions.
+    #     rendering; it never touches CR-A text or dispatch.  A prior snapshot
+    #     may be supplied directly in memory or loaded read-only from an
+    #     explicit local path.  No default path is consulted and no state is
+    #     written back.
     cooldown_policy_effective: CRCooldownPolicy | None = None
     effective_pipeline_config = pipeline_config
+    cooldown_snapshot_for_audit = cooldown_prior_snapshot
+    cooldown_prior_snapshot_load: CREventStateLoadResult | None = None
     if include_cooldown_audit:
+        if (
+            cooldown_prior_snapshot is not None
+            and cooldown_prior_snapshot_path is not None
+        ):
+            raise ValueError(
+                "cooldown_prior_snapshot and cooldown_prior_snapshot_path "
+                "are mutually exclusive"
+            )
+
         cooldown_policy_effective = (
             cooldown_policy if cooldown_policy is not None else CRCooldownPolicy()
         )
+        if cooldown_prior_snapshot_path is not None:
+            cooldown_prior_snapshot_load = load_cr_event_state_snapshot(
+                cooldown_prior_snapshot_path
+            )
+            if cooldown_prior_snapshot_load.error is None:
+                cooldown_snapshot_for_audit = cooldown_prior_snapshot_load.snapshot
+            else:
+                cooldown_snapshot_for_audit = None
+
         audit_seen_states: dict[str, CRSeenEventState] | None = (
-            cr_event_state_snapshot_to_seen_states(cooldown_prior_snapshot)
-            if cooldown_prior_snapshot is not None
+            cr_event_state_snapshot_to_seen_states(cooldown_snapshot_for_audit)
+            if cooldown_snapshot_for_audit is not None
             else None
         )
         effective_pipeline_config = _pipeline_config_with_cooldown_audit(
@@ -294,13 +338,13 @@ def build_and_write_cr_runtime_dry_run(
 
     # 4b. Assemble the audit-only cooldown context (PR10e) from the presented
     #     candidates.  Built in memory only — the optional prior snapshot is
-    #     caller-provided (never read from disk), no state is written, and the
-    #     proposed next-state entries are never persisted.
+    #     explicit (in memory or loaded read-only from a caller path), no state
+    #     is written, and the proposed next-state entries are never persisted.
     cooldown_audit_context: CRCooldownAuditContext | None = None
     if include_cooldown_audit:
         cooldown_audit_context = build_cr_cooldown_audit_context(
             pipeline_result.presented_candidates,
-            prior_snapshot=cooldown_prior_snapshot,
+            prior_snapshot=cooldown_snapshot_for_audit,
             policy=cooldown_policy_effective,
             seen_at=None,
         )
@@ -328,4 +372,5 @@ def build_and_write_cr_runtime_dry_run(
         dispatch_plan=dispatch_plan,
         dispatch_execution=dispatch_execution,
         cooldown_audit=cooldown_audit_context,
+        cooldown_prior_snapshot_load=cooldown_prior_snapshot_load,
     )
