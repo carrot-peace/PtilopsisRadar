@@ -65,5 +65,8 @@ PR10g adds an explicit in-memory prior-snapshot input for dry-run artifact
 experiments (still in memory, still no production persistence) so that audit
 artifacts can show real `same_level_repeat` / `meaningful_escalation` evidence;
 see [cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
+PR10h extends that to an explicit, read-only local state file input for
+artifact dry-runs; see
+[cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).
 Production enforcement (suppressing dispatch, writing state, reading a clock)
 still requires a separate, explicitly gated PR.

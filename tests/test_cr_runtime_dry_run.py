@@ -205,6 +205,7 @@ class TestRuntimeDryRunModel(unittest.TestCase):
                 artifact_config=_artifact_config(tmp),
             )
             self.assertIsNone(result.cooldown_audit)
+            self.assertIsNone(result.cooldown_prior_snapshot_load)
 
     def test_prior_snapshot_ignored_when_audit_disabled(self):
         # PR10g: an explicit in-memory prior snapshot is accepted but is fully
@@ -225,6 +226,25 @@ class TestRuntimeDryRunModel(unittest.TestCase):
                 cooldown_prior_snapshot=snapshot,
             )
             self.assertIsNone(result.cooldown_audit)
+            self.assertIsNone(result.cooldown_prior_snapshot_load)
+            self.assertNotIn(
+                "Cooldown Policy Preview", result.pipeline.markdown_audit_text
+            )
+
+    def test_prior_snapshot_path_ignored_when_audit_disabled(self):
+        # PR10h: explicit local paths are accepted but ignored completely while
+        # the artifact-only cooldown audit flag is off.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.json"
+            path.write_text("{not-json", encoding="utf-8")
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+                cooldown_prior_snapshot_path=path,
+            )
+            self.assertIsNone(result.cooldown_audit)
+            self.assertIsNone(result.cooldown_prior_snapshot_load)
             self.assertNotIn(
                 "Cooldown Policy Preview", result.pipeline.markdown_audit_text
             )
@@ -429,10 +449,10 @@ class TestSourceBoundary(unittest.TestCase):
     """runtime_dry_run.py must not import / reference forbidden subsystems."""
 
     # PR10f wires audit-only cooldown evidence into the artifact render
-    # configs, so the dry-run bridge legitimately references the pure
-    # cooldown audit/policy modules.  The boundary that still matters is that
-    # it must never read/write event state, send Telegram, or enforce
-    # suppression — those tokens stay forbidden.
+    # configs, and PR10h allows a read-only, explicit local load through the
+    # state_store boundary.  The boundary that still matters is that dry-run
+    # must never write event state, send Telegram, read env/config state paths,
+    # or enforce suppression — those tokens stay forbidden.
     FORBIDDEN = (
         "trendradar.notification",
         "trendradar.storage",
@@ -444,10 +464,16 @@ class TestSourceBoundary(unittest.TestCase):
         "dispatcher",
         "dedupe",
         "alert_state",
-        "state_store",
-        "load_cr_event_state_snapshot",
         "save_cr_event_state_snapshot",
         "PTILOPSIS_CR_TELEGRAM_SEND",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "telegram_sink",
+        "telegram_env",
+        "os.environ",
+        "output/cr/state",
+        "output/cr_state",
+        "cr/state",
     )
 
     def _module_source(self) -> str:
