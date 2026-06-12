@@ -92,9 +92,33 @@ next-state file is written.
 from pathlib import Path
 import tempfile
 
-from tests.test_cr_cooldown_artifact_wiring import _hotlist_stats, _artifact_config
+from trendradar.cr.artifacts import CRArtifactConfig
 from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
-from trendradar.cr.state_store import load_cr_event_state_snapshot
+
+
+def sample_hotlist_stats():
+    return [
+        {
+            "word": "AI",
+            "titles": [
+                {
+                    "title": "AI Title One",
+                    "source_name": "weibo",
+                    "source_id": "weibo",
+                    "ranks": [3],
+                    "count": 3,
+                    "first_time": "09:30",
+                    "last_time": "12:00",
+                    "url": "https://example.com/ai",
+                    "mobileUrl": "",
+                    "is_new": False,
+                    "rank_timeline": [],
+                }
+            ],
+            "count": 1,
+            "position": 0,
+        },
+    ]
 
 root = Path(tempfile.mkdtemp(prefix="cooldown-loop-"))
 
@@ -103,9 +127,9 @@ next_path = root / "next-state.json"
 
 # Run 1: missing prior → new / allow_new
 run1 = build_and_write_cr_runtime_dry_run(
-    hotlist_stats=_hotlist_stats(),
+    hotlist_stats=sample_hotlist_stats(),
     run_label="loop-run-1",
-    artifact_config=_artifact_config(str(root / "artifacts-1")),
+    artifact_config=CRArtifactConfig(root_dir=root / "artifacts-1"),
     include_cooldown_audit=True,
     cooldown_prior_snapshot_path=prior_path,
     cooldown_next_snapshot_path=next_path,
@@ -118,9 +142,9 @@ print("Run 1 save:", run1.cooldown_next_snapshot_save)
 # Run 2: use Run 1 output as prior → same_level_repeat / cooldown
 next2 = root / "next-state-2.json"
 run2 = build_and_write_cr_runtime_dry_run(
-    hotlist_stats=_hotlist_stats(),
+    hotlist_stats=sample_hotlist_stats(),
     run_label="loop-run-2",
-    artifact_config=_artifact_config(str(root / "artifacts-2")),
+    artifact_config=CRArtifactConfig(root_dir=root / "artifacts-2"),
     include_cooldown_audit=True,
     cooldown_prior_snapshot_path=next_path,
     cooldown_next_snapshot_path=next2,
@@ -131,8 +155,9 @@ print("Run 2 save:", run2.cooldown_next_snapshot_save)
 # Run 2: loaded=True, error=None, same_level_repeat, next state written
 ```
 
-This script uses test fixtures for input data. Replace with real runtime
-stats for production-like validation.
+The `hotlist_stats` example is intentionally minimal. For production-like
+validation, pass the runtime's real hotlist/RSS stats in the same adapter input
+shape.
 
 ## Operator Checklist
 
