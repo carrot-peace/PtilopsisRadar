@@ -149,6 +149,40 @@ class TestSingleDecision(unittest.TestCase):
         self.assertEqual(decision.action, "cooldown")
         self.assertEqual(decision.cooldown_minutes, 60)
 
+    def test_mismatched_event_key_fails_closed_to_not_evaluated(self):
+        # A preview built for a different event must never yield a verdict.
+        for status in (
+            "new",
+            "same_level_repeat",
+            "same_event_repeat",
+            "meaningful_escalation",
+            "deescalation",
+        ):
+            with self.subTest(status=status):
+                decision = decide_cr_cooldown(
+                    event_key="e1",
+                    repeat_preview=_preview(
+                        status,
+                        event_key="different-event",
+                        previous_level="watch",
+                        current_level="urgent",
+                    ),
+                    # Even a permissive policy must not flip the verdict.
+                    policy=CRCooldownPolicy(allow_deescalation=True),
+                )
+                self.assertEqual(decision.action, "not_evaluated")
+                self.assertEqual(
+                    decision.reason,
+                    "repeat preview event key does not match current event key",
+                )
+                self.assertEqual(decision.event_key, "e1")
+                self.assertNotIn(
+                    decision.action,
+                    ("cooldown", "allow", "allow_escalation", "allow_new"),
+                )
+                # Evidence from the preview is preserved for audit.
+                self.assertEqual(decision.repeat_status, status)
+
     def test_evidence_is_carried_through(self):
         decision = decide_cr_cooldown(
             event_key="e1",
