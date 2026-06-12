@@ -76,4 +76,6 @@ metadata and in-memory next-state preview; see
 [cr_state_transition_preview.md](cr_state_transition_preview.md).
 PR10j adds explicit local-only next-state write-back for dry-runs; see
 [cr_cooldown_local_state_writeback.md](cr_cooldown_local_state_writeback.md).
+PR10k documents the full loop and closes PR10; see
+[pr10_closure_cooldown_state_loop.md](pr10_closure_cooldown_state_loop.md).
 Production integration remains intentionally separate.

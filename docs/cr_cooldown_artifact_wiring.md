@@ -73,5 +73,7 @@ updates, and in-memory next snapshot metadata; see
 [cr_state_transition_preview.md](cr_state_transition_preview.md).
 PR10j adds explicit local-only next-state write-back for artifact dry-runs; see
 [cr_cooldown_local_state_writeback.md](cr_cooldown_local_state_writeback.md).
+PR10k documents the full loop and closes PR10; see
+[pr10_closure_cooldown_state_loop.md](pr10_closure_cooldown_state_loop.md).
 Production enforcement (suppressing dispatch, writing state, reading a clock)
 still requires a separate, explicitly gated PR.
