@@ -102,7 +102,9 @@ load failures.
 ## 6. PR10d Handoff
 
 PR10d may use this state boundary to implement cooldown policy and
-enforcement.
+enforcement. PR10d's pure cooldown policy decision layer is documented in
+[cr_cooldown_policy.md](cr_cooldown_policy.md); it previews decisions only and
+does not yet read or write this state.
 
 Open questions for PR10d:
 
