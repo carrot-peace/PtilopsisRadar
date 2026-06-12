@@ -56,8 +56,10 @@ class TestSaveAndLoad(unittest.TestCase):
 
         self.assertTrue(save_result.saved)
         self.assertIsNone(save_result.error)
+        self.assertEqual(save_result.path, str(path))
         self.assertTrue(load_result.loaded)
         self.assertIsNone(load_result.error)
+        self.assertEqual(load_result.path, str(path))
         self.assertEqual(load_result.snapshot, snapshot)
 
     def test_saving_to_nested_path_creates_parents(self):
@@ -87,6 +89,7 @@ class TestMalformedAndInvalidState(unittest.TestCase):
         self.assertLess(len(result.error or ""), 120)
         self.assertIn("JSONDecodeError", result.error or "")
         self.assertNotIn("{not-json", result.error or "")
+        self.assertEqual(result.path, str(path))
 
     def test_schema_mismatch_returns_empty_snapshot_and_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,6 +105,7 @@ class TestMalformedAndInvalidState(unittest.TestCase):
         self.assertFalse(result.loaded)
         self.assertIsNotNone(result.error)
         self.assertIn("schema_version mismatch", result.error or "")
+        self.assertEqual(result.path, str(path))
 
 
 class TestAtomicishBehavior(unittest.TestCase):
