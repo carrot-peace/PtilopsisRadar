@@ -324,6 +324,170 @@ class TestTelegramAndDispatchUnchanged(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Group F — Explicit in-memory prior snapshot (PR10g)
+# ---------------------------------------------------------------------------
+
+
+_LEVEL_ORDER = {"suppress": 0, "watch": 1, "alert": 2, "urgent": 3}
+_ORDER_LEVEL = {v: k for k, v in _LEVEL_ORDER.items()}
+
+
+def _audit_candidate_key_and_level(tmp):
+    """Run a no-snapshot audit dry-run and return (event_key, current_level)
+    for the single candidate the hotlist fixture produces."""
+    result = build_and_write_cr_runtime_dry_run(
+        hotlist_stats=_hotlist_stats(),
+        run_label="probe",
+        artifact_config=_artifact_config(tmp),
+        include_cooldown_audit=True,
+    )
+    ac = result.cooldown_audit.candidates[0]
+    return ac.event_identity.event_key, ac.state_update.decision_level
+
+
+def _snapshot_with(event_key: str, decision_level: str, score: float = 50.0):
+    return CREventStateSnapshot(
+        schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
+        entries=(
+            CREventStateEntry(
+                event_key=event_key,
+                decision_level=decision_level,
+                score=score,
+            ),
+        ),
+    )
+
+
+class TestPriorSnapshotIgnoredWhenDisabled(unittest.TestCase):
+    def test_snapshot_ignored_when_audit_disabled(self):
+        with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as t1, tempfile.TemporaryDirectory() as t2:
+            key, level = _audit_candidate_key_and_level(probe)
+            snapshot = _snapshot_with(key, level)
+
+            plain = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-off",
+                artifact_config=_artifact_config(t1),
+            )
+            with_snapshot = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-off",
+                artifact_config=_artifact_config(t2),
+                include_cooldown_audit=False,
+                cooldown_prior_snapshot=snapshot,
+            )
+            # Flag off → snapshot ignored entirely.
+            self.assertIsNone(with_snapshot.cooldown_audit)
+            md = _read_markdown(with_snapshot)
+            self.assertNotIn("Cooldown Policy Preview", md)
+            # Default artifacts unchanged vs a plain run.
+            self.assertEqual(
+                plain.pipeline.markdown_audit_text,
+                with_snapshot.pipeline.markdown_audit_text,
+            )
+
+
+class TestPriorSnapshotNotEvaluated(unittest.TestCase):
+    def test_none_snapshot_is_not_evaluated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-none",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot=None,
+            )
+            md = _read_markdown(result)
+            self.assertIn("- Action: `not_evaluated`", md)
+            for ac in result.cooldown_audit.candidates:
+                self.assertEqual(ac.cooldown_decision.action, "not_evaluated")
+
+
+class TestPriorSnapshotSameLevelRepeat(unittest.TestCase):
+    def test_same_level_repeat_shows_cooldown(self):
+        with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as tmp:
+            key, level = _audit_candidate_key_and_level(probe)
+            snapshot = _snapshot_with(key, level)
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-same",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot=snapshot,
+            )
+            md = _read_markdown(result)
+            html = _read_html(result)
+            self.assertIn("- Status: `same_level_repeat`", md)
+            self.assertIn("- Action: `cooldown`", md)
+            self.assertIn("<dt>Action</dt><dd>cooldown</dd>", html)
+
+            self.assertGreater(len(result.cooldown_audit.candidates), 0)
+            for ac in result.cooldown_audit.candidates:
+                self.assertEqual(ac.repeat_preview.status, "same_level_repeat")
+                self.assertEqual(ac.cooldown_decision.action, "cooldown")
+
+
+class TestPriorSnapshotMeaningfulEscalation(unittest.TestCase):
+    def test_meaningful_escalation_shows_allow_escalation(self):
+        with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as tmp:
+            key, level = _audit_candidate_key_and_level(probe)
+            # Prior level one step below the current level → escalation.
+            lower_rank = max(0, _LEVEL_ORDER[level] - 1)
+            lower_level = _ORDER_LEVEL[lower_rank]
+            self.assertLess(lower_rank, _LEVEL_ORDER[level])
+            snapshot = _snapshot_with(key, lower_level)
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-esc",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot=snapshot,
+            )
+            md = _read_markdown(result)
+            html = _read_html(result)
+            self.assertIn("- Status: `meaningful_escalation`", md)
+            self.assertIn("- Action: `allow_escalation`", md)
+            self.assertIn("<dt>Action</dt><dd>allow_escalation</dd>", html)
+
+            for ac in result.cooldown_audit.candidates:
+                self.assertEqual(
+                    ac.repeat_preview.status, "meaningful_escalation"
+                )
+                self.assertEqual(
+                    ac.cooldown_decision.action, "allow_escalation"
+                )
+
+
+class TestPriorSnapshotTelegramAndDispatchUnchanged(unittest.TestCase):
+    def test_cr_a_text_and_dispatch_identical_with_prior_snapshot(self):
+        with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as t1, tempfile.TemporaryDirectory() as t2:
+            key, level = _audit_candidate_key_and_level(probe)
+            snapshot = _snapshot_with(key, level)
+
+            off = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-eq2",
+                artifact_config=_artifact_config(t1),
+            )
+            on = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-eq2",
+                artifact_config=_artifact_config(t2),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot=snapshot,
+            )
+            # A prior snapshot must not change CR-A text or the dispatch plan.
+            self.assertEqual(off.pipeline.cr_a_text, on.pipeline.cr_a_text)
+            self.assertEqual(
+                len(off.dispatch_plan.messages), len(on.dispatch_plan.messages)
+            )
+            self.assertNotIn("same_level_repeat", on.pipeline.cr_a_text)
+            self.assertNotIn("Cooldown Policy Preview", on.pipeline.cr_a_text)
+
+
+# ---------------------------------------------------------------------------
 # Group E — No state file I/O / no Telegram send in the dry-run module
 # ---------------------------------------------------------------------------
 

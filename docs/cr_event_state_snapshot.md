@@ -108,7 +108,10 @@ does not yet read or write this state. PR10e assembles these primitives into an
 audit-only context and proposes (but never writes) next-state entries; see
 [cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md). PR10f surfaces
 that context in dry-run artifacts (opt-in, no state read/write); see
-[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md).
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md). PR10g lets a
+caller pass an explicit in-memory snapshot of this shape into that dry-run (no
+file read/write); see
+[cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
 
 Open questions for PR10d:
 
