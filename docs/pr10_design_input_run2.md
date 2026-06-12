@@ -136,6 +136,9 @@ meaningful escalation, deescalation, new, and not-evaluated states without
 enforcing suppression or cooldown. PR10b closure and PR10c handoff are recorded
 in [pr10b_closure_repeat_preview.md](pr10b_closure_repeat_preview.md).
 
+PR10c defines the event state snapshot boundary in
+[cr_event_state_snapshot.md](cr_event_state_snapshot.md).
+
 ## 6. Non-Goals
 
 - no runtime behavior change
