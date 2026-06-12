@@ -104,7 +104,9 @@ load failures.
 PR10d may use this state boundary to implement cooldown policy and
 enforcement. PR10d's pure cooldown policy decision layer is documented in
 [cr_cooldown_policy.md](cr_cooldown_policy.md); it previews decisions only and
-does not yet read or write this state.
+does not yet read or write this state. PR10e assembles these primitives into an
+audit-only context and proposes (but never writes) next-state entries; see
+[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md).
 
 Open questions for PR10d:
 
