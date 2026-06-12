@@ -11,10 +11,10 @@ This is a *dry-run* bridge only.  It answers exactly one system question:
     hotlist / RSS stats without sending anything?
 
 It deliberately stays inside the CR layer: it only converts stats via the
-existing CR adapter, runs the existing CR pipeline, and writes through the
-existing CR artifact writer.  It performs no delivery, no suppression /
-de-duplication, no run-to-run state, no AI-result integration, and reads no
-runtime configuration.  CR-A text and JSON outputs are out of scope here.
+existing CR adapter, runs the existing CR pipeline, and writes through explicit
+CR boundaries.  It performs no delivery, no suppression / de-duplication, no
+AI-result integration, and reads no runtime configuration.  CR-A text and JSON
+outputs are out of scope here.
 
 Design reference: PR9k.
 """
@@ -57,7 +57,9 @@ from trendradar.cr.state_snapshot import (
 )
 from trendradar.cr.state_store import (
     CREventStateLoadResult,
+    CREventStateSaveResult,
     load_cr_event_state_snapshot,
+    save_cr_event_state_snapshot,
 )
 from trendradar.cr.state_transition_preview import (
     CREventStateTransitionPreview,
@@ -104,8 +106,13 @@ class CRRuntimeDryRunResult:
 
     ``cooldown_state_transition_preview`` is populated only when
     ``include_cooldown_audit=True``. It previews the next state snapshot in
-    memory from the effective prior snapshot and proposed state updates. It is
-    never written.
+    memory from the effective prior snapshot and proposed state updates.
+
+    ``cooldown_next_snapshot_save`` is populated only when
+    ``include_cooldown_audit=True``, ``cooldown_next_snapshot_path`` is
+    explicitly supplied, and the transition preview has a next snapshot to
+    persist.  It records the explicit local dry-run write result.  ``None``
+    means no write was attempted.
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
@@ -118,6 +125,7 @@ class CRRuntimeDryRunResult:
     cooldown_state_transition_preview: (
         CREventStateTransitionPreview | None
     ) = None
+    cooldown_next_snapshot_save: CREventStateSaveResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +262,7 @@ def build_and_write_cr_runtime_dry_run(
     cooldown_policy: CRCooldownPolicy | None = None,
     cooldown_prior_snapshot: CREventStateSnapshot | None = None,
     cooldown_prior_snapshot_path: str | Path | None = None,
+    cooldown_next_snapshot_path: str | Path | None = None,
 ) -> CRRuntimeDryRunResult:
     """Convert real runtime stats and write CR audit artifacts (dry-run).
 
@@ -323,6 +332,14 @@ def build_and_write_cr_runtime_dry_run(
         prior snapshot.  No default path, environment/config path, or
         write-back is used.  Ignored when ``include_cooldown_audit`` is
         ``False``.
+    cooldown_next_snapshot_path:
+        Optional explicit local JSON output path (PR10j) used only when
+        ``include_cooldown_audit`` is ``True``.  When provided and the
+        transition preview has a valid next snapshot, that snapshot is written
+        through ``save_cr_event_state_snapshot`` and the result is returned in
+        ``cooldown_next_snapshot_save``.  No default path, environment/config
+        path, production persistence, dispatch change, or suppression behavior
+        is used.  Ignored when ``include_cooldown_audit`` is ``False``.
 
     Returns
     -------
@@ -332,8 +349,9 @@ def build_and_write_cr_runtime_dry_run(
     -----
     Does not score, cluster, decide, or render manually — every transformation
     is delegated to the existing CR layers.  Does not write files except
-    through :func:`write_cr_pipeline_artifacts`.  Does not catch or suppress
-    structural pipeline errors.
+    through :func:`write_cr_pipeline_artifacts` and the explicit PR10j
+    ``cooldown_next_snapshot_path`` state-store boundary.  Does not catch or
+    suppress structural pipeline errors.
 
     If neither stats source is provided, an empty primitive tuple is produced
     and an empty (but valid) pipeline is still built and written.
@@ -406,11 +424,13 @@ def build_and_write_cr_runtime_dry_run(
     )
 
     # 4b. Assemble the audit-only cooldown context (PR10e) from the presented
-    #     candidates.  Built in memory only — the optional prior snapshot is
-    #     explicit (in memory or loaded read-only from a caller path), no state
-    #     is written, and the proposed next-state entries are never persisted.
+    #     candidates.  The optional prior snapshot is explicit (in memory or
+    #     loaded read-only from a caller path).  Proposed updates are in memory
+    #     unless the caller also supplies the PR10j explicit next-snapshot
+    #     output path below.
     cooldown_audit_context: CRCooldownAuditContext | None = None
     cooldown_state_transition_preview: CREventStateTransitionPreview | None = None
+    cooldown_next_snapshot_save: CREventStateSaveResult | None = None
     if include_cooldown_audit:
         cooldown_audit_context = build_cr_cooldown_audit_context(
             pipeline_result.presented_candidates,
@@ -440,6 +460,13 @@ def build_and_write_cr_runtime_dry_run(
             transition_preview=cooldown_state_transition_preview,
             urgent_threshold=urgent_threshold,
         )
+        if cooldown_next_snapshot_path is not None:
+            next_snapshot = cooldown_state_transition_preview.next_snapshot
+            if next_snapshot is not None:
+                cooldown_next_snapshot_save = save_cr_event_state_snapshot(
+                    next_snapshot,
+                    cooldown_next_snapshot_path,
+                )
 
     # 5. Write artifacts only through the existing artifact writer.
     artifact_paths = write_cr_pipeline_artifacts(
@@ -466,4 +493,5 @@ def build_and_write_cr_runtime_dry_run(
         cooldown_audit=cooldown_audit_context,
         cooldown_prior_snapshot_load=cooldown_prior_snapshot_load,
         cooldown_state_transition_preview=cooldown_state_transition_preview,
+        cooldown_next_snapshot_save=cooldown_next_snapshot_save,
     )
