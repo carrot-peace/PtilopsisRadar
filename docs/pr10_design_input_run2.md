@@ -133,7 +133,8 @@ identity evidence now exposed in CR audit artifacts.
 PR10b is implemented as repeat preview evidence: see
 [cr_repeat_preview.md](cr_repeat_preview.md). It classifies same-level repeat,
 meaningful escalation, deescalation, new, and not-evaluated states without
-enforcing suppression or cooldown.
+enforcing suppression or cooldown. PR10b closure and PR10c handoff are recorded
+in [pr10b_closure_repeat_preview.md](pr10b_closure_repeat_preview.md).
 
 ## 6. Non-Goals
 

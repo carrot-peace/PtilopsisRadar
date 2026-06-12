@@ -88,3 +88,6 @@ Recommended next steps:
   explicit.
 - Later: improve title variant normalization for semantically equivalent event
   titles that currently produce different `event_key` values.
+
+See also [pr10b_closure_repeat_preview.md](pr10b_closure_repeat_preview.md) for
+PR10b closure status and PR10c handoff notes.
