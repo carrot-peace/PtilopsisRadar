@@ -66,3 +66,9 @@ the caller-provided path.
 - no scheduler integration
 - no bot commands
 - no dashboard work
+
+## Handoff
+
+PR10k documents the full local cooldown loop and closes PR10; see
+[pr10_closure_cooldown_state_loop.md](pr10_closure_cooldown_state_loop.md) and
+[cr_local_cooldown_state_loop.md](cr_local_cooldown_state_loop.md).

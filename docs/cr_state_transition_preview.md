@@ -58,3 +58,6 @@ PR10j adds explicit local-only write-back using a caller-provided output path;
 see [cr_cooldown_local_state_writeback.md](cr_cooldown_local_state_writeback.md).
 That remains separate because it crosses from preview-only artifact evidence
 into opt-in local persistence.
+PR10k documents the full local cooldown loop and closes PR10; see
+[pr10_closure_cooldown_state_loop.md](pr10_closure_cooldown_state_loop.md) and
+[cr_local_cooldown_state_loop.md](cr_local_cooldown_state_loop.md).
