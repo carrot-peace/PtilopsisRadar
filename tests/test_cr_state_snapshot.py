@@ -131,6 +131,18 @@ class TestSeenStateConversion(unittest.TestCase):
         self.assertEqual(state.title, "Topic")
         self.assertEqual(state.candidate_id, "candidate-1")
 
+    def test_rejects_schema_version_mismatch(self):
+        snapshot = CREventStateSnapshot(
+            schema_version="wrong",
+            entries=(CREventStateEntry(event_key="event-1"),),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "event state snapshot schema_version mismatch",
+        ):
+            cr_event_state_snapshot_to_seen_states(snapshot)
+
 
 class TestInvalidInput(unittest.TestCase):
     def test_missing_schema_version_is_rejected(self):
@@ -252,6 +264,7 @@ class TestPurityGuard(unittest.TestCase):
             "dispatch_executor",
             "dispatch_plan",
             "runtime_dry_run",
+            "state_store",
         )
         for fragment in forbidden_fragments:
             self.assertNotIn(fragment, source)

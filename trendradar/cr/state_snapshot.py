@@ -130,6 +130,9 @@ def _canonical_entries(
 def cr_event_state_snapshot_to_seen_states(
     snapshot: CREventStateSnapshot,
 ) -> dict[str, CRSeenEventState]:
+    if snapshot.schema_version != CR_EVENT_STATE_SCHEMA_VERSION:
+        raise ValueError("event state snapshot schema_version mismatch")
+
     seen_states: dict[str, CRSeenEventState] = {}
     for entry in _canonical_entries(snapshot.entries):
         seen_states[entry.event_key] = CRSeenEventState(
