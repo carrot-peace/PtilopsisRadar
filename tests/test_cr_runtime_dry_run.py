@@ -391,6 +391,11 @@ class TestDeterminism(unittest.TestCase):
 class TestSourceBoundary(unittest.TestCase):
     """runtime_dry_run.py must not import / reference forbidden subsystems."""
 
+    # PR10f wires audit-only cooldown evidence into the artifact render
+    # configs, so the dry-run bridge legitimately references the pure
+    # cooldown audit/policy modules.  The boundary that still matters is that
+    # it must never read/write event state, send Telegram, or enforce
+    # suppression — those tokens stay forbidden.
     FORBIDDEN = (
         "trendradar.notification",
         "trendradar.storage",
@@ -400,9 +405,12 @@ class TestSourceBoundary(unittest.TestCase):
         "telegram",
         "sender",
         "dispatcher",
-        "cooldown",
         "dedupe",
         "alert_state",
+        "state_store",
+        "load_cr_event_state_snapshot",
+        "save_cr_event_state_snapshot",
+        "PTILOPSIS_CR_TELEGRAM_SEND",
     )
 
     def _module_source(self) -> str:

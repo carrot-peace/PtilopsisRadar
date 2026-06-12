@@ -91,7 +91,8 @@ and the CR-A Telegram text renderer is unaffected.
 
 ## 5. Handoff
 
-A future PR may wire this context into artifact-only dry-run reporting behind
-explicit local-only controls. Production enforcement (actually suppressing
-dispatch, writing state, or reading a clock) still requires a separate, gated
-PR.
+PR10f wires this context into the runtime dry-run artifact path behind an
+opt-in, artifact-only flag; see
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md). Production
+enforcement (actually suppressing dispatch, writing state, or reading a clock)
+still requires a separate, gated PR.
