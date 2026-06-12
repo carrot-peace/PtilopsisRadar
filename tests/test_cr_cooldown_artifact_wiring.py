@@ -39,7 +39,10 @@ from trendradar.cr.state_snapshot import (
     CREventStateEntry,
     CREventStateSnapshot,
 )
-from trendradar.cr.state_store import save_cr_event_state_snapshot
+from trendradar.cr.state_store import (
+    load_cr_event_state_snapshot,
+    save_cr_event_state_snapshot,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +437,7 @@ class TestPriorSnapshotIgnoredWhenDisabled(unittest.TestCase):
             self.assertIsNone(with_path.cooldown_audit)
             self.assertIsNone(with_path.cooldown_prior_snapshot_load)
             self.assertIsNone(with_path.cooldown_state_transition_preview)
+            self.assertIsNone(with_path.cooldown_next_snapshot_save)
             md = _read_markdown(with_path)
             self.assertNotIn("Cooldown Policy Preview", md)
             self.assertNotIn("State Transition Preview", md)
@@ -631,6 +635,118 @@ class TestPriorSnapshotPathFailureSemantics(unittest.TestCase):
             self.assertNotIn("allow_new", md)
 
 
+class TestExplicitNextSnapshotWriteBack(unittest.TestCase):
+    def test_valid_prior_path_writes_merged_next_snapshot(self):
+        with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as tmp:
+            key, level = _audit_candidate_key_and_level(probe)
+            prior = _snapshot_with(key, level, score=42.0)
+            prior_path = Path(tmp) / "prior.json"
+            next_path = Path(tmp) / "state" / "next.json"
+            self.assertTrue(save_cr_event_state_snapshot(prior, prior_path).saved)
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-write-valid",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot_path=prior_path,
+                cooldown_next_snapshot_path=next_path,
+            )
+            md = _read_markdown(result)
+
+            self.assertTrue(next_path.exists())
+            self.assertIsNotNone(result.cooldown_next_snapshot_save)
+            self.assertTrue(result.cooldown_next_snapshot_save.saved)
+            self.assertIsNone(result.cooldown_next_snapshot_save.error)
+            self.assertIn("- Status: `same_level_repeat`", md)
+            self.assertIn("- Action: `cooldown`", md)
+
+            load_result = load_cr_event_state_snapshot(next_path)
+            self.assertTrue(load_result.loaded)
+            preview = result.cooldown_state_transition_preview
+            self.assertIsNotNone(preview)
+            self.assertIsNotNone(preview.next_snapshot)
+            self.assertEqual(load_result.snapshot, preview.next_snapshot)
+            self.assertEqual(
+                len(load_result.snapshot.entries),
+                len(preview.next_snapshot.entries),
+            )
+
+    def test_missing_prior_path_can_write_from_known_empty_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            next_path = Path(tmp) / "next.json"
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-write-missing",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot_path=Path(tmp) / "missing.json",
+                cooldown_next_snapshot_path=next_path,
+            )
+            md = _read_markdown(result)
+
+            self.assertIsNotNone(result.cooldown_prior_snapshot_load)
+            self.assertFalse(result.cooldown_prior_snapshot_load.loaded)
+            self.assertIsNone(result.cooldown_prior_snapshot_load.error)
+            self.assertTrue(next_path.exists())
+            self.assertIsNotNone(result.cooldown_next_snapshot_save)
+            self.assertTrue(result.cooldown_next_snapshot_save.saved)
+            self.assertIn("- Status: `new`", md)
+            self.assertIn("- Action: `allow_new`", md)
+
+            load_result = load_cr_event_state_snapshot(next_path)
+            self.assertTrue(load_result.loaded)
+            self.assertGreater(len(load_result.snapshot.entries), 0)
+
+    def test_malformed_prior_path_suppresses_next_snapshot_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prior_path = Path(tmp) / "bad.json"
+            next_path = Path(tmp) / "next.json"
+            prior_path.write_text("{not-json", encoding="utf-8")
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-write-bad",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot_path=prior_path,
+                cooldown_next_snapshot_path=next_path,
+            )
+            md = _read_markdown(result)
+
+            self.assertIsNotNone(result.cooldown_prior_snapshot_load)
+            self.assertIsNotNone(result.cooldown_prior_snapshot_load.error)
+            self.assertIsNone(result.cooldown_state_transition_preview.next_snapshot)
+            self.assertFalse(next_path.exists())
+            self.assertIsNone(result.cooldown_next_snapshot_save)
+            self.assertIn("- Action: `not_evaluated`", md)
+            self.assertIn("- Next Snapshot Preview: `suppressed`", md)
+
+    def test_schema_mismatch_prior_path_suppresses_next_snapshot_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prior_path = Path(tmp) / "bad-schema.json"
+            next_path = Path(tmp) / "next.json"
+            prior_path.write_text(
+                '{"schema_version":"wrong","entries":[]}',
+                encoding="utf-8",
+            )
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-write-bad-schema",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_prior_snapshot_path=prior_path,
+                cooldown_next_snapshot_path=next_path,
+            )
+
+            self.assertIsNotNone(result.cooldown_prior_snapshot_load)
+            self.assertIsNotNone(result.cooldown_prior_snapshot_load.error)
+            self.assertIsNone(result.cooldown_state_transition_preview.next_snapshot)
+            self.assertFalse(next_path.exists())
+            self.assertIsNone(result.cooldown_next_snapshot_save)
+
+
 class TestPriorSnapshotMeaningfulEscalation(unittest.TestCase):
     def test_meaningful_escalation_shows_allow_escalation(self):
         with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as tmp:
@@ -730,9 +846,43 @@ class TestPriorSnapshotTelegramAndDispatchUnchanged(unittest.TestCase):
                 "State Transition Preview", with_path.pipeline.cr_a_text
             )
 
+    def test_cr_a_text_and_dispatch_identical_with_next_snapshot_path(self):
+        with tempfile.TemporaryDirectory() as t1, tempfile.TemporaryDirectory() as t2:
+            without_write = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-eq-write",
+                artifact_config=_artifact_config(t1),
+                include_cooldown_audit=True,
+            )
+            with_write = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-eq-write",
+                artifact_config=_artifact_config(t2),
+                include_cooldown_audit=True,
+                cooldown_next_snapshot_path=Path(t2) / "next.json",
+            )
+
+            self.assertIsNotNone(with_write.cooldown_next_snapshot_save)
+            self.assertEqual(
+                without_write.pipeline.cr_a_text,
+                with_write.pipeline.cr_a_text,
+            )
+            self.assertEqual(
+                len(without_write.dispatch_plan.messages),
+                len(with_write.dispatch_plan.messages),
+            )
+            self.assertEqual(
+                tuple(m.format for m in without_write.dispatch_plan.messages),
+                tuple(m.format for m in with_write.dispatch_plan.messages),
+            )
+            self.assertNotIn("Cooldown Policy Preview", with_write.pipeline.cr_a_text)
+            self.assertNotIn(
+                "State Transition Preview", with_write.pipeline.cr_a_text
+            )
+
 
 # ---------------------------------------------------------------------------
-# Group E — No state file I/O / no Telegram send in the dry-run module
+# Group E — Explicit state-store only / no Telegram send in the dry-run module
 # ---------------------------------------------------------------------------
 
 
@@ -745,7 +895,6 @@ class TestNoStateIOSourceGuard(unittest.TestCase):
     def test_dry_run_has_no_state_io_or_telegram_send(self):
         source = self._module_source()
         forbidden = (
-            "save_cr_event_state_snapshot",
             "PTILOPSIS_CR_TELEGRAM_SEND",
             "TELEGRAM_BOT_TOKEN",
             "TELEGRAM_CHAT_ID",

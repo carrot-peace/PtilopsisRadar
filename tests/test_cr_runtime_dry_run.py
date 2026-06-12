@@ -35,6 +35,7 @@ from trendradar.cr.state_snapshot import (
     CREventStateEntry,
     CREventStateSnapshot,
 )
+from trendradar.cr.state_store import load_cr_event_state_snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +208,7 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             self.assertIsNone(result.cooldown_audit)
             self.assertIsNone(result.cooldown_prior_snapshot_load)
             self.assertIsNone(result.cooldown_state_transition_preview)
+            self.assertIsNone(result.cooldown_next_snapshot_save)
 
     def test_prior_snapshot_ignored_when_audit_disabled(self):
         # PR10g: an explicit in-memory prior snapshot is accepted but is fully
@@ -229,6 +231,7 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             self.assertIsNone(result.cooldown_audit)
             self.assertIsNone(result.cooldown_prior_snapshot_load)
             self.assertIsNone(result.cooldown_state_transition_preview)
+            self.assertIsNone(result.cooldown_next_snapshot_save)
             self.assertNotIn(
                 "Cooldown Policy Preview", result.pipeline.markdown_audit_text
             )
@@ -248,6 +251,7 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             self.assertIsNone(result.cooldown_audit)
             self.assertIsNone(result.cooldown_prior_snapshot_load)
             self.assertIsNone(result.cooldown_state_transition_preview)
+            self.assertIsNone(result.cooldown_next_snapshot_save)
             self.assertNotIn(
                 "Cooldown Policy Preview", result.pipeline.markdown_audit_text
             )
@@ -273,6 +277,70 @@ class TestRuntimeDryRunModel(unittest.TestCase):
                 "State Transition Preview",
                 result.pipeline.markdown_audit_text,
             )
+            self.assertIsNone(result.cooldown_next_snapshot_save)
+
+    def test_next_snapshot_path_ignored_when_audit_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "next-state.json"
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=False,
+                cooldown_next_snapshot_path=path,
+            )
+
+            self.assertFalse(path.exists())
+            self.assertIsNone(result.cooldown_audit)
+            self.assertIsNone(result.cooldown_state_transition_preview)
+            self.assertIsNone(result.cooldown_next_snapshot_save)
+            self.assertNotIn(
+                "State Transition Preview",
+                result.pipeline.markdown_audit_text,
+            )
+
+    def test_no_next_snapshot_write_without_explicit_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "next-state.json"
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_next_snapshot_path=None,
+            )
+
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            self.assertIsNotNone(
+                result.cooldown_state_transition_preview.next_snapshot
+            )
+            self.assertFalse(path.exists())
+            self.assertIsNone(result.cooldown_next_snapshot_save)
+
+    def test_explicit_next_snapshot_path_writes_preview_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state" / "next.json"
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+                cooldown_next_snapshot_path=path,
+            )
+
+            self.assertTrue(path.exists())
+            self.assertIsNotNone(result.cooldown_next_snapshot_save)
+            self.assertTrue(result.cooldown_next_snapshot_save.saved)
+            self.assertIsNone(result.cooldown_next_snapshot_save.error)
+            self.assertEqual(result.cooldown_next_snapshot_save.path, str(path))
+
+            load_result = load_cr_event_state_snapshot(path)
+            self.assertTrue(load_result.loaded)
+            self.assertIsNone(load_result.error)
+            preview = result.cooldown_state_transition_preview
+            self.assertIsNotNone(preview)
+            self.assertIsNotNone(preview.next_snapshot)
+            self.assertEqual(load_result.snapshot, preview.next_snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -473,11 +541,9 @@ class TestDeterminism(unittest.TestCase):
 class TestSourceBoundary(unittest.TestCase):
     """runtime_dry_run.py must not import / reference forbidden subsystems."""
 
-    # PR10f wires audit-only cooldown evidence into the artifact render
-    # configs, and PR10h allows a read-only, explicit local load through the
-    # state_store boundary.  The boundary that still matters is that dry-run
-    # must never write event state, send Telegram, read env/config state paths,
-    # or enforce suppression — those tokens stay forbidden.
+    # PR10j allows one explicit local dry-run write through the state_store
+    # boundary. The boundary that still matters is that dry-run must never send
+    # Telegram, read env/config/default state paths, or enforce suppression.
     FORBIDDEN = (
         "trendradar.notification",
         "trendradar.storage",
@@ -489,7 +555,6 @@ class TestSourceBoundary(unittest.TestCase):
         "dispatcher",
         "dedupe",
         "alert_state",
-        "save_cr_event_state_snapshot",
         "PTILOPSIS_CR_TELEGRAM_SEND",
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
