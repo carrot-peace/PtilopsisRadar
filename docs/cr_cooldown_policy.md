@@ -140,9 +140,12 @@ Example Markdown for a meaningful escalation:
 
 ## 7. PR10e Handoff
 
-PR10e may integrate the cooldown policy into artifact / dry-run reporting or a
-dispatch plan *preview*. Actual production enforcement (suppressing dispatch,
-mutating state, reading a clock) must remain behind explicit gates.
+PR10e assembles this policy with event identity, prior state, and repeat
+preview into an audit-only context; see
+[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md). It may later be
+integrated into artifact / dry-run reporting or a dispatch plan *preview*.
+Actual production enforcement (suppressing dispatch, mutating state, reading a
+clock) must remain behind explicit gates.
 
 Open questions for PR10e:
 

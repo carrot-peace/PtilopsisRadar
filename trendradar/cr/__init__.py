@@ -12,6 +12,7 @@ PR9h: artifact path resolver / writer.
 PR9i: canonical HTML audit renderer.
 PR10c: CR-A event state snapshot boundary.
 PR10d: CR-A cooldown policy decision layer.
+PR10e: CR-A cooldown audit assembly.
 """
 
 from trendradar.cr.models import (
@@ -106,6 +107,11 @@ from trendradar.cr.cooldown_policy import (
     DEFAULT_CR_COOLDOWN_POLICY,
     decide_cr_cooldown,
     decide_cr_cooldowns,
+)
+from trendradar.cr.cooldown_audit import (
+    CRCooldownAuditCandidate,
+    CRCooldownAuditContext,
+    build_cr_cooldown_audit_context,
 )
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -229,6 +235,9 @@ __all__ = [
     "DEFAULT_CR_COOLDOWN_POLICY",
     "decide_cr_cooldown",
     "decide_cr_cooldowns",
+    "CRCooldownAuditCandidate",
+    "CRCooldownAuditContext",
+    "build_cr_cooldown_audit_context",
     "CRPresentedCandidate",
     "CRPresentationRun",
     "CRTextPresentationConfig",

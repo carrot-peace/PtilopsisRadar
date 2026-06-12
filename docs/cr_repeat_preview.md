@@ -33,7 +33,9 @@ provided, repeat preview is explicitly `not_evaluated`.
 PR10c defines the event state snapshot boundary in
 [cr_event_state_snapshot.md](cr_event_state_snapshot.md). PR10d defines the
 cooldown policy decision layer in
-[cr_cooldown_policy.md](cr_cooldown_policy.md).
+[cr_cooldown_policy.md](cr_cooldown_policy.md). PR10e assembles these into an
+audit-only context in
+[cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md).
 
 ## 3. Preview statuses
 
