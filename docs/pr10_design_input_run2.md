@@ -172,4 +172,7 @@ enforcement); see [cr_cooldown_policy.md](cr_cooldown_policy.md). PR10e
 assembles these primitives into an audit-only context; see
 [cr_cooldown_audit_assembly.md](cr_cooldown_audit_assembly.md). PR10f wires that
 context into dry-run artifacts (opt-in, artifact-only); see
-[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md).
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md). PR10g lets the
+caller supply an explicit in-memory prior snapshot to that dry-run (no file
+I/O); see
+[cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
