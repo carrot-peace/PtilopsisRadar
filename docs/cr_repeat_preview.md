@@ -30,6 +30,9 @@ It uses the PR10a `event_key`, the current decision level / score, and an
 optional caller-provided prior state snapshot. If no prior snapshot is
 provided, repeat preview is explicitly `not_evaluated`.
 
+PR10c defines the event state snapshot boundary in
+[cr_event_state_snapshot.md](cr_event_state_snapshot.md).
+
 ## 3. Preview statuses
 
 - `not_evaluated`: no prior event state snapshot was provided.
