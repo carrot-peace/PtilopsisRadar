@@ -30,6 +30,11 @@ from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
     build_and_write_cr_runtime_dry_run,
 )
+from trendradar.cr.state_snapshot import (
+    CR_EVENT_STATE_SCHEMA_VERSION,
+    CREventStateEntry,
+    CREventStateSnapshot,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +195,38 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             # Dry-run is pure planning — plan refers to the same run.
             self.assertEqual(
                 result.dispatch_plan.run_label, result.pipeline.run_label
+            )
+
+    def test_cooldown_audit_none_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+            )
+            self.assertIsNone(result.cooldown_audit)
+
+    def test_prior_snapshot_ignored_when_audit_disabled(self):
+        # PR10g: an explicit in-memory prior snapshot is accepted but is fully
+        # ignored (and never read from disk) while the audit flag is off.
+        snapshot = CREventStateSnapshot(
+            schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
+            entries=(
+                CREventStateEntry(
+                    event_key="cr-event-v1:example", decision_level="watch"
+                ),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+                cooldown_prior_snapshot=snapshot,
+            )
+            self.assertIsNone(result.cooldown_audit)
+            self.assertNotIn(
+                "Cooldown Policy Preview", result.pipeline.markdown_audit_text
             )
 
 
