@@ -166,7 +166,10 @@ class TestDefaultBehaviorUnchanged(unittest.TestCase):
             html = _read_html(result)
             self.assertNotIn("Cooldown Policy Preview", md)
             self.assertNotIn("Cooldown Policy Preview", html)
+            self.assertNotIn("State Transition Preview", md)
+            self.assertNotIn("State Transition Preview", html)
             self.assertIsNone(result.cooldown_audit)
+            self.assertIsNone(result.cooldown_state_transition_preview)
 
     def test_default_artifacts_byte_for_byte_match_disabled(self):
         with tempfile.TemporaryDirectory() as t1, tempfile.TemporaryDirectory() as t2:
@@ -210,14 +213,22 @@ class TestCooldownAuditEnabled(unittest.TestCase):
             md = _read_markdown(self._run(tmp))
             self.assertIn("#### Repeat Preview", md)
             self.assertIn("#### Cooldown Policy Preview", md)
+            self.assertIn("#### State Transition Preview", md)
             self.assertIn("- Action: `not_evaluated`", md)
+            self.assertIn("- Prior Source: `not_supplied`", md)
+            self.assertIn("- Next Snapshot Preview: `available`", md)
 
     def test_html_shows_repeat_and_cooldown_not_evaluated(self):
         with tempfile.TemporaryDirectory() as tmp:
             html = _read_html(self._run(tmp))
             self.assertIn("Repeat Preview", html)
             self.assertIn("Cooldown Policy Preview", html)
+            self.assertIn("State Transition Preview", html)
             self.assertIn("<dt>Action</dt><dd>not_evaluated</dd>", html)
+            self.assertIn("<dt>Prior Source</dt><dd>not_supplied</dd>", html)
+            self.assertIn(
+                "<dt>Next Snapshot Preview</dt><dd>available</dd>", html
+            )
 
     def test_context_is_populated_and_inert(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -233,6 +244,18 @@ class TestCooldownAuditEnabled(unittest.TestCase):
             self.assertEqual(
                 len(result.cooldown_audit.state_updates),
                 len(result.cooldown_audit.candidates),
+            )
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            preview = result.cooldown_state_transition_preview
+            self.assertFalse(preview.prior_snapshot_available)
+            self.assertEqual(
+                preview.update_count,
+                len(result.cooldown_audit.state_updates),
+            )
+            self.assertIsNotNone(preview.next_snapshot)
+            self.assertEqual(
+                len(preview.next_snapshot.entries),
+                len(result.cooldown_audit.state_updates),
             )
 
     def test_written_artifacts_match_pipeline_text(self):
@@ -410,8 +433,10 @@ class TestPriorSnapshotIgnoredWhenDisabled(unittest.TestCase):
 
             self.assertIsNone(with_path.cooldown_audit)
             self.assertIsNone(with_path.cooldown_prior_snapshot_load)
+            self.assertIsNone(with_path.cooldown_state_transition_preview)
             md = _read_markdown(with_path)
             self.assertNotIn("Cooldown Policy Preview", md)
+            self.assertNotIn("State Transition Preview", md)
             self.assertEqual(
                 plain.pipeline.markdown_audit_text,
                 with_path.pipeline.markdown_audit_text,
@@ -507,7 +532,19 @@ class TestPriorSnapshotPathSameLevelRepeat(unittest.TestCase):
             self.assertIsNone(result.cooldown_prior_snapshot_load.error)
             self.assertIn("- Status: `same_level_repeat`", md)
             self.assertIn("- Action: `cooldown`", md)
+            self.assertIn("- Prior Source: `loaded`", md)
+            self.assertIn("- Next Snapshot Preview: `available`", md)
+            self.assertIn("- Next Snapshot Entry Count: `1`", md)
             self.assertIn("<dt>Action</dt><dd>cooldown</dd>", html)
+            self.assertIn("<dt>Prior Source</dt><dd>loaded</dd>", html)
+            self.assertIn(
+                "<dt>Next Snapshot Entry Count</dt><dd>1</dd>", html
+            )
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            self.assertEqual(
+                len(result.cooldown_state_transition_preview.next_snapshot.entries),
+                1,
+            )
             for ac in result.cooldown_audit.candidates:
                 self.assertEqual(ac.repeat_preview.status, "same_level_repeat")
                 self.assertEqual(ac.cooldown_decision.action, "cooldown")
@@ -528,8 +565,15 @@ class TestPriorSnapshotPathFailureSemantics(unittest.TestCase):
             self.assertIsNotNone(result.cooldown_prior_snapshot_load)
             self.assertFalse(result.cooldown_prior_snapshot_load.loaded)
             self.assertIsNone(result.cooldown_prior_snapshot_load.error)
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            self.assertIsNotNone(
+                result.cooldown_state_transition_preview.next_snapshot
+            )
             self.assertIn("- Status: `new`", md)
             self.assertIn("- Action: `allow_new`", md)
+            self.assertIn("- Prior Source: `missing`", md)
+            self.assertIn("- Prior Loaded: `False`", md)
+            self.assertIn("- Next Snapshot Preview: `available`", md)
 
     def test_malformed_file_fails_closed_to_not_evaluated(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -548,7 +592,13 @@ class TestPriorSnapshotPathFailureSemantics(unittest.TestCase):
             self.assertIsNotNone(result.cooldown_prior_snapshot_load)
             self.assertFalse(result.cooldown_prior_snapshot_load.loaded)
             self.assertIsNotNone(result.cooldown_prior_snapshot_load.error)
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            self.assertIsNone(
+                result.cooldown_state_transition_preview.next_snapshot
+            )
             self.assertIn("- Action: `not_evaluated`", md)
+            self.assertIn("- Prior Source: `error`", md)
+            self.assertIn("- Next Snapshot Preview: `suppressed`", md)
             self.assertNotIn("allow_new", md)
 
     def test_schema_mismatch_fails_closed_to_not_evaluated(self):
@@ -571,7 +621,13 @@ class TestPriorSnapshotPathFailureSemantics(unittest.TestCase):
             self.assertIsNotNone(result.cooldown_prior_snapshot_load)
             self.assertFalse(result.cooldown_prior_snapshot_load.loaded)
             self.assertIsNotNone(result.cooldown_prior_snapshot_load.error)
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            self.assertIsNone(
+                result.cooldown_state_transition_preview.next_snapshot
+            )
             self.assertIn("- Action: `not_evaluated`", md)
+            self.assertIn("- Prior Source: `error`", md)
+            self.assertIn("- Next Snapshot Preview: `suppressed`", md)
             self.assertNotIn("allow_new", md)
 
 
@@ -632,6 +688,7 @@ class TestPriorSnapshotTelegramAndDispatchUnchanged(unittest.TestCase):
             )
             self.assertNotIn("same_level_repeat", on.pipeline.cr_a_text)
             self.assertNotIn("Cooldown Policy Preview", on.pipeline.cr_a_text)
+            self.assertNotIn("State Transition Preview", on.pipeline.cr_a_text)
 
     def test_cr_a_text_and_dispatch_identical_with_prior_snapshot_path(self):
         with tempfile.TemporaryDirectory() as probe, tempfile.TemporaryDirectory() as t1, tempfile.TemporaryDirectory() as t2:
@@ -669,6 +726,9 @@ class TestPriorSnapshotTelegramAndDispatchUnchanged(unittest.TestCase):
             )
             self.assertNotIn("same_level_repeat", with_path.pipeline.cr_a_text)
             self.assertNotIn("Cooldown Policy Preview", with_path.pipeline.cr_a_text)
+            self.assertNotIn(
+                "State Transition Preview", with_path.pipeline.cr_a_text
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +753,8 @@ class TestNoStateIOSourceGuard(unittest.TestCase):
             "telegram_env",
             "os.environ",
             "open(",
+            "write_text",
+            "os.replace",
             "output/cr/state",
             "output/cr_state",
             "cr/state",

@@ -206,6 +206,7 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             )
             self.assertIsNone(result.cooldown_audit)
             self.assertIsNone(result.cooldown_prior_snapshot_load)
+            self.assertIsNone(result.cooldown_state_transition_preview)
 
     def test_prior_snapshot_ignored_when_audit_disabled(self):
         # PR10g: an explicit in-memory prior snapshot is accepted but is fully
@@ -227,6 +228,7 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             )
             self.assertIsNone(result.cooldown_audit)
             self.assertIsNone(result.cooldown_prior_snapshot_load)
+            self.assertIsNone(result.cooldown_state_transition_preview)
             self.assertNotIn(
                 "Cooldown Policy Preview", result.pipeline.markdown_audit_text
             )
@@ -245,8 +247,31 @@ class TestRuntimeDryRunModel(unittest.TestCase):
             )
             self.assertIsNone(result.cooldown_audit)
             self.assertIsNone(result.cooldown_prior_snapshot_load)
+            self.assertIsNone(result.cooldown_state_transition_preview)
             self.assertNotIn(
                 "Cooldown Policy Preview", result.pipeline.markdown_audit_text
+            )
+
+    def test_state_transition_preview_populated_when_audit_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="run-a",
+                artifact_config=_artifact_config(tmp),
+                include_cooldown_audit=True,
+            )
+
+            self.assertIsNotNone(result.cooldown_audit)
+            self.assertIsNotNone(result.cooldown_state_transition_preview)
+            preview = result.cooldown_state_transition_preview
+            self.assertEqual(
+                preview.update_count,
+                len(result.cooldown_audit.state_updates),
+            )
+            self.assertIsNotNone(preview.next_snapshot)
+            self.assertIn(
+                "State Transition Preview",
+                result.pipeline.markdown_audit_text,
             )
 
 
@@ -471,6 +496,8 @@ class TestSourceBoundary(unittest.TestCase):
         "telegram_sink",
         "telegram_env",
         "os.environ",
+        "write_text",
+        "os.replace",
         "output/cr/state",
         "output/cr_state",
         "cr/state",

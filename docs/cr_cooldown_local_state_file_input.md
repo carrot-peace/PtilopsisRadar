@@ -73,8 +73,9 @@ read.
 Future PRs may add:
 
 - explicit local-only write-back in dry-run
-- artifact display of load result metadata
 - production integration behind hard gates
 
-Those are intentionally not implemented here. PR10h only adds explicit,
-read-only, local file input for artifact dry-runs.
+PR10i adds artifact-only state transition preview, including load-result
+metadata and in-memory next-state preview; see
+[cr_state_transition_preview.md](cr_state_transition_preview.md).
+Write-back and production integration remain intentionally separate.

@@ -38,7 +38,10 @@ from trendradar.cr.dispatch_executor import (
 )
 from trendradar.cr.dispatch_plan import CRDispatchPlan, build_cr_a_dispatch_plan
 from trendradar.cr.html import CRHTMLRenderConfig
-from trendradar.cr.markdown import CRMarkdownRenderConfig
+from trendradar.cr.markdown import (
+    CRMarkdownRenderConfig,
+    render_cr_markdown_audit,
+)
 from trendradar.cr.models import CRPrimitiveRecord, CRRunContext
 from trendradar.cr.pipeline import (
     CRPipelineConfig,
@@ -56,6 +59,11 @@ from trendradar.cr.state_store import (
     CREventStateLoadResult,
     load_cr_event_state_snapshot,
 )
+from trendradar.cr.state_transition_preview import (
+    CREventStateTransitionPreview,
+    build_cr_event_state_transition_preview,
+)
+from trendradar.cr.html import render_cr_html_audit
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +101,11 @@ class CRRuntimeDryRunResult:
     ``error=None`` and are treated as known-empty prior state.  Malformed or
     invalid files produce ``loaded=False`` with an error and fail closed to no
     prior snapshot.
+
+    ``cooldown_state_transition_preview`` is populated only when
+    ``include_cooldown_audit=True``. It previews the next state snapshot in
+    memory from the effective prior snapshot and proposed state updates. It is
+    never written.
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
@@ -102,6 +115,9 @@ class CRRuntimeDryRunResult:
     dispatch_execution: CRDispatchExecutionResult | None = None
     cooldown_audit: CRCooldownAuditContext | None = None
     cooldown_prior_snapshot_load: CREventStateLoadResult | None = None
+    cooldown_state_transition_preview: (
+        CREventStateTransitionPreview | None
+    ) = None
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +183,58 @@ def _pipeline_config_with_cooldown_audit(
     return replace(pipeline_config, render=audit_render)
 
 
+def _pipeline_result_with_state_transition_preview(
+    pipeline_result: CRPipelineResult,
+    pipeline_config: CRPipelineConfig | None,
+    *,
+    transition_preview: CREventStateTransitionPreview,
+    urgent_threshold: float,
+) -> CRPipelineResult:
+    """Return a pipeline result with Markdown/HTML re-rendered to include the
+    run-level state transition preview.
+    """
+    base_render = (
+        pipeline_config.render
+        if pipeline_config is not None
+        else CRPipelineRenderConfig()
+    )
+    base_md = (
+        base_render.markdown
+        if base_render.markdown is not None
+        else CRMarkdownRenderConfig()
+    )
+    base_html = (
+        base_render.html
+        if base_render.html is not None
+        else CRHTMLRenderConfig()
+    )
+    md_cfg = replace(
+        base_md,
+        include_state_transition_preview=True,
+        state_transition_preview=transition_preview,
+    )
+    html_cfg = replace(
+        base_html,
+        include_state_transition_preview=True,
+        state_transition_preview=transition_preview,
+    )
+    return replace(
+        pipeline_result,
+        markdown_audit_text=render_cr_markdown_audit(
+            list(pipeline_result.presented_candidates),
+            run_label=pipeline_result.run_label,
+            config=md_cfg,
+            urgent_threshold=urgent_threshold,
+        ),
+        html_audit_text=render_cr_html_audit(
+            list(pipeline_result.presented_candidates),
+            run_label=pipeline_result.run_label,
+            config=html_cfg,
+            urgent_threshold=urgent_threshold,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Bridge
 # ---------------------------------------------------------------------------
@@ -229,10 +297,11 @@ def build_and_write_cr_runtime_dry_run(
         Opt-in, artifact-only flag (default ``False``).  When ``True``, the
         Markdown / HTML audit artifacts additionally render repeat-preview and
         cooldown-policy-preview evidence, and ``cooldown_audit`` is populated
-        with the PR10e audit context.  This is observability only: no prior
-        state file is read, no state is written, the CR-A text and dispatch
-        plan are unaffected, and nothing is enforced or suppressed.  When
-        ``False`` (default), artifact output is byte-for-byte unchanged.
+        with the PR10e audit context.  This is observability only: prior state
+        is used only when explicitly supplied in memory or loaded read-only
+        from an explicit local path, no state is written, the CR-A text and
+        dispatch plan are unaffected, and nothing is enforced or suppressed.
+        When ``False`` (default), artifact output is byte-for-byte unchanged.
     cooldown_policy:
         Optional cooldown policy used only when ``include_cooldown_audit`` is
         ``True``.  Defaults to ``CRCooldownPolicy()``.  Ignored otherwise.
@@ -341,12 +410,35 @@ def build_and_write_cr_runtime_dry_run(
     #     explicit (in memory or loaded read-only from a caller path), no state
     #     is written, and the proposed next-state entries are never persisted.
     cooldown_audit_context: CRCooldownAuditContext | None = None
+    cooldown_state_transition_preview: CREventStateTransitionPreview | None = None
     if include_cooldown_audit:
         cooldown_audit_context = build_cr_cooldown_audit_context(
             pipeline_result.presented_candidates,
             prior_snapshot=cooldown_snapshot_for_audit,
             policy=cooldown_policy_effective,
             seen_at=None,
+        )
+        cooldown_state_transition_preview = (
+            build_cr_event_state_transition_preview(
+                prior_snapshot=cooldown_snapshot_for_audit,
+                state_updates=cooldown_audit_context.state_updates,
+                prior_snapshot_loaded=(
+                    cooldown_prior_snapshot_load.loaded
+                    if cooldown_prior_snapshot_load is not None
+                    else None
+                ),
+                prior_snapshot_error=(
+                    cooldown_prior_snapshot_load.error
+                    if cooldown_prior_snapshot_load is not None
+                    else None
+                ),
+            )
+        )
+        pipeline_result = _pipeline_result_with_state_transition_preview(
+            pipeline_result,
+            effective_pipeline_config,
+            transition_preview=cooldown_state_transition_preview,
+            urgent_threshold=urgent_threshold,
         )
 
     # 5. Write artifacts only through the existing artifact writer.
@@ -373,4 +465,5 @@ def build_and_write_cr_runtime_dry_run(
         dispatch_execution=dispatch_execution,
         cooldown_audit=cooldown_audit_context,
         cooldown_prior_snapshot_load=cooldown_prior_snapshot_load,
+        cooldown_state_transition_preview=cooldown_state_transition_preview,
     )
