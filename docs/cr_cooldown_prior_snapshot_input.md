@@ -94,8 +94,8 @@ explicitly so the evidence becomes meaningful.
 
 ## 6. Handoff
 
-A future PR may add an explicit *local file* input that loads a prior snapshot
-from disk for dry-run experiments — that is intentionally a separate, gated
-change because it crosses the in-memory boundary this PR preserves. Production
-enforcement (suppressing dispatch, writing state, reading a clock) likewise
-remains a separate, explicitly gated PR.
+PR10h adds an explicit *local file* input that loads a prior snapshot from disk
+for dry-run experiments while preserving artifact-only, read-only semantics;
+see [cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).
+Production enforcement (suppressing dispatch, writing state, reading a clock)
+likewise remains a separate, explicitly gated PR.

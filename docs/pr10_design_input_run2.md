@@ -176,3 +176,6 @@ context into dry-run artifacts (opt-in, artifact-only); see
 caller supply an explicit in-memory prior snapshot to that dry-run (no file
 I/O); see
 [cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
+PR10h lets artifact dry-runs load that prior snapshot from an explicit local
+JSON path, read-only and without default/env/config paths; see
+[cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).

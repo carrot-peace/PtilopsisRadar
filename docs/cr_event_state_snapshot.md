@@ -112,6 +112,9 @@ that context in dry-run artifacts (opt-in, no state read/write); see
 caller pass an explicit in-memory snapshot of this shape into that dry-run (no
 file read/write); see
 [cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
+PR10h lets that artifact dry-run load a prior snapshot from an explicit local
+JSON path, read-only and with no default path; see
+[cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).
 
 Open questions for PR10d:
 
