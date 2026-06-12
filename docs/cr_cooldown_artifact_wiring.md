@@ -61,8 +61,9 @@ result = build_and_write_cr_runtime_dry_run(
 
 ## 5. Handoff
 
-A future PR may add an explicit local-only prior-snapshot input for dry-run
-artifact experiments (still in memory, still no production persistence) so that
-audit artifacts can show real `same_level_repeat` / `meaningful_escalation`
-evidence. Production enforcement (suppressing dispatch, writing state, reading a
-clock) still requires a separate, explicitly gated PR.
+PR10g adds an explicit in-memory prior-snapshot input for dry-run artifact
+experiments (still in memory, still no production persistence) so that audit
+artifacts can show real `same_level_repeat` / `meaningful_escalation` evidence;
+see [cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
+Production enforcement (suppressing dispatch, writing state, reading a clock)
+still requires a separate, explicitly gated PR.

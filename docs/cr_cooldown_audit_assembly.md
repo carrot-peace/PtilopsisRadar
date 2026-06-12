@@ -93,6 +93,9 @@ and the CR-A Telegram text renderer is unaffected.
 
 PR10f wires this context into the runtime dry-run artifact path behind an
 opt-in, artifact-only flag; see
-[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md). Production
-enforcement (actually suppressing dispatch, writing state, or reading a clock)
-still requires a separate, gated PR.
+[cr_cooldown_artifact_wiring.md](cr_cooldown_artifact_wiring.md). PR10g lets the
+caller supply an explicit in-memory prior snapshot so the artifacts show real
+repeat / cooldown decisions; see
+[cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
+Production enforcement (actually suppressing dispatch, writing state, or reading
+a clock) still requires a separate, gated PR.
