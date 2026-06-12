@@ -74,6 +74,9 @@ Where does the prior event state snapshot come from, and how is it safely read/w
 
 PR10c should still avoid cooldown enforcement.
 
+PR10c defines the event state snapshot boundary in
+[cr_event_state_snapshot.md](cr_event_state_snapshot.md).
+
 Recommended next PR:
 
 ```text
