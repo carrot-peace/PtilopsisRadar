@@ -54,6 +54,7 @@ default.
 
 ## Handoff
 
-Future PR10j may add explicit local-only write-back using a caller-provided
-output path. That should remain separate because it crosses from preview-only
-artifact evidence into persistence.
+PR10j adds explicit local-only write-back using a caller-provided output path;
+see [cr_cooldown_local_state_writeback.md](cr_cooldown_local_state_writeback.md).
+That remains separate because it crosses from preview-only artifact evidence
+into opt-in local persistence.
