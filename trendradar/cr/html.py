@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
+from typing import Mapping
 
 from trendradar.cr.decision import (
     DECISION_ALERT,
@@ -26,6 +27,11 @@ from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
 from trendradar.cr.presentation import (
     CRPresentedCandidate,
     sort_cr_presented_candidates,
+)
+from trendradar.cr.repeat_preview import (
+    CRRepeatPreview,
+    CRSeenEventState,
+    preview_cr_repeat,
 )
 from trendradar.cr.scoring import CRScoreResult
 
@@ -44,6 +50,8 @@ class CRHTMLRenderConfig:
     include_source_items: bool = True
     include_score_components: bool = True
     include_event_identity: bool = True
+    include_repeat_preview: bool = False
+    seen_event_states: Mapping[str, CRSeenEventState] | None = None
     collapse_suppress: bool = True
     collapse_watch: bool = False
 
@@ -290,6 +298,49 @@ def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
     return lines
 
 
+def _render_repeat_preview(preview: CRRepeatPreview) -> list[str]:
+    """Render audit-only repeat preview evidence for one candidate."""
+    has_prior_level = preview.previous_decision_level is not None
+    has_prior_score = preview.previous_score is not None
+    rows: list[tuple[str, str | None]] = [
+        ("Status", preview.status),
+        ("Reason", preview.reason),
+        ("Previous Level", preview.previous_decision_level),
+        (
+            "Current Level",
+            preview.current_decision_level if has_prior_level else None,
+        ),
+        (
+            "Previous Score",
+            _format_score(preview.previous_score)
+            if has_prior_score
+            else None,
+        ),
+        (
+            "Current Score",
+            _format_score(preview.current_score)
+            if has_prior_score and preview.current_score is not None
+            else None,
+        ),
+        ("Previous Seen At", preview.previous_seen_at),
+    ]
+
+    lines: list[str] = []
+    lines.append('      <section class="repeat-preview">')
+    lines.append("        <h4>Repeat Preview</h4>")
+    lines.append("        <dl>")
+    for label, value in rows:
+        if value is None or value == "":
+            continue
+        lines.append(
+            f"          <dt>{_escape_html_text(label)}</dt>"
+            f"<dd>{_escape_html_text(value)}</dd>"
+        )
+    lines.append("        </dl>")
+    lines.append("      </section>")
+    return lines
+
+
 def _render_candidate_card(
     pc: CRPresentedCandidate, config: CRHTMLRenderConfig
 ) -> list[str]:
@@ -343,6 +394,22 @@ def _render_candidate_card(
 
     if config.include_event_identity:
         lines.extend(_render_event_identity(pc))
+
+    if config.include_repeat_preview:
+        identity = build_cr_event_identity_from_candidate(pc.candidate)
+        seen_state = (
+            config.seen_event_states.get(identity.event_key)
+            if config.seen_event_states is not None
+            else None
+        )
+        preview = preview_cr_repeat(
+            event_key=identity.event_key,
+            current_decision_level=pc.decision_level,
+            current_score=pc.total_score,
+            seen_state=seen_state,
+            prior_state_snapshot_provided=config.seen_event_states is not None,
+        )
+        lines.extend(_render_repeat_preview(preview))
 
     if config.include_score_components:
         lines.extend(_render_score_components_table(pc.score_result))
