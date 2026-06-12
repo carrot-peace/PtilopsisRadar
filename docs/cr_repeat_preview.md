@@ -31,7 +31,9 @@ optional caller-provided prior state snapshot. If no prior snapshot is
 provided, repeat preview is explicitly `not_evaluated`.
 
 PR10c defines the event state snapshot boundary in
-[cr_event_state_snapshot.md](cr_event_state_snapshot.md).
+[cr_event_state_snapshot.md](cr_event_state_snapshot.md). PR10d defines the
+cooldown policy decision layer in
+[cr_cooldown_policy.md](cr_cooldown_policy.md).
 
 ## 3. Preview statuses
 

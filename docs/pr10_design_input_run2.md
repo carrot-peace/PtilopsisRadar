@@ -166,3 +166,6 @@ PR10c defines the event state snapshot boundary in
 
 Run-2 turns PR10 from speculative architecture into observed system design. The
 next step should preserve this evidence trail before implementing enforcement.
+
+PR10d adds a pure cooldown policy decision layer (preview only, no
+enforcement); see [cr_cooldown_policy.md](cr_cooldown_policy.md).

@@ -23,6 +23,11 @@ from trendradar.cr.decision import (
     DECISION_URGENT,
     DECISION_WATCH,
 )
+from trendradar.cr.cooldown_policy import (
+    CRCooldownDecision,
+    CRCooldownPolicy,
+    decide_cr_cooldown,
+)
 from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
 from trendradar.cr.presentation import (
     CRPresentedCandidate,
@@ -52,6 +57,8 @@ class CRHTMLRenderConfig:
     include_event_identity: bool = True
     include_repeat_preview: bool = False
     seen_event_states: Mapping[str, CRSeenEventState] | None = None
+    include_cooldown_decision: bool = False
+    cooldown_policy: CRCooldownPolicy | None = None
     collapse_suppress: bool = True
     collapse_watch: bool = False
 
@@ -341,6 +348,40 @@ def _render_repeat_preview(preview: CRRepeatPreview) -> list[str]:
     return lines
 
 
+def _render_cooldown_decision(decision: CRCooldownDecision) -> list[str]:
+    """Render audit-only cooldown policy preview for one candidate.
+
+    Preview of what a cooldown policy *would* decide. No enforcement, no
+    dispatch change, no anchors/hrefs; every value is HTML-escaped text.
+    """
+    rows: list[tuple[str, str | None]] = [
+        ("Action", decision.action),
+        ("Reason", decision.reason),
+        ("Repeat Status", decision.repeat_status),
+        (
+            "Cooldown Minutes",
+            str(decision.cooldown_minutes)
+            if decision.cooldown_minutes is not None
+            else None,
+        ),
+    ]
+
+    lines: list[str] = []
+    lines.append('      <section class="cooldown-decision">')
+    lines.append("        <h4>Cooldown Policy Preview</h4>")
+    lines.append("        <dl>")
+    for label, value in rows:
+        if value is None or value == "":
+            continue
+        lines.append(
+            f"          <dt>{_escape_html_text(label)}</dt>"
+            f"<dd>{_escape_html_text(value)}</dd>"
+        )
+    lines.append("        </dl>")
+    lines.append("      </section>")
+    return lines
+
+
 def _render_candidate_card(
     pc: CRPresentedCandidate, config: CRHTMLRenderConfig
 ) -> list[str]:
@@ -410,6 +451,16 @@ def _render_candidate_card(
             prior_state_snapshot_provided=config.seen_event_states is not None,
         )
         lines.extend(_render_repeat_preview(preview))
+
+        # Cooldown policy preview (audit-only; no enforcement). Gated on
+        # repeat preview being enabled so a preview already exists.
+        if config.include_cooldown_decision:
+            decision = decide_cr_cooldown(
+                event_key=identity.event_key,
+                repeat_preview=preview,
+                policy=config.cooldown_policy,
+            )
+            lines.extend(_render_cooldown_decision(decision))
 
     if config.include_score_components:
         lines.extend(_render_score_components_table(pc.score_result))

@@ -21,6 +21,11 @@ from trendradar.cr.decision import (
     DECISION_URGENT,
     DECISION_WATCH,
 )
+from trendradar.cr.cooldown_policy import (
+    CRCooldownDecision,
+    CRCooldownPolicy,
+    decide_cr_cooldown,
+)
 from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
 from trendradar.cr.models import CRSourceItem
 from trendradar.cr.presentation import (
@@ -51,6 +56,8 @@ class CRMarkdownRenderConfig:
     include_event_identity: bool = True
     include_repeat_preview: bool = False
     seen_event_states: Mapping[str, CRSeenEventState] | None = None
+    include_cooldown_decision: bool = False
+    cooldown_policy: CRCooldownPolicy | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +281,27 @@ def _render_repeat_preview(preview: CRRepeatPreview) -> list[str]:
     return lines
 
 
+def _render_cooldown_decision(decision: CRCooldownDecision) -> list[str]:
+    """Render audit-only cooldown policy preview for one candidate.
+
+    This is a preview of what a cooldown policy *would* decide. It does NOT
+    enforce cooldown, suppress dispatch, or change Telegram output.
+    """
+    lines: list[str] = []
+    lines.append("#### Cooldown Policy Preview")
+    lines.append("")
+    lines.append(f"- Action: `{_escape_markdown_text(decision.action)}`")
+    if decision.reason:
+        lines.append(f"- Reason: {_escape_markdown_text(decision.reason)}")
+    if decision.repeat_status is not None:
+        lines.append(
+            f"- Repeat Status: `{_escape_markdown_text(decision.repeat_status)}`"
+        )
+    if decision.cooldown_minutes is not None:
+        lines.append(f"- Cooldown Minutes: `{decision.cooldown_minutes}`")
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -398,6 +426,17 @@ def render_cr_markdown_audit(
                 )
                 lines.append("")
                 lines.extend(_render_repeat_preview(preview))
+
+                # Cooldown policy preview (audit-only; no enforcement). Gated
+                # on repeat preview being enabled so a preview already exists.
+                if config.include_cooldown_decision:
+                    decision = decide_cr_cooldown(
+                        event_key=identity.event_key,
+                        repeat_preview=preview,
+                        policy=config.cooldown_policy,
+                    )
+                    lines.append("")
+                    lines.extend(_render_cooldown_decision(decision))
 
             # Score components.
             if config.include_score_components:
