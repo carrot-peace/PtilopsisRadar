@@ -475,6 +475,20 @@ class NewsAnalyzer:
         if not analysis_config.get("ENABLED", False):
             return None
 
+        if schedule is None:
+            schedule = ResolvedSchedule(
+                period_key=None,
+                period_name=None,
+                day_plan="manual",
+                collect=True,
+                analyze=True,
+                push=True,
+                report_mode=mode,
+                ai_mode=mode,
+                once_analyze=False,
+                once_push=False,
+            )
+
         # 调度系统决策
         if not schedule.analyze:
             print("[AI] 调度器: 当前时间段不执行 AI 分析")
@@ -498,10 +512,24 @@ class NewsAnalyzer:
             # 确定 AI 分析使用的模式
             ai_mode_config = analysis_config.get("MODE", "follow_report")
             if ai_mode_config == "follow_report":
-                # 跟随推送报告模式
-                ai_mode = mode
-                ai_stats = stats
-                ai_id_to_name = id_to_name
+                # 跟随调度解析出的 AI 模式；调度未指定时再回退到推送报告模式。
+                ai_mode = getattr(schedule, "ai_mode", None) or mode
+                if ai_mode == "follow_report":
+                    ai_mode = mode
+                if ai_mode != mode:
+                    print(f"[AI] 使用调度分析模式: {ai_mode} (推送模式: {mode})")
+                    print(f"[AI] 正在准备 {ai_mode} 模式的数据...")
+                    ai_stats, ai_id_to_name = self._prepare_ai_analysis_data(
+                        ai_mode, current_results, id_to_name
+                    )
+                    if not ai_stats:
+                        print(f"[AI] 警告: 无法准备 {ai_mode} 模式的数据，回退到推送模式数据")
+                        ai_stats = stats
+                        ai_id_to_name = id_to_name
+                        ai_mode = mode
+                else:
+                    ai_stats = stats
+                    ai_id_to_name = id_to_name
             elif ai_mode_config in ["daily", "current", "incremental"]:
                 # 使用独立配置的模式，需要重新准备数据
                 ai_mode = ai_mode_config
