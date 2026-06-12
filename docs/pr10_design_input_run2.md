@@ -179,3 +179,6 @@ I/O); see
 PR10h lets artifact dry-runs load that prior snapshot from an explicit local
 JSON path, read-only and without default/env/config paths; see
 [cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).
+PR10i adds artifact-only state transition preview for load status and in-memory
+next snapshot metadata; see
+[cr_state_transition_preview.md](cr_state_transition_preview.md).

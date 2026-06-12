@@ -97,5 +97,8 @@ opt-in, artifact-only flag; see
 caller supply an explicit in-memory prior snapshot so the artifacts show real
 repeat / cooldown decisions; see
 [cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
+PR10i uses the context's proposed `state_updates` to render an artifact-only
+next-state preview; see
+[cr_state_transition_preview.md](cr_state_transition_preview.md).
 Production enforcement (actually suppressing dispatch, writing state, or reading
 a clock) still requires a separate, gated PR.

@@ -68,5 +68,8 @@ see [cr_cooldown_prior_snapshot_input.md](cr_cooldown_prior_snapshot_input.md).
 PR10h extends that to an explicit, read-only local state file input for
 artifact dry-runs; see
 [cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).
+PR10i adds artifact-only state transition preview for load status, proposed
+updates, and in-memory next snapshot metadata; see
+[cr_state_transition_preview.md](cr_state_transition_preview.md).
 Production enforcement (suppressing dispatch, writing state, reading a clock)
 still requires a separate, explicitly gated PR.

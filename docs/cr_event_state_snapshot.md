@@ -115,6 +115,8 @@ file read/write); see
 PR10h lets that artifact dry-run load a prior snapshot from an explicit local
 JSON path, read-only and with no default path; see
 [cr_cooldown_local_state_file_input.md](cr_cooldown_local_state_file_input.md).
+PR10i previews the merged next snapshot in artifacts without writing it; see
+[cr_state_transition_preview.md](cr_state_transition_preview.md).
 
 Open questions for PR10d:
 
