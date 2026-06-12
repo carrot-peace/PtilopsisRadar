@@ -69,6 +69,16 @@ from trendradar.cr.event_identity import (
     build_cr_event_identity_from_input,
     build_cr_event_identity_from_candidate,
 )
+from trendradar.cr.repeat_preview import (
+    CRRepeatPreviewStatus,
+    CRDecisionLevelComparison,
+    CRSeenEventState,
+    CRRepeatPreview,
+    normalize_cr_decision_level,
+    compare_cr_decision_level,
+    preview_cr_repeat,
+    preview_cr_repeats,
+)
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
     render_cr_markdown_audit,
@@ -163,6 +173,14 @@ __all__ = [
     "normalize_cr_event_url",
     "build_cr_event_identity_from_input",
     "build_cr_event_identity_from_candidate",
+    "CRRepeatPreviewStatus",
+    "CRDecisionLevelComparison",
+    "CRSeenEventState",
+    "CRRepeatPreview",
+    "normalize_cr_decision_level",
+    "compare_cr_decision_level",
+    "preview_cr_repeat",
+    "preview_cr_repeats",
     "CRPresentedCandidate",
     "CRPresentationRun",
     "CRTextPresentationConfig",
