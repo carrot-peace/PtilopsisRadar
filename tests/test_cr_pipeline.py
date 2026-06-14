@@ -737,8 +737,6 @@ class TestArtifactWriteHelpers(unittest.TestCase):
             self.assertGreater(len(result.pipeline.candidates), 0)
 
     def test_build_and_write_artifact_paths_field(self):
-        from trendradar.cr.artifacts import CRArtifactPaths
-
         with tempfile.TemporaryDirectory() as d:
             from trendradar.cr.artifacts import CRArtifactConfig
 
@@ -748,7 +746,10 @@ class TestArtifactWriteHelpers(unittest.TestCase):
                 run_label="test",
                 artifact_config=art_cfg,
             )
-            self.assertIsInstance(result.artifact_paths, CRArtifactPaths)
+            self.assertTrue(result.artifact_paths.markdown_archive_path.exists())
+            self.assertTrue(result.artifact_paths.html_archive_path.exists())
+            self.assertTrue(result.artifact_paths.latest_markdown_path.exists())
+            self.assertTrue(result.artifact_paths.latest_html_path.exists())
 
 
 # ===========================================================================
