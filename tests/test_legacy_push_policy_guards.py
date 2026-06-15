@@ -19,6 +19,7 @@ CR_TELEGRAM_ENV_PATH = PROJECT_ROOT / "trendradar" / "cr" / "telegram_env.py"
 CR_TELEGRAM_SINK_PATH = PROJECT_ROOT / "trendradar" / "cr" / "telegram_sink.py"
 MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
 REPORT_TRANSLATION_PATH = PROJECT_ROOT / "trendradar" / "report" / "translation.py"
+NOTIFICATION_ROOT = PROJECT_ROOT / "trendradar" / "notification"
 
 
 def _read(path: Path) -> str:
@@ -271,10 +272,20 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
         )
         self.assertNotIn("NotificationDispatcher", source)
 
-    @unittest.expectedFailure
-    def test_future_legacy_fallback_sender_must_be_unreachable(self) -> None:
-        source = _read(PROJECT_ROOT / "trendradar" / "notification" / "senders.py")
+    def test_legacy_fallback_sender_is_unreachable(self) -> None:
+        source = _read(NOTIFICATION_ROOT / "senders.py")
         self.assertNotIn("fallback", source.lower())
+
+    def test_notification_package_has_no_active_telegram_transport(self) -> None:
+        source = "\n".join(_read(path) for path in _python_sources(NOTIFICATION_ROOT))
+        for token in (
+            "requests.post",
+            "urllib",
+            "sendMessage",
+            "sendDocument",
+            "本轮 Telegram 文本简报暂不可用",
+        ):
+            self.assertNotIn(token, source)
 
 
 if __name__ == "__main__":
