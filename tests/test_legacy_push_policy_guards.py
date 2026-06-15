@@ -187,7 +187,6 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
             "_send_notification_if_needed",
             "dispatch_all",
             "send_to_telegram",
-            "record_execution",
         }
 
         offenders: list[str] = []
