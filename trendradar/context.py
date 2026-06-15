@@ -37,6 +37,7 @@ from trendradar.report import (
     generate_html_report,
 )
 from trendradar.report.dashboard import write_dashboard
+from trendradar.report.daily_v2 import render_daily_report_v2
 from trendradar.report.newsletter import render_newsletter_report
 from trendradar.ai import AITranslator
 from trendradar.ai.filter import AIFilter, AIFilterResult
@@ -391,10 +392,21 @@ class AppContext:
     ) -> str:
         """渲染HTML内容。
 
-        统一使用 environment newsletter 渲染器：AI 是否可用只决定
-        newsletter 内部显示正常 editorial 还是 no-AI fallback notice。
-        classic report_style 已废弃，不再路由到旧版 HTML 渲染器。
+        daily artifact route uses Daily Report v2. Current/incremental keep the
+        existing environment newsletter renderer.
         """
+        if mode == "daily":
+            return render_daily_report_v2(
+                report_data,
+                total_titles,
+                mode,
+                update_info,
+                rss_items=rss_items,
+                rss_new_items=rss_new_items,
+                ai_analysis=ai_analysis,
+                get_time_func=self.get_time,
+            )
+
         return render_newsletter_report(
             report_data,
             total_titles,
