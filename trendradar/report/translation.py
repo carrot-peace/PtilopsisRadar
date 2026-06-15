@@ -9,14 +9,24 @@ or transport code.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
+
+
+class ArtifactTranslator(Protocol):
+    """Structural interface for a report/artifact translator."""
+
+    enabled: bool
+    scope: Dict[str, Any]
+    target_language: str
+
+    def translate_batch(self, titles: List[str]) -> Any: ...
 
 
 def translate_report_content(
     report_data: Dict[str, Any],
     rss_items: Optional[List[Dict[str, Any]]] = None,
     rss_new_items: Optional[List[Dict[str, Any]]] = None,
-    translator: Any = None,
+    translator: Optional[ArtifactTranslator] = None,
     display_regions: Optional[Dict[str, Any]] = None,
     skip_rss: bool = False,
     debug: bool = False,

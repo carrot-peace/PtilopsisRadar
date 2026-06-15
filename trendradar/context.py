@@ -5,9 +5,14 @@
 提供配置上下文类，封装所有依赖配置的操作，消除全局状态和包装函数。
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from trendradar.report.translation import ArtifactTranslator
 
 from trendradar.utils.time import (
     DEFAULT_TIMEZONE,
@@ -403,7 +408,7 @@ class AppContext:
 
     # === 翻译 / 通知发送 ===
 
-    def create_artifact_translator(self) -> Optional[AITranslator]:
+    def create_artifact_translator(self) -> Optional[ArtifactTranslator]:
         """创建 artifact/report 翻译器。"""
         trans_config = self.config.get("AI_TRANSLATION", {})
         if not trans_config.get("ENABLED", False):

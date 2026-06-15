@@ -214,12 +214,25 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
                 names.add(node.attr)
 
         self.assertFalse(forbidden & names)
+        # function must reference the centralized removal-message constant
         self.assertTrue(
             any(
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and "Legacy Push has been removed from runtime" in node.value
+                isinstance(node, ast.Name) and node.id == "LEGACY_PUSH_REMOVED_MSG"
                 for node in ast.walk(function)
+            )
+        )
+        # the constant itself must carry the canonical removal message
+        tree = ast.parse(source)
+        self.assertTrue(
+            any(
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(t, ast.Name) and t.id == "LEGACY_PUSH_REMOVED_MSG"
+                    for t in node.targets
+                )
+                and isinstance(node.value, ast.Constant)
+                and "Legacy Push has been removed from runtime" in node.value.value
+                for node in ast.walk(tree)
             )
         )
 
