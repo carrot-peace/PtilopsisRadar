@@ -28,6 +28,11 @@ from trendradar.report.dashboard import (
     build_dashboard_state,
     write_dashboard,
 )
+from trendradar.report.daily_v2 import (
+    DailyReportV2,
+    build_daily_report_v2,
+    render_daily_report_v2,
+)
 
 __all__ = [
     # 辅助函数
@@ -43,4 +48,8 @@ __all__ = [
     "render_current_dashboard_html",
     "build_dashboard_state",
     "write_dashboard",
+    # Daily Report v2 (artifact-only)
+    "DailyReportV2",
+    "build_daily_report_v2",
+    "render_daily_report_v2",
 ]
