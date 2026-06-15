@@ -14,7 +14,7 @@ import sys
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, NoReturn, Tuple, Optional
 
 import requests
 
@@ -836,7 +836,7 @@ class NewsAnalyzer:
         ai_result: Optional[AIAnalysisResult] = None,
         current_results: Optional[Dict] = None,
         schedule: ResolvedSchedule = None,
-    ) -> bool:
+    ) -> NoReturn:
         """Fail-closed Legacy Push entrypoint.
 
         PR-A disconnects Legacy Push from normal runtime.  This method remains
