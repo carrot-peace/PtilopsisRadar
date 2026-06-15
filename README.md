@@ -123,10 +123,10 @@ AI (optional, requires API Key configuration) has one sole task: based on the pr
 
 ### Reports & Push Notifications
 
-Generates an Information Environment Anomaly Monitoring Daily Report (HTML), and can push to: Feishu, DingTalk, WeWork, Telegram, Email, Slack, Bark, ntfy, Generic Webhook.
+Generates an Information Environment Anomaly Monitoring Daily Report (HTML).
+Legacy notification push has been disconnected from normal runtime.
 
-Legacy notification push is scheduled for removal in PtilopsisRadar and should
-not be treated as the future push path. See
+Legacy notification push should not be treated as the future push path. See
 [`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md) for the
 canonical Legacy Push removal and CR-New separation plan.
 
@@ -188,7 +188,7 @@ uv sync
 
 # Edit configuration (see "Configuration Entry Points" below)
 cp config/config.yaml config/config.yaml.bak
-# Edit config/config.yaml to configure data sources and push channels
+# Edit config/config.yaml to configure data sources and artifact generation
 
 # Run
 uv run python -m trendradar
@@ -225,9 +225,11 @@ ai:
 
 Supported models include DeepSeek, OpenAI, Gemini, Claude, Ollama, etc. See [LiteLLM docs](https://docs.litellm.ai/docs/providers).
 
-### Push Channels (Optional)
+### Legacy Push Channels
 
-Configure desired push channels in the `notification.channels` section of `config/config.yaml`. Supports multi-account (semicolon-separated) and multi-channel parallel delivery.
+Legacy notification push has been disconnected from normal runtime. Existing
+notification config remains legacy data until later cleanup stages; it is not
+the future push path.
 
 ### Diagnostic Commands
 
@@ -235,7 +237,7 @@ Configure desired push channels in the `notification.channels` section of `confi
 # Environment health check
 uv run python -m trendradar --doctor
 
-# Test notification connectivity
+# Legacy Push has been removed from runtime; this prints the removal notice
 uv run python -m trendradar --test-notification
 
 # Show current schedule status
@@ -248,7 +250,7 @@ uv run python -m trendradar --show-schedule
 
 | File | Purpose |
 |------|---------|
-| `config/config.yaml` | Main config: data sources, report mode, push channels, AI model, storage, scheduling, etc. |
+| `config/config.yaml` | Main config: data sources, report mode, AI model, storage, scheduling, legacy notification fields, etc. |
 | `config/source_tiers.yaml` | Source tier mapping: platform / RSS feed to A / B / C / D tier assignment |
 | `config/frequency_words.txt` | Keywords / topic groups: for keyword matching mode (`filter.method: keyword`) |
 | `config/ai_interests.txt` | AI filter interest description: for AI smart filtering mode (`filter.method: ai`) |
@@ -264,7 +266,7 @@ Configuration files contain detailed comments. Visual config editor: https://san
 
 ```
 trendradar/
-├── __main__.py          # Entry point: NewsAnalyzer orchestrates collect→analyze→push pipeline
+├── __main__.py          # Entry point: NewsAnalyzer orchestrates collect→analyze→artifact pipeline
 ├── context.py           # AppContext: dependency injection container, wraps config-related ops
 ├── core/                # Core logic
 │   ├── config.py        #   Config parsing, multi-account management

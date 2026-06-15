@@ -83,7 +83,7 @@ def test_valid_telegram_config_counts_as_notification_configured():
     assert analyzer._has_notification_configured() is True
 
 
-def test_telegram_test_notification_path_remains_available(monkeypatch, capsys):
+def test_telegram_test_notification_path_fails_closed(monkeypatch, capsys):
     calls = []
 
     class FakeDispatcher:
@@ -112,10 +112,12 @@ def test_telegram_test_notification_path_remains_available(monkeypatch, capsys):
     )
 
     out = capsys.readouterr().out
-    assert ok is True
-    assert calls and calls[0][0] == "init"
-    assert "Telegram 通知连通性测试" in out
-    assert "Telegram: 测试成功" in out
+    assert ok is False
+    assert calls == []
+    assert "Legacy Push has been removed from runtime" in out
+    assert "Use CR-New canary / CR dry-run Telegram sink instead" in out
+    assert "Telegram 通知连通性测试" not in out
+    assert "测试成功" not in out
 
 
 def test_non_telegram_test_notification_path_no_longer_advertised(monkeypatch, capsys):
@@ -133,8 +135,6 @@ def test_non_telegram_test_notification_path_no_longer_advertised(monkeypatch, c
 
     out = capsys.readouterr().out
     assert ok is False
-    assert "未配置 Telegram 通知" in out
-    assert "非 Telegram 通知配置已不再作为运行时通知渠道" in out
-    assert "已忽略旧通知配置: Slack" in out
+    assert "Legacy Push has been removed from runtime" in out
     assert "可用渠道" not in out
     assert "测试成功" not in out
