@@ -5,6 +5,7 @@ All checks run in isolated subprocesses to avoid polluting sys.modules
 in the host test process (which would break mock.patch in Telegram tests).
 """
 
+import inspect
 import subprocess
 import sys
 import textwrap
@@ -12,7 +13,9 @@ import unittest
 
 
 POSITIVE_EXPORTS = (
+    "LegacyNotificationRemovedError",
     "NotificationDispatcher",
+    "send_telegram_document",
     "send_to_telegram",
     "strip_markdown",
 )
@@ -49,7 +52,6 @@ def _run_python(code: str) -> subprocess.CompletedProcess:
 
 class NotificationFacadeTest(unittest.TestCase):
     def test_positive_exports_remain_available(self):
-        names = ", ".join(POSITIVE_EXPORTS)
         result = _run_python(f"""
             import trendradar.notification as notification
 
@@ -66,6 +68,87 @@ class NotificationFacadeTest(unittest.TestCase):
             result.returncode, 0,
             f"Positive exports check failed:\n{result.stderr}",
         )
+
+    def test_legacy_public_exports_fail_closed(self):
+        result = _run_python("""
+            import trendradar.notification as notification
+
+            removed_error = notification.LegacyNotificationRemovedError
+
+            for call in (
+                lambda: notification.NotificationDispatcher(config={}, get_time_func=lambda: None),
+                lambda: notification.send_to_telegram("token", "chat", {}, "test"),
+                lambda: notification.send_telegram_document("token", "chat", "report.html"),
+            ):
+                try:
+                    call()
+                except removed_error:
+                    pass
+                else:
+                    raise AssertionError("legacy notification API did not fail closed")
+        """)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Fail-closed facade check failed:\n{result.stderr}",
+        )
+
+    def test_legacy_sender_stubs_preserve_public_signatures(self):
+        from trendradar.notification.senders import (
+            resolve_attachment_kind_for_event,
+            resolve_report_attachment_path,
+            send_telegram_document,
+            send_to_telegram,
+            should_apply_realtime_alert_gate,
+        )
+
+        expected = {
+            send_to_telegram: (
+                "bot_token",
+                "chat_id",
+                "report_data",
+                "report_type",
+                "update_info",
+                "proxy_url",
+                "mode",
+                "account_label",
+                "batch_size",
+                "batch_interval",
+                "rss_items",
+                "rss_new_items",
+                "ai_analysis",
+                "display_regions",
+                "html_file_path",
+                "get_time_func",
+                "alert_state_store",
+                "alert_config",
+                "manual_trigger",
+            ),
+            send_telegram_document: (
+                "bot_token",
+                "chat_id",
+                "document_path",
+                "filename",
+                "caption",
+                "proxy_url",
+                "max_file_mb",
+                "timeout",
+                "log_prefix",
+            ),
+            should_apply_realtime_alert_gate: (
+                "report_style",
+                "mode",
+                "manual_trigger",
+            ),
+            resolve_attachment_kind_for_event: ("cfg", "event_name"),
+            resolve_report_attachment_path: ("output_dir", "mode", "report_kind"),
+        }
+
+        for func, names in expected.items():
+            with self.subTest(func=func.__name__):
+                signature = inspect.signature(func)
+                self.assertEqual(names, tuple(signature.parameters))
+                for name in ("args", "kwargs"):
+                    self.assertNotIn(name, signature.parameters)
 
     def test_legacy_non_telegram_exports_are_removed(self):
         result = _run_python(f"""
