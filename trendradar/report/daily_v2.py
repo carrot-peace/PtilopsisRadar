@@ -380,7 +380,7 @@ def _evidence_note(entry: Dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
-def _status_for(entry: Dict[str, Any], section: str) -> str:
+def _status_for(entry: Dict[str, Any]) -> str:
     """Status label, upgraded to a domestic-confidence status when applicable."""
     detail = entry.get("evidence_detail") or {}
     domestic = _domestic_status_from_evidence(detail)
@@ -404,7 +404,7 @@ def _build_main_item(entry: Dict[str, Any], section: str) -> DailyItem:
         summary=body,
         risk_note=risk,
         evidence_note=_evidence_note(entry),
-        status=_status_for(entry, section),
+        status=_status_for(entry),
         section=section,
         degraded=degraded,
     )
@@ -441,7 +441,9 @@ def build_daily_report_v2(
             model.degraded = True
             model.degraded_notice = DEGRADED_OVERVIEW_NOTICE
 
-        noise_examples: Dict[str, List[str]] = {}
+        # Per-category noise tally: real total count + capped examples. The
+        # count must reflect every suppressed noise item, not just the examples.
+        noise: Dict[str, Dict[str, Any]] = {}
 
         for section in SECTION_ORDER:
             entries = getattr(ai_analysis, section, None) or []
@@ -453,13 +455,14 @@ def build_daily_report_v2(
                 # Rule 4: entertainment/sports/esports → noise unless structural.
                 if is_noise_item(topic, samples):
                     cat = classify_category(_item_blob(topic, samples)) or "noise"
-                    noise_examples.setdefault(cat, [])
-                    if len(noise_examples[cat]) < SUPPRESSED_EXAMPLE_CAP and topic:
-                        noise_examples[cat].append(topic)
+                    bucket = noise.setdefault(cat, {"count": 0, "examples": []})
+                    bucket["count"] += 1
+                    if len(bucket["examples"]) < SUPPRESSED_EXAMPLE_CAP and topic:
+                        bucket["examples"].append(topic)
                     continue
                 model.main_items.append(_build_main_item(entry, section))
 
-        model.suppressed = _build_suppressed(ai_analysis, noise_examples)
+        model.suppressed = _build_suppressed(ai_analysis, noise)
     else:
         # No usable AI result: artifact-only, evidence/appendix shown, no
         # fabricated conclusions. This is distinct from the degraded state.
@@ -471,7 +474,7 @@ def build_daily_report_v2(
 
 def _build_suppressed(
     ai_analysis: Any,
-    noise_examples: Dict[str, List[str]],
+    noise: Dict[str, Dict[str, Any]],
 ) -> List[SuppressedGroup]:
     """Build a compact suppressed list (Rule 6): one row per category."""
     groups: List[SuppressedGroup] = []
@@ -497,14 +500,15 @@ def _build_suppressed(
         )
 
     # Noise pulled out of the main sections (entertainment/sports/esports).
-    for cat, examples in noise_examples.items():
+    # count is the real per-category total; examples stay capped.
+    for cat, bucket in noise.items():
         label = _CATEGORY_LABELS.get(cat, cat)
         groups.append(
             SuppressedGroup(
                 category=label,
-                count=len(examples) if examples else 1,
+                count=int(bucket.get("count", 0)),
                 reason="非信息环境结构性异常，默认不进入主榜",
-                examples=examples[:SUPPRESSED_EXAMPLE_CAP],
+                examples=list(bucket.get("examples", []))[:SUPPRESSED_EXAMPLE_CAP],
             )
         )
 

@@ -297,6 +297,30 @@ class TestNoiseHandling(unittest.TestCase):
         cats = [g.category for g in model.suppressed]
         self.assertIn("娱乐", cats)
 
+    def test_noise_count_is_real_total_not_capped_examples(self):
+        # 10 entertainment noise items, example cap 3 → count==10, examples<=3.
+        ai = _ai(
+            high_heat_unverified=[
+                _entry(
+                    f"某明星塌房事件{i}",
+                    summary=f"某明星塌房事件{i}，粉丝大量讨论",
+                    samples=[{"title": f"某明星塌房事件{i}上热搜"}],
+                )
+                for i in range(10)
+            ]
+        )
+        model = DV2.build_daily_report_v2(ai, {"stats": []})
+        self.assertEqual(model.main_items, [])
+        noise_groups = [g for g in model.suppressed if g.category == "娱乐"]
+        self.assertEqual(len(noise_groups), 1)
+        group = noise_groups[0]
+        self.assertEqual(group.count, 10)
+        self.assertLessEqual(len(group.examples), DV2.SUPPRESSED_EXAMPLE_CAP)
+        # logical suppressed total reflects the real 10, not the 3 examples
+        self.assertEqual(model.suppressed_count, 10)
+        html = DV2.render_daily_report_v2({"stats": []}, ai_analysis=ai)
+        self.assertIn("合计 10", html)
+
     def test_structurally_relevant_entertainment_is_promoted(self):
         ai = _ai(
             high_heat_unverified=[
