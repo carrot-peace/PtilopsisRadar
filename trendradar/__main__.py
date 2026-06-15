@@ -45,6 +45,12 @@ class LegacyPushRemovedError(RuntimeError):
     """Raised when removed Legacy Push runtime entrypoints are called."""
 
 
+LEGACY_PUSH_REMOVED_MSG = (
+    "Legacy Push has been removed from runtime. "
+    "Use CR-New canary / CR dry-run Telegram sink instead."
+)
+
+
 def _telegram_receiver_chat_ids(config: Dict) -> List[str]:
     """Return Telegram receiver chat ids using the same access parser as runtime senders."""
     tg_access = config.get("TELEGRAM_ACCESS") or {}
@@ -872,10 +878,7 @@ class NewsAnalyzer:
         PR-A disconnects Legacy Push from normal runtime.  This method remains
         only as an explicit guard until PR-C deletes or stubs the old package.
         """
-        raise LegacyPushRemovedError(
-            "Legacy Push has been removed from normal runtime. "
-            "Use CR-New canary / CR dry-run Telegram sink instead."
-        )
+        raise LegacyPushRemovedError(LEGACY_PUSH_REMOVED_MSG)
 
     def _initialize_and_check_config(self) -> bool:
         """通用初始化和配置检查。返回 True 表示可以继续执行。"""
@@ -1805,10 +1808,7 @@ def _create_test_html_file(ctx: AppContext) -> Optional[str]:
 
 def _run_test_notification(config: Dict) -> bool:
     """Fail closed: old Legacy Push test-notification path is removed."""
-    print(
-        "Legacy Push has been removed from runtime. "
-        "Use CR-New canary / CR dry-run Telegram sink instead."
-    )
+    print(LEGACY_PUSH_REMOVED_MSG)
     return False
 
 
