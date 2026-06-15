@@ -8,6 +8,7 @@ entrypoints, do not perform network I/O, and do not mutate the environment.
 
 from __future__ import annotations
 
+import ast
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,51 @@ def _read(path: Path) -> str:
 
 def _python_sources(root: Path) -> list[Path]:
     return sorted(path for path in root.rglob("*.py") if "__pycache__" not in path.parts)
+
+
+def _function_node(source: str, name: str) -> ast.FunctionDef:
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"Function not found: {name}")
+
+
+def _is_exact_one(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "1"
+
+
+def _is_cr_telegram_send_lookup(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr != "get":
+        return False
+    if not isinstance(node.func.value, ast.Name):
+        return False
+    if node.func.value.id != "env":
+        return False
+    return bool(node.args) and isinstance(node.args[0], ast.Constant) and (
+        node.args[0].value == "PTILOPSIS_CR_TELEGRAM_SEND"
+    )
+
+
+def _compares_cr_telegram_send_to_exact_one(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Compare):
+        return False
+    if len(node.ops) != 1 or not isinstance(node.ops[0], ast.Eq):
+        return False
+    if len(node.comparators) != 1:
+        return False
+    left = node.left
+    right = node.comparators[0]
+    return (
+        _is_cr_telegram_send_lookup(left)
+        and _is_exact_one(right)
+        or _is_exact_one(left)
+        and _is_cr_telegram_send_lookup(right)
+    )
 
 
 class TestLegacyPushRemovalPlanDoc(unittest.TestCase):
@@ -60,10 +106,13 @@ class TestLegacyPushRemovalPlanDoc(unittest.TestCase):
 class TestCRTelegramGateSourceGuards(unittest.TestCase):
     def test_cr_telegram_send_gate_requires_exact_one(self) -> None:
         source = _read(CR_TELEGRAM_ENV_PATH)
-        self.assertIn(
-            'return env.get("PTILOPSIS_CR_TELEGRAM_SEND") == "1"',
-            source,
-        )
+        function = _function_node(source, "cr_telegram_send_enabled")
+        comparisons = [
+            node
+            for node in ast.walk(function)
+            if _compares_cr_telegram_send_to_exact_one(node)
+        ]
+        self.assertTrue(comparisons)
 
     def test_cr_telegram_transport_modules_remain_under_cr_package(self) -> None:
         self.assertTrue(CR_TELEGRAM_ENV_PATH.exists())
