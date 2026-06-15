@@ -124,9 +124,9 @@ _MAIN = _load_real("trendradar.__main__", "trendradar/__main__.py")
 NewsAnalyzer = _MAIN.NewsAnalyzer
 
 _MODE_STRATEGY = {{
-    "daily": {{"report_type": "全天汇总", "should_send_notification": True}},
-    "current": {{"report_type": "当前榜单", "should_send_notification": True}},
-    "incremental": {{"report_type": "增量分析", "should_send_notification": True}},
+    "daily": {{"report_type": "全天汇总", "should_send_notification": False}},
+    "current": {{"report_type": "当前榜单", "should_send_notification": False}},
+    "incremental": {{"report_type": "增量分析", "should_send_notification": False}},
 }}
 
 

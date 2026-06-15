@@ -123,7 +123,10 @@ AI（可选，需配置 API Key）的唯一任务是基于程序生成的 eviden
 
 ### 报告与推送
 
-生成信息环境异常监测日报（HTML 报告），并可推送到：飞书、钉钉、企业微信、Telegram、邮件、Slack、Bark、ntfy、通用 Webhook。
+生成信息环境异常监测日报（HTML 报告）。Legacy notification push 已从正常运行时断开。
+
+Legacy notification push 不应被视为未来推送路径。详见
+[`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md)。
 
 ---
 
@@ -220,9 +223,9 @@ ai:
 
 支持的模型包括 DeepSeek、OpenAI、Gemini、Claude、Ollama 等，详见 [LiteLLM 文档](https://docs.litellm.ai/docs/providers)。
 
-### 推送渠道（可选）
+### Legacy Push 渠道
 
-在 `config/config.yaml` 的 `notification.channels` 段配置需要的推送渠道。支持多账号（分号分隔）和多渠道并行。
+Legacy notification push 已从正常运行时断开。现有 notification 配置在后续清理阶段前仍作为 legacy 配置存在，但不是未来推送路径。
 
 ### 诊断命令
 
@@ -230,7 +233,7 @@ ai:
 # 环境体检
 uv run python -m trendradar --doctor
 
-# 测试通知连通性
+# Legacy Push 已从正常运行时移除；该命令只输出移除提示
 uv run python -m trendradar --test-notification
 
 # 查看当前调度状态
@@ -259,7 +262,7 @@ uv run python -m trendradar --show-schedule
 
 ```
 trendradar/
-├── __main__.py          # 主入口：NewsAnalyzer 编排 采集→分析→推送 流程
+├── __main__.py          # 主入口：NewsAnalyzer 编排 采集→分析→artifact 流程
 ├── context.py           # AppContext：依赖注入容器，封装配置相关操作
 ├── core/                # 核心逻辑
 │   ├── config.py        #   配置解析、多账号管理
