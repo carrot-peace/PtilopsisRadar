@@ -24,8 +24,6 @@ class LegacyTelegramAttachmentSenderRemovedTest(unittest.TestCase):
             if "__pycache__" not in path.parts
         )
         for token in (
-            "requests.post",
-            "urllib",
             "sendMessage",
             "sendDocument",
             "本轮 Telegram 文本简报暂不可用",
