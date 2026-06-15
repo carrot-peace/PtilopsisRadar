@@ -18,6 +18,7 @@ DOC_PATH = PROJECT_ROOT / "docs" / "legacy_push_removal_plan.md"
 CR_TELEGRAM_ENV_PATH = PROJECT_ROOT / "trendradar" / "cr" / "telegram_env.py"
 CR_TELEGRAM_SINK_PATH = PROJECT_ROOT / "trendradar" / "cr" / "telegram_sink.py"
 MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
+REPORT_TRANSLATION_PATH = PROJECT_ROOT / "trendradar" / "report" / "translation.py"
 
 
 def _read(path: Path) -> str:
@@ -221,6 +222,31 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
                 for node in ast.walk(function)
             )
         )
+
+    def test_generation_translation_module_does_not_import_notification(self) -> None:
+        source = _read(REPORT_TRANSLATION_PATH)
+        self.assertNotIn("trendradar.notification", source)
+        self.assertNotIn("NotificationDispatcher", source)
+        self.assertNotIn("dispatch_all", source)
+        self.assertNotIn("send_to_telegram", source)
+
+    def test_analysis_pipeline_uses_report_translation_not_dispatcher(self) -> None:
+        source = _read(MAIN_PATH)
+        analyzer = _class_node(source, "NewsAnalyzer")
+        method = _method_node(analyzer, "_run_analysis_pipeline")
+        names: set[str] = set()
+
+        for node in ast.walk(method):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+
+        self.assertIn("translate_report_content", names)
+        self.assertNotIn("create_notification_dispatcher", names)
+        self.assertNotIn("NotificationDispatcher", names)
+        self.assertNotIn("dispatch_all", names)
+        self.assertNotIn("send_to_telegram", names)
 
     @unittest.expectedFailure
     def test_future_runtime_wiring_must_not_construct_notification_dispatcher(self) -> None:
