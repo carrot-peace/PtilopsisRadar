@@ -19,12 +19,14 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-for _stale in [
-    _name
-    for _name in list(sys.modules)
-    if _name == "trendradar" or _name.startswith("trendradar.")
-]:
-    del sys.modules[_stale]
+# Ensure we get a fresh view of the __main__ runtime wiring for this test
+# module.  Other test helpers (e.g. _bootstrap) may inject a stub
+# ``trendradar`` package without ``__version__``; drop both the parent
+# package and ``__main__`` so the real ``__init__`` can run, but leave
+# all other ``trendradar.*`` entries untouched.
+for _name in ("trendradar.__main__", "trendradar"):
+    if _name in sys.modules:
+        del sys.modules[_name]
 
 import trendradar.__main__ as main  # noqa: E402
 
