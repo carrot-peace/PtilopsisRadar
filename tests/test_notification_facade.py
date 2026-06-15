@@ -12,7 +12,9 @@ import unittest
 
 
 POSITIVE_EXPORTS = (
+    "LegacyNotificationRemovedError",
     "NotificationDispatcher",
+    "send_telegram_document",
     "send_to_telegram",
     "strip_markdown",
 )
@@ -49,7 +51,6 @@ def _run_python(code: str) -> subprocess.CompletedProcess:
 
 class NotificationFacadeTest(unittest.TestCase):
     def test_positive_exports_remain_available(self):
-        names = ", ".join(POSITIVE_EXPORTS)
         result = _run_python(f"""
             import trendradar.notification as notification
 
@@ -65,6 +66,29 @@ class NotificationFacadeTest(unittest.TestCase):
         self.assertEqual(
             result.returncode, 0,
             f"Positive exports check failed:\n{result.stderr}",
+        )
+
+    def test_legacy_public_exports_fail_closed(self):
+        result = _run_python("""
+            import trendradar.notification as notification
+
+            removed_error = notification.LegacyNotificationRemovedError
+
+            for call in (
+                lambda: notification.NotificationDispatcher(config={}, get_time_func=lambda: None),
+                lambda: notification.send_to_telegram("token", "chat", {}, "test"),
+                lambda: notification.send_telegram_document("token", "chat", "report.html"),
+            ):
+                try:
+                    call()
+                except removed_error:
+                    pass
+                else:
+                    raise AssertionError("legacy notification API did not fail closed")
+        """)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Fail-closed facade check failed:\n{result.stderr}",
         )
 
     def test_legacy_non_telegram_exports_are_removed(self):
