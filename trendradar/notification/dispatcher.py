@@ -20,6 +20,7 @@ from trendradar.core.config import (
     validate_paired_configs,
 )
 from trendradar.telegram_bot.access import build_telegram_access_config
+from trendradar.report.translation import translate_report_content
 
 from .senders import (
     resolve_attachment_kind_for_event,
@@ -160,108 +161,15 @@ class NotificationDispatcher:
         Returns:
             tuple: (翻译后的 report_data, rss_items, rss_new_items)
         """
-        if not self.translator or not self.translator.enabled:
-            return report_data, rss_items, rss_new_items
-
-        import copy
-        print(f"[翻译] 开始翻译内容到 {self.translator.target_language}...")
-
-        scope = self.translator.scope
-        display_regions = display_regions or {}
-
-        # 深拷贝避免修改原始数据
-        report_data = copy.deepcopy(report_data)
-        rss_items = copy.deepcopy(rss_items) if rss_items else None
-        rss_new_items = copy.deepcopy(rss_new_items) if rss_new_items else None
-
-        # 收集所有需要翻译的标题
-        titles_to_translate = []
-        title_locations = []  # 记录标题位置，用于回填
-
-        # 1. 热榜标题（scope 开启 且 区域展示）
-        if scope.get("HOTLIST", True) and display_regions.get("HOTLIST", True):
-            for stat_idx, stat in enumerate(report_data.get("stats", [])):
-                for title_idx, title_data in enumerate(stat.get("titles", [])):
-                    titles_to_translate.append(title_data.get("title", ""))
-                    title_locations.append(("stats", stat_idx, title_idx))
-
-            # 2. 新增热点标题
-            for source_idx, source in enumerate(report_data.get("new_titles", [])):
-                for title_idx, title_data in enumerate(source.get("titles", [])):
-                    titles_to_translate.append(title_data.get("title", ""))
-                    title_locations.append(("new_titles", source_idx, title_idx))
-
-        # 3. RSS 统计标题（结构与 stats 一致：[{word, count, titles: [{title, ...}]}]）
-        if not skip_rss and rss_items and scope.get("RSS", True) and display_regions.get("RSS", True):
-            for stat_idx, stat in enumerate(rss_items):
-                for title_idx, title_data in enumerate(stat.get("titles", [])):
-                    titles_to_translate.append(title_data.get("title", ""))
-                    title_locations.append(("rss_items", stat_idx, title_idx))
-
-        # 4. RSS 新增标题（结构与 stats 一致）
-        if not skip_rss and rss_new_items and scope.get("RSS", True) and display_regions.get("RSS", True) and display_regions.get("NEW_ITEMS", True):
-            for stat_idx, stat in enumerate(rss_new_items):
-                for title_idx, title_data in enumerate(stat.get("titles", [])):
-                    titles_to_translate.append(title_data.get("title", ""))
-                    title_locations.append(("rss_new_items", stat_idx, title_idx))
-
-        if not titles_to_translate:
-            print("[翻译] 没有需要翻译的内容")
-            return report_data, rss_items, rss_new_items
-
-        print(f"[翻译] 共 {len(titles_to_translate)} 条标题待翻译")
-
-        # 批量翻译
-        result = self.translator.translate_batch(titles_to_translate)
-
-        if result.success_count == 0:
-            print(f"[翻译] 翻译失败: {result.results[0].error if result.results else '未知错误'}")
-            return report_data, rss_items, rss_new_items
-
-        print(f"[翻译] 翻译完成: {result.success_count}/{result.total_count} 成功")
-
-        # debug 模式：输出完整 prompt、AI 原始响应、逐条对照
-        if self.config.get("DEBUG", False):
-            if result.prompt:
-                print(f"[翻译][DEBUG] === 发送给 AI 的 Prompt ===")
-                print(result.prompt)
-                print(f"[翻译][DEBUG] === Prompt 结束 ===")
-            if result.raw_response:
-                print(f"[翻译][DEBUG] === AI 原始响应 ===")
-                print(result.raw_response)
-                print(f"[翻译][DEBUG] === 响应结束 ===")
-            # 行数不匹配警告
-            expected = len(titles_to_translate)
-            if result.parsed_count != expected:
-                print(f"[翻译][DEBUG] ⚠️ 行数不匹配：期望 {expected} 条，AI 返回 {result.parsed_count} 条")
-            # 逐条对照
-            unchanged_count = 0
-            for i, res in enumerate(result.results):
-                if not res.success and res.error:
-                    print(f"[翻译][DEBUG] [{i+1}] !! 失败: {res.error}")
-                elif res.original_text == res.translated_text:
-                    unchanged_count += 1
-                else:
-                    print(f"[翻译][DEBUG] [{i+1}] {res.original_text} => {res.translated_text}")
-            if unchanged_count > 0:
-                print(f"[翻译][DEBUG] （另有 {unchanged_count} 条未变化，已省略）")
-
-        # 回填翻译结果（仅在翻译文本非空时替换，防止空翻译覆盖原始标题）
-        for i, (loc_type, idx1, idx2) in enumerate(title_locations):
-            if i < len(result.results) and result.results[i].success:
-                translated = result.results[i].translated_text
-                if not translated or not translated.strip():
-                    continue
-                if loc_type == "stats":
-                    report_data["stats"][idx1]["titles"][idx2]["title"] = translated
-                elif loc_type == "new_titles":
-                    report_data["new_titles"][idx1]["titles"][idx2]["title"] = translated
-                elif loc_type == "rss_items" and rss_items:
-                    rss_items[idx1]["titles"][idx2]["title"] = translated
-                elif loc_type == "rss_new_items" and rss_new_items:
-                    rss_new_items[idx1]["titles"][idx2]["title"] = translated
-
-        return report_data, rss_items, rss_new_items
+        return translate_report_content(
+            report_data=report_data,
+            rss_items=rss_items,
+            rss_new_items=rss_new_items,
+            translator=self.translator,
+            display_regions=display_regions,
+            skip_rss=skip_rss,
+            debug=self.config.get("DEBUG", False),
+        )
 
     def dispatch_all(
         self,

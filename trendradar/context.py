@@ -33,9 +33,6 @@ from trendradar.report import (
 )
 from trendradar.report.dashboard import write_dashboard
 from trendradar.report.newsletter import render_newsletter_report
-from trendradar.notification import (
-    NotificationDispatcher,
-)
 from trendradar.ai import AITranslator
 from trendradar.ai.filter import AIFilter, AIFilterResult
 from trendradar.storage import get_storage_manager
@@ -404,16 +401,23 @@ class AppContext:
             get_time_func=self.get_time,
         )
 
-    # === 通知发送 ===
+    # === 翻译 / 通知发送 ===
 
-    def create_notification_dispatcher(self) -> NotificationDispatcher:
-        """创建通知调度器"""
-        # 创建翻译器（如果启用）
-        translator = None
+    def create_artifact_translator(self) -> Optional[AITranslator]:
+        """创建 artifact/report 翻译器。"""
         trans_config = self.config.get("AI_TRANSLATION", {})
-        if trans_config.get("ENABLED", False):
-            ai_config = self.config.get("AI", {})
-            translator = AITranslator(trans_config, ai_config)
+        if not trans_config.get("ENABLED", False):
+            return None
+
+        ai_config = self.config.get("AI", {})
+        return AITranslator(trans_config, ai_config)
+
+    def create_notification_dispatcher(self) -> Any:
+        """创建通知调度器"""
+        from trendradar.notification import NotificationDispatcher
+
+        # 创建翻译器（如果启用）
+        translator = self.create_artifact_translator()
 
         return NotificationDispatcher(
             config=self.config,

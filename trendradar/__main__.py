@@ -762,18 +762,20 @@ class NewsAnalyzer:
             )
 
         # 翻译 RSS 内容（如果启用）— 在 HTML 生成前执行，确保网页版也能展示翻译内容。
-        # PR-B 会把这段生成翻译从 NotificationDispatcher 中迁出；本 PR 不移动翻译代码。
         trans_config = self.ctx.config.get("AI_TRANSLATION", {})
         if trans_config.get("ENABLED", False):
-            dispatcher = self.ctx.create_notification_dispatcher()
+            from trendradar.report.translation import translate_report_content
+
+            translator = self.ctx.create_artifact_translator()
             display_regions = self.ctx.config.get("DISPLAY", {}).get("REGIONS", {})
-            _, rss_items, rss_new_items, _ = \
-                dispatcher.translate_content(
-                    report_data={"stats": [], "new_titles": []},
-                    rss_items=rss_items,
-                    rss_new_items=rss_new_items,
-                    display_regions=display_regions,
-                )
+            _, rss_items, rss_new_items = translate_report_content(
+                report_data={"stats": [], "new_titles": []},
+                rss_items=rss_items,
+                rss_new_items=rss_new_items,
+                translator=translator,
+                display_regions=display_regions,
+                debug=self.ctx.config.get("DEBUG", False),
+            )
 
         # 计算 RSS 匹配条数（供 HTML / dashboard artifact 使用）
         self._rss_matched_count = sum(stat.get("count", 0) for stat in rss_items) if rss_items else 0
