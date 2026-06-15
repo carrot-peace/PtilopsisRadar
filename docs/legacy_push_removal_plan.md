@@ -33,7 +33,7 @@ Policy:
 - It must not import `trendradar.notification` after PR-B.
 - It must not call `dispatch_all`.
 - It must not call `send_to_telegram`.
-- It must not POST Telegram.
+- It must not POST to Telegram.
 - It must not trigger Transport.
 
 ### Legacy Push
