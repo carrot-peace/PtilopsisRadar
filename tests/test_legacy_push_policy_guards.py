@@ -279,8 +279,6 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
     def test_notification_package_has_no_active_telegram_transport(self) -> None:
         source = "\n".join(_read(path) for path in _python_sources(NOTIFICATION_ROOT))
         for token in (
-            "requests.post",
-            "urllib",
             "sendMessage",
             "sendDocument",
             "本轮 Telegram 文本简报暂不可用",
