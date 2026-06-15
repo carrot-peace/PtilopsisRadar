@@ -180,7 +180,7 @@ class Scheduler:
         if resolved.analyze:
             actions.append(f"分析(AI:{resolved.ai_mode})")
         if resolved.push:
-            actions.append(f"推送(模式:{resolved.report_mode})")
+            actions.append(f"Legacy Push配置已忽略(模式:{resolved.report_mode})")
         print(f"[调度] 行为: {', '.join(actions) if actions else '无'}")
         if resolved.frequency_file:
             print(f"[调度] 频率词文件: {resolved.frequency_file}")
