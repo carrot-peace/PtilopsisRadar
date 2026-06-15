@@ -3,7 +3,7 @@
 PR4a smoke / regression tests。
 
 验证 __main__._run_analysis_pipeline → context.render_html →
-newsletter.render_newsletter_report 完整链路中 AI analysis gate 行为
+daily_v2 / newsletter renderer 完整链路中 AI analysis gate 行为
 （不触发真实 crawler / AI / Telegram）。
 
 覆盖：
@@ -96,10 +96,14 @@ def _load_real(name, relpath):
     return mod
 
 
-# Load real context (needs real trendradar.utils.time and real trendradar.report.newsletter)
-_stub_pkg("trendradar.report")
+# Load real context (needs real report generator/renderers)
+report_pkg = _stub_pkg("trendradar.report")
+_GEN = _load_real("trendradar.report.generator", "trendradar/report/generator.py")
+report_pkg.prepare_report_data = _GEN.prepare_report_data
+report_pkg.generate_html_report = _GEN.generate_html_report
+_load_real("trendradar.report.dashboard", "trendradar/report/dashboard.py")
+_load_real("trendradar.report.daily_v2", "trendradar/report/daily_v2.py")
 _load_real("trendradar.report.newsletter", "trendradar/report/newsletter.py")
-_stub_pkg("trendradar.report.dashboard")
 _stub_pkg("trendradar.utils")
 _stub_pkg("trendradar.utils.time")
 _stub_pkg("trendradar.core")
@@ -265,6 +269,7 @@ assert "<!DOCTYPE html>" in out
 assert "跨层共振信号持续升温" in out
 assert FALLBACK_NOTICE not in out
 assert '<div class="ai-unavailable">' not in out
+assert '<div class="no-ai-notice">' not in out
 assert "某条热榜标题" in out
 """
         result = _run_in_subprocess(code)
@@ -280,7 +285,7 @@ ctx.get_time = lambda: datetime(2026, 6, 5, 9, 0)
 out = ctx.render_html(_report_data(), 1, mode="daily", ai_analysis=None)
 assert "<!DOCTYPE html>" in out
 assert FALLBACK_NOTICE in out
-assert '<div class="ai-unavailable">' in out
+assert '<div class="no-ai-notice">' in out
 assert "某条热榜标题" in out
 """
         result = _run_in_subprocess(code)
