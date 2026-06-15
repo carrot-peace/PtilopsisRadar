@@ -125,6 +125,11 @@ AI (optional, requires API Key configuration) has one sole task: based on the pr
 
 Generates an Information Environment Anomaly Monitoring Daily Report (HTML), and can push to: Feishu, DingTalk, WeWork, Telegram, Email, Slack, Bark, ntfy, Generic Webhook.
 
+Legacy notification push is scheduled for removal in PtilopsisRadar and should
+not be treated as the future push path. See
+[`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md) for the
+canonical Legacy Push removal and CR-New separation plan.
+
 ---
 
 ## Anomaly Section Reference
