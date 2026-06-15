@@ -131,6 +131,7 @@ _MODE_STRATEGY = {{
 
 
 def _load_real_senders():
+    _load_real("trendradar.notification.removed", "trendradar/notification/removed.py")
     _load_real("trendradar.notification.text_utils", "trendradar/notification/text_utils.py")
     _load_real("trendradar.notification.formatters", "trendradar/notification/formatters.py")
     return _load_real("trendradar.notification.senders", "trendradar/notification/senders.py")
@@ -326,13 +327,17 @@ assert dashboard_calls[0].get("ai_analysis") is ai
 
 
 class TestTelegramDailyAttachmentPath(unittest.TestCase):
-    """PR4a: daily attachment path 仍指向 public/daily/full.html。"""
+    """Legacy Telegram attachment helpers fail closed after PR-C1."""
 
-    def test_daily_digest_attachment_path_stable(self):
+    def test_daily_digest_attachment_path_helper_fails_closed(self):
         code = _SUBPROCESS_PREAMBLE + """
 senders = _load_real_senders()
-path = senders.resolve_report_attachment_path("output", "daily")
-assert path == os.path.join("output", "public", "daily", "full.html"), f"Got: {path}"
+try:
+    senders.resolve_report_attachment_path("output", "daily")
+except senders.LegacyNotificationRemovedError:
+    pass
+else:
+    raise AssertionError("legacy attachment path helper did not fail closed")
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
@@ -340,11 +345,15 @@ assert path == os.path.join("output", "public", "daily", "full.html"), f"Got: {p
             f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_daily_digest_attachment_path_with_explicit_full(self):
+    def test_daily_digest_attachment_path_with_explicit_full_fails_closed(self):
         code = _SUBPROCESS_PREAMBLE + """
 senders = _load_real_senders()
-path = senders.resolve_report_attachment_path("output", "daily", "full")
-assert path == os.path.join("output", "public", "daily", "full.html"), f"Got: {path}"
+try:
+    senders.resolve_report_attachment_path("output", "daily", "full")
+except senders.LegacyNotificationRemovedError:
+    pass
+else:
+    raise AssertionError("legacy attachment path helper did not fail closed")
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
@@ -352,11 +361,15 @@ assert path == os.path.join("output", "public", "daily", "full.html"), f"Got: {p
             f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_daily_digest_event_defaults_to_full(self):
+    def test_daily_digest_event_kind_helper_fails_closed(self):
         code = _SUBPROCESS_PREAMBLE + """
 senders = _load_real_senders()
-kind = senders.resolve_attachment_kind_for_event({}, "daily_digest")
-assert kind == "full", f"Got: {kind}"
+try:
+    senders.resolve_attachment_kind_for_event({}, "daily_digest")
+except senders.LegacyNotificationRemovedError:
+    pass
+else:
+    raise AssertionError("legacy attachment kind helper did not fail closed")
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
