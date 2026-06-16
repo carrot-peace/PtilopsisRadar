@@ -418,7 +418,7 @@ class AppContext:
             get_time_func=self.get_time,
         )
 
-    # === 翻译 / 通知发送 ===
+    # === 翻译 ===
 
     def create_artifact_translator(self) -> Optional[ArtifactTranslator]:
         """创建 artifact/report 翻译器。"""
@@ -428,21 +428,6 @@ class AppContext:
 
         ai_config = self.config.get("AI", {})
         return AITranslator(trans_config, ai_config)
-
-    def create_notification_dispatcher(self) -> Any:
-        """创建通知调度器"""
-        from trendradar.notification import NotificationDispatcher
-
-        # 创建翻译器（如果启用）
-        translator = self.create_artifact_translator()
-
-        return NotificationDispatcher(
-            config=self.config,
-            get_time_func=self.get_time,
-            translator=translator,
-            storage_backend=self.get_storage_manager(),
-            attachment_output_dir="output",
-        )
 
     def create_scheduler(self) -> Scheduler:
         """

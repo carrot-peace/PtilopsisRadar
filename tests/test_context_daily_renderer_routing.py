@@ -10,7 +10,7 @@ AppContext.render_html() 的 renderer routing 测试。
 测试方式（不经 __main__ / 端到端）：
   - 用 _bootstrap 注册真实 trendradar.ai.* 依赖；
   - 加载真实 trendradar.report.daily_v2 / newsletter；
-  - 把 context.py 的其余重依赖（utils.time / core / notification / storage 等）stub 成
+  - 把 context.py 的其余重依赖（utils.time / core / storage 等）stub 成
     占位模块，使 context.py 能在精简解释器下加载；
   - 加载真实 trendradar.context，再用 spy 包裹 renderer，断言 daily / non-daily
     route 选择正确。
@@ -93,7 +93,6 @@ def _load_context_module():
     _stub_pkg("trendradar.utils")
     _stub_pkg("trendradar.utils.time")
     _stub_pkg("trendradar.core")  # _bootstrap 已建为普通模块，这里补 __getattr__
-    _stub_pkg("trendradar.notification")
     _stub_pkg("trendradar.ai")  # 同上，补 __getattr__ 以解析 AITranslator
     _stub_pkg("trendradar.ai.filter")
     _stub_pkg("trendradar.storage")

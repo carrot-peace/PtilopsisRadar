@@ -1,30 +1,33 @@
 # coding=utf-8
-"""Legacy dispatcher removal tests."""
+"""Legacy dispatcher deletion tests."""
 
+import ast
+import importlib
 import unittest
+from pathlib import Path
 
-from trendradar.notification import LegacyNotificationRemovedError, NotificationDispatcher
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONTEXT_PATH = PROJECT_ROOT / "trendradar" / "context.py"
+NOTIFICATION_ROOT = PROJECT_ROOT / "trendradar" / "notification"
 
 
-class LegacyTelegramDispatcherRemovedTest(unittest.TestCase):
-    def test_dispatcher_constructor_fails_closed(self):
-        with self.assertRaises(LegacyNotificationRemovedError):
-            NotificationDispatcher(config={}, get_time_func=lambda: None)
+class LegacyTelegramDispatcherDeletedTest(unittest.TestCase):
+    def test_notification_dispatcher_is_not_importable(self):
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("trendradar.notification")
 
-    def test_dispatch_all_fails_closed_if_stale_instance_exists(self):
-        dispatcher = object.__new__(NotificationDispatcher)
-        with self.assertRaises(LegacyNotificationRemovedError):
-            dispatcher.dispatch_all({}, "test")
+    def test_notification_package_directory_is_absent(self):
+        self.assertFalse(NOTIFICATION_ROOT.exists())
 
-    def test_private_telegram_send_fails_closed_if_stale_instance_exists(self):
-        dispatcher = object.__new__(NotificationDispatcher)
-        with self.assertRaises(LegacyNotificationRemovedError):
-            dispatcher._send_telegram({}, "test", None, None, "daily")
-
-    def test_translate_content_fails_closed(self):
-        dispatcher = object.__new__(NotificationDispatcher)
-        with self.assertRaises(LegacyNotificationRemovedError):
-            dispatcher.translate_content({})
+    def test_context_exposes_no_dispatcher_factory(self):
+        source = CONTEXT_PATH.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function_names = {
+            node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        }
+        self.assertNotIn("create_notification_dispatcher", function_names)
+        self.assertNotIn("NotificationDispatcher", source)
 
 
 if __name__ == "__main__":

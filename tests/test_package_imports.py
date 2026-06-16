@@ -3,8 +3,7 @@
 包初始化与 AppContext 惰性导出测试。
 
 验证 import trendradar / trendradar.core.analyzer 不会因为 package init
-而提前拉起 trendradar.context / trendradar.notification（含 SMTP 配置等
-notification runtime），同时 `from trendradar import AppContext` 仍可用。
+而提前拉起 trendradar.context，同时 `from trendradar import AppContext` 仍可用。
 """
 
 import importlib
@@ -17,7 +16,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 # 受关注的、本应被惰性化、不该在 package init 阶段出现的模块。
-LAZY_MODULES = ("trendradar.context", "trendradar.notification")
+LAZY_MODULES = ("trendradar.context",)
 
 
 def _purge(prefix):

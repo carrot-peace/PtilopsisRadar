@@ -121,12 +121,12 @@ class TestLegacyPushRemovalPlanDoc(unittest.TestCase):
         ):
             self.assertIn(term, text)
 
-    def test_canonical_doc_records_current_dirty_state(self) -> None:
+    def test_canonical_doc_records_legacy_removal_contract(self) -> None:
         text = _read(DOC_PATH)
         for phrase in (
-            "Legacy Push is still live",
-            "NotificationDispatcher.translate_content",
-            "must not be deleted before PR-B",
+            "Legacy Push has been removed from runtime",
+            "Legacy Push package has been deleted",
+            "Generation Plane no longer imports `trendradar.notification`",
             "Production Push is out of this series",
         ):
             self.assertIn(phrase, text)
@@ -262,8 +262,7 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
         self.assertNotIn("dispatch_all", names)
         self.assertNotIn("send_to_telegram", names)
 
-    @unittest.expectedFailure
-    def test_future_runtime_wiring_must_not_construct_notification_dispatcher(self) -> None:
+    def test_runtime_wiring_must_not_construct_notification_dispatcher(self) -> None:
         source = "\n".join(
             (
                 _read(PROJECT_ROOT / "trendradar" / "__main__.py"),
@@ -271,19 +270,23 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
             )
         )
         self.assertNotIn("NotificationDispatcher", source)
+        self.assertNotIn("trendradar.notification", source)
+        self.assertNotIn("create_notification_dispatcher", source)
 
-    def test_legacy_fallback_sender_is_unreachable(self) -> None:
-        source = _read(NOTIFICATION_ROOT / "senders.py")
-        self.assertNotIn("fallback", source.lower())
+    def test_legacy_notification_package_is_deleted(self) -> None:
+        self.assertFalse(NOTIFICATION_ROOT.exists())
 
-    def test_notification_package_has_no_active_telegram_transport(self) -> None:
-        source = "\n".join(_read(path) for path in _python_sources(NOTIFICATION_ROOT))
-        for token in (
-            "sendMessage",
-            "sendDocument",
-            "本轮 Telegram 文本简报暂不可用",
-        ):
-            self.assertNotIn(token, source)
+    def test_no_runtime_legacy_telegram_transport_tokens(self) -> None:
+        offenders: list[str] = []
+        for path in _python_sources(PROJECT_ROOT / "trendradar"):
+            rel = path.relative_to(PROJECT_ROOT).as_posix()
+            if rel.startswith("trendradar/cr/"):
+                continue
+            source = _read(path)
+            for token in ("sendMessage", "sendDocument", "本轮 Telegram 文本简报暂不可用"):
+                if token in source:
+                    offenders.append(f"{rel}::{token}")
+        self.assertEqual([], offenders)
 
 
 if __name__ == "__main__":
