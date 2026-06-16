@@ -61,8 +61,7 @@ PtilopsisRadar 只优化一个更窄的雷达功能：检测中文信息环境�
 → 来源分层 source tiers
 → evidence summary / evidence labels / bucketize
 → environment AI analysis
-→ current dashboard / daily report
-→ Telegram realtime alert / daily digest
+→ current dashboard / daily report artifacts
 ```
 
 ---
@@ -123,7 +122,7 @@ AI（可选，需配置 API Key）的唯一任务是基于程序生成的 eviden
 
 ### 报告与推送
 
-生成信息环境异常监测日报（HTML 报告）。Legacy notification push 已从正常运行时断开。
+生成信息环境异常监测日报（HTML 报告）。Legacy notification push 已从正常运行时移除，旧 notification package 已删除。
 
 Legacy notification push 不应被视为未来推送路径。详见
 [`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md)。
@@ -225,7 +224,7 @@ ai:
 
 ### Legacy Push 渠道
 
-Legacy notification push 已从正常运行时断开。现有 notification 配置在后续清理阶段前仍作为 legacy 配置存在，但不是未来推送路径。
+Legacy notification push 已移除。旧 `trendradar.notification` package、dispatcher、sender、fallback 和兼容 facade 均不再可用。现有 legacy notification 配置仅是历史 inert config，不是可用运行时路径，也不是未来推送路径。
 
 ### 诊断命令
 
@@ -233,7 +232,7 @@ Legacy notification push 已从正常运行时断开。现有 notification 配�
 # 环境体检
 uv run python -m trendradar --doctor
 
-# Legacy Push 已从正常运行时移除；该命令只输出移除提示
+# Legacy Push 已移除；该命令只输出移除提示，不发送任何内容
 uv run python -m trendradar --test-notification
 
 # 查看当前调度状态
@@ -293,11 +292,6 @@ trendradar/
 │   ├── html.py          #   HTML 报告渲染
 │   ├── generator.py     #   报告生成器
 │   └── formatter.py     #   标题格式化
-├── notification/        # 推送通知
-│   ├── dispatcher.py    #   多渠道通知调度器
-│   ├── senders.py       #   各渠道发送函数
-│   ├── renderer.py      #   通知内容渲染
-│   └── splitter.py      #   消息分批拆分
 └── utils/               # 工具函数
     ├── time.py          #   时间处理
     └── url.py           #   URL 处理

@@ -1,7 +1,6 @@
 # coding=utf-8
 
 import sys
-import types
 from types import SimpleNamespace
 
 # Earlier-collected test modules install partial `trendradar` trees into
@@ -85,19 +84,6 @@ def test_valid_telegram_config_counts_as_notification_configured():
 
 def test_telegram_test_notification_path_fails_closed(monkeypatch, capsys):
     calls = []
-
-    class FakeDispatcher:
-        def __init__(self, **kwargs):
-            calls.append(("init", kwargs["config"]))
-
-        def dispatch_all(self, **kwargs):
-            calls.append(("dispatch", kwargs))
-            return {"Telegram": True}
-
-    notification_stub = types.ModuleType("trendradar.notification")
-    notification_stub.NotificationDispatcher = FakeDispatcher
-
-    monkeypatch.setitem(sys.modules, "trendradar.notification", notification_stub)
     monkeypatch.setattr(main, "AppContext", FakeAppContext)
     monkeypatch.setattr(main, "_create_test_html_file", lambda ctx: None)
     monkeypatch.setattr(main, "_build_test_report_data", lambda ctx: {"platform_stats": []})
@@ -121,14 +107,6 @@ def test_telegram_test_notification_path_fails_closed(monkeypatch, capsys):
 
 
 def test_non_telegram_test_notification_path_no_longer_advertised(monkeypatch, capsys):
-    class FakeDispatcher:
-        def __init__(self, **kwargs):
-            raise AssertionError("non-Telegram configs must not create a dispatcher")
-
-    notification_stub = types.ModuleType("trendradar.notification")
-    notification_stub.NotificationDispatcher = FakeDispatcher
-
-    monkeypatch.setitem(sys.modules, "trendradar.notification", notification_stub)
     monkeypatch.setattr(main, "AppContext", FakeAppContext)
 
     ok = main._run_test_notification({"SLACK_WEBHOOK_URL": "https://example.test/slack"})

@@ -14,7 +14,7 @@ import sys
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, NoReturn, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 import requests
 
@@ -39,10 +39,6 @@ LEGACY_NOTIFICATION_CONFIGS = [
     ("SLACK_WEBHOOK_URL", "Slack"),
     ("GENERIC_WEBHOOK_URL", "通用Webhook"),
 ]
-
-
-class LegacyPushRemovedError(RuntimeError):
-    """Raised when removed Legacy Push runtime entrypoints are called."""
 
 
 LEGACY_PUSH_REMOVED_MSG = (
@@ -857,28 +853,6 @@ class NewsAnalyzer:
             )
 
         return stats, html_file, ai_result, rss_items
-
-    def _send_notification_if_needed(
-        self,
-        stats: List[Dict],
-        report_type: str,
-        mode: str,
-        failed_ids: Optional[List] = None,
-        new_titles: Optional[Dict] = None,
-        id_to_name: Optional[Dict] = None,
-        html_file_path: Optional[str] = None,
-        rss_items: Optional[List[Dict]] = None,
-        rss_new_items: Optional[List[Dict]] = None,
-        ai_result: Optional[AIAnalysisResult] = None,
-        current_results: Optional[Dict] = None,
-        schedule: ResolvedSchedule = None,
-    ) -> NoReturn:
-        """Fail-closed Legacy Push entrypoint.
-
-        PR-A disconnects Legacy Push from normal runtime.  This method remains
-        only as an explicit guard until PR-C deletes or stubs the old package.
-        """
-        raise LegacyPushRemovedError(LEGACY_PUSH_REMOVED_MSG)
 
     def _initialize_and_check_config(self) -> bool:
         """通用初始化和配置检查。返回 True 表示可以继续执行。"""

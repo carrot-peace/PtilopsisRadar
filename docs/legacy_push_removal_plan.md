@@ -5,18 +5,19 @@
 This document is the canonical plan for removing Legacy Push while preserving
 artifact generation and CR-New.
 
-Current status before PR-A:
+Current status after PR-C2:
 
-- Legacy Push is still live and reachable from normal runtime.
-- Generation still has one dirty dependency on
-  `NotificationDispatcher.translate_content` before PR-B.
-- `trendradar/notification/` must not be deleted before PR-B.
+- Legacy Push has been removed from runtime.
+- Legacy Push package has been deleted.
+- Generation Plane no longer imports `trendradar.notification`.
+- Daily Report v2 remains artifact-only and does not use notification
+  transport.
 - CR-New Canary / Shadow is allowed later behind explicit gates.
 - Production Push is out of this series and requires a future separate design.
 
-This document is intentionally a plan and policy boundary. PR-0 does not change
-runtime push behavior, notification code, translation code, or CR Telegram
-behavior.
+This document is intentionally a plan and policy boundary. Historical stage
+notes below describe the removal path; current runtime must not reconnect
+Legacy Push.
 
 ## Boundaries
 
@@ -53,7 +54,7 @@ Policy:
 - It must not fallback-send.
 - It must not silently no-op as success.
 - It must not return success-shaped `True` when nothing was sent.
-- It must eventually be fail-closed or deleted.
+- It must remain deleted after PR-C2.
 - It is not a degraded path.
 - It is not a compatibility path.
 
@@ -334,6 +335,9 @@ Hard acceptance criteria:
 - Source grep shows no required imports of `trendradar.notification`.
 - `NotificationDispatcher`, `dispatch_all`, and `send_to_telegram` are not
   required by runtime, Generation Plane, DR, or CR-New.
+- `trendradar/notification/` does not exist.
+- Normal runtime, Daily Report v2, report, AI, and core code do not import
+  legacy notification.
 - No generated artifacts are committed.
 
 Rollback notes:
@@ -461,14 +465,12 @@ Test categories:
 - CR env gate tests proving explicit gates are required.
 - Docs/config grep checks for stale Legacy Push guidance.
 
-Known-before-cleanup guard status:
+Post-PR-C2 guard status:
 
-- `normal runtime must not call dispatch_all` is expected to fail before PR-A.
-- `normal runtime must not call send_to_telegram` is expected to fail before
-  PR-A / PR-C.
-- `Generation Plane must not import trendradar.notification` is expected to
-  fail before PR-B.
-- `fallback Telegram must be unreachable` is expected to fail before PR-C1.
+- `normal runtime must not call dispatch_all` is enforced.
+- `normal runtime must not call send_to_telegram` is enforced.
+- `Generation Plane must not import trendradar.notification` is enforced.
+- `fallback Telegram must be unreachable` is enforced by package deletion.
 
 ## Final Policy
 
@@ -476,7 +478,7 @@ Legacy Push is not a degraded path.
 
 Legacy Push is not a compatibility path.
 
-Legacy Push must become unreachable, fail-closed, and eventually deleted.
+Legacy Push must stay unreachable and deleted.
 
 CR-New is the only future push-capable path, and it remains gated, auditable,
 and separate from Production Push until a future explicit production design is

@@ -39,7 +39,7 @@
 | **文章** | `read_article` | 读取单篇文章内容（Markdown 格式） |
 | | `read_articles_batch` | 批量读取多篇文章（最多 5 篇） |
 
-> MCP 通知发送工具已不再暴露；通知发送由应用运行时的 Telegram 通知链路负责。
+> MCP 通知发送工具已不再暴露；旧应用运行时 Legacy Push / Telegram 通知链路也已移除。
 
 ---
 
@@ -812,7 +812,7 @@
 
 MCP 通知发送工具已不再暴露。`get_notification_channels`、`send_notification` 等 MCP 通知发送工具已从 MCP server 移除，不再作为可用工具提供。
 
-通知发送由应用运行时的 Telegram 通知链路负责，而非 MCP server。
+旧应用运行时 Legacy Push / Telegram 通知链路已移除；不要把 MCP 当作备用通知发送路径。
 
 ---
 
@@ -845,4 +845,3 @@ MCP 通知发送工具已不再暴露。`get_notification_channels`、`send_noti
 1. 查看最新："查询今天关于'iPhone'的新闻"
 2. 查找历史："查找上周与'iPhone'相关的历史新闻"
 3. 找相似报道："找出和'iPhone 发布会'相似的新闻"
-
