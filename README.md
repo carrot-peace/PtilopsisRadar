@@ -33,7 +33,7 @@ Ptilopsis Radar monitors anomaly signals across multi-platform information envir
 
 PtilopsisRadar is a product-boundary fork of TrendRadar.
 
-TrendRadar optimizes for broad utility: aggregation, RSS reading, AI summaries, multi-channel notifications, MCP integrations, and customizable reports.
+TrendRadar optimizes for broad utility: aggregation, RSS reading, AI summaries, MCP integrations, and customizable artifact reports.
 
 PtilopsisRadar optimizes for a narrow radar function: detecting abnormal propagation structures in Chinese-language information environments.
 
@@ -61,8 +61,7 @@ hotlist/RSS crawling
 → source tiers
 → evidence summary / evidence labels / bucketize
 → environment AI analysis
-→ current dashboard / daily report
-→ Telegram realtime alert / daily digest
+→ current dashboard / daily report artifacts
 ```
 
 ---
@@ -124,7 +123,8 @@ AI (optional, requires API Key configuration) has one sole task: based on the pr
 ### Reports & Push Notifications
 
 Generates an Information Environment Anomaly Monitoring Daily Report (HTML).
-Legacy notification push has been disconnected from normal runtime.
+Legacy notification push has been removed from normal runtime and its old
+notification package has been deleted.
 
 Legacy notification push should not be treated as the future push path. See
 [`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md) for the
@@ -227,9 +227,10 @@ Supported models include DeepSeek, OpenAI, Gemini, Claude, Ollama, etc. See [Lit
 
 ### Legacy Push Channels
 
-Legacy notification push has been disconnected from normal runtime. Existing
-notification config remains legacy data until later cleanup stages; it is not
-the future push path.
+Legacy notification push has been removed. The old `trendradar.notification`
+package, dispatcher, sender, fallback, and compatibility facade are no longer
+available. Legacy notification config fields are inert historical config, not a
+usable runtime path and not the future push path.
 
 ### Diagnostic Commands
 
@@ -237,7 +238,7 @@ the future push path.
 # Environment health check
 uv run python -m trendradar --doctor
 
-# Legacy Push has been removed from runtime; this prints the removal notice
+# Legacy Push has been removed; this prints the removal notice and sends nothing
 uv run python -m trendradar --test-notification
 
 # Show current schedule status
@@ -250,7 +251,7 @@ uv run python -m trendradar --show-schedule
 
 | File | Purpose |
 |------|---------|
-| `config/config.yaml` | Main config: data sources, report mode, AI model, storage, scheduling, legacy notification fields, etc. |
+| `config/config.yaml` | Main config: data sources, report mode, AI model, storage, scheduling, inert legacy notification fields, etc. |
 | `config/source_tiers.yaml` | Source tier mapping: platform / RSS feed to A / B / C / D tier assignment |
 | `config/frequency_words.txt` | Keywords / topic groups: for keyword matching mode (`filter.method: keyword`) |
 | `config/ai_interests.txt` | AI filter interest description: for AI smart filtering mode (`filter.method: ai`) |
@@ -297,11 +298,6 @@ trendradar/
 │   ├── html.py          #   HTML report rendering
 │   ├── generator.py     #   Report generator
 │   └── formatter.py     #   Title formatting
-├── notification/        # Push notifications
-│   ├── dispatcher.py    #   Multi-channel notification dispatcher
-│   ├── senders.py       #   Per-channel send functions
-│   ├── renderer.py      #   Notification content rendering
-│   └── splitter.py      #   Message batch splitting
 └── utils/               # Utilities
     ├── time.py          #   Time handling
     └── url.py           #   URL handling

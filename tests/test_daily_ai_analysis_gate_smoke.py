@@ -107,7 +107,6 @@ _load_real("trendradar.report.newsletter", "trendradar/report/newsletter.py")
 _stub_pkg("trendradar.utils")
 _stub_pkg("trendradar.utils.time")
 _stub_pkg("trendradar.core")
-_stub_pkg("trendradar.notification")
 _stub_pkg("trendradar.ai")
 _stub_pkg("trendradar.ai.filter")
 _stub_pkg("trendradar.storage")
@@ -132,13 +131,6 @@ _MODE_STRATEGY = {{
     "current": {{"report_type": "当前榜单", "should_send_notification": False}},
     "incremental": {{"report_type": "增量分析", "should_send_notification": False}},
 }}
-
-
-def _load_real_senders():
-    _load_real("trendradar.notification.removed", "trendradar/notification/removed.py")
-    _load_real("trendradar.notification.text_utils", "trendradar/notification/text_utils.py")
-    _load_real("trendradar.notification.formatters", "trendradar/notification/formatters.py")
-    return _load_real("trendradar.notification.senders", "trendradar/notification/senders.py")
 
 
 def _report_data():
@@ -331,18 +323,14 @@ assert dashboard_calls[0].get("ai_analysis") is ai
         )
 
 
-class TestTelegramDailyAttachmentPath(unittest.TestCase):
-    """Legacy Telegram attachment helpers fail closed after PR-C1."""
+class TestLegacyNotificationPackageDeleted(unittest.TestCase):
+    """Legacy notification attachment helpers are deleted after PR-C2."""
 
-    def test_daily_digest_attachment_path_helper_fails_closed(self):
+    def test_daily_digest_attachment_path_helper_is_deleted(self):
         code = _SUBPROCESS_PREAMBLE + """
-senders = _load_real_senders()
-try:
-    senders.resolve_report_attachment_path("output", "daily")
-except senders.LegacyNotificationRemovedError:
-    pass
-else:
-    raise AssertionError("legacy attachment path helper did not fail closed")
+path = os.path.join(ROOT, "trendradar", "notification", "senders.py")
+if os.path.exists(path):
+    raise AssertionError("legacy attachment helper module still exists")
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
@@ -350,15 +338,14 @@ else:
             f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_daily_digest_attachment_path_with_explicit_full_fails_closed(self):
+    def test_notification_package_import_is_unavailable(self):
         code = _SUBPROCESS_PREAMBLE + """
-senders = _load_real_senders()
 try:
-    senders.resolve_report_attachment_path("output", "daily", "full")
-except senders.LegacyNotificationRemovedError:
+    __import__("trendradar.notification")
+except ModuleNotFoundError:
     pass
 else:
-    raise AssertionError("legacy attachment path helper did not fail closed")
+    raise AssertionError("legacy notification package import unexpectedly succeeded")
 """
         result = _run_in_subprocess(code)
         self.assertEqual(
@@ -366,15 +353,10 @@ else:
             f"Subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_daily_digest_event_kind_helper_fails_closed(self):
+    def test_daily_pipeline_does_not_stub_notification_package(self):
         code = _SUBPROCESS_PREAMBLE + """
-senders = _load_real_senders()
-try:
-    senders.resolve_attachment_kind_for_event({}, "daily_digest")
-except senders.LegacyNotificationRemovedError:
-    pass
-else:
-    raise AssertionError("legacy attachment kind helper did not fail closed")
+if "trendradar.notification" in sys.modules:
+    raise AssertionError("daily smoke preamble should not load notification")
 """
         result = _run_in_subprocess(code)
         self.assertEqual(

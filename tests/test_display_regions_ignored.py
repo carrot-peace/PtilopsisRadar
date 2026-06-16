@@ -324,7 +324,6 @@ _stub_pkg("trendradar.crawler")
 _stub_pkg("trendradar.storage")
 _stub_pkg("trendradar.ai")
 _stub_pkg("trendradar.ai.filter")
-_stub_pkg("trendradar.notification")
 _stub_pkg("trendradar.telegram_bot")
 _stub_pkg("trendradar.telegram_bot.access")
 

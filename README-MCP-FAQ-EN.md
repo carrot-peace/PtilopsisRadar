@@ -39,7 +39,7 @@
 | **Article** | `read_article` | Read single article content (Markdown format) |
 | | `read_articles_batch` | Batch read multiple articles (max 5) |
 
-> MCP notification sending tools are no longer exposed; notification delivery is handled by the application runtime Telegram notification path.
+> MCP notification sending tools are no longer exposed; the old application runtime Legacy Push / Telegram notification path has also been removed.
 
 ---
 
@@ -812,7 +812,7 @@ Users often use natural language like "this week", "last 7 days" to express date
 
 MCP notification sending tools are no longer exposed. The `get_notification_channels` and `send_notification` MCP tools have been removed from the MCP server and are no longer available.
 
-Notification delivery is handled by the application runtime Telegram notification path, not by the MCP server.
+The old application runtime Legacy Push / Telegram notification path has been removed; MCP is not a backup notification sending path.
 
 ---
 
