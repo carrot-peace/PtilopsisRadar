@@ -857,7 +857,11 @@ class NewsAnalyzer:
                     build_cr_telegram_sink_from_env,
                 )
 
-                _dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
+                try:
+                    _dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
+                except ValueError as exc:
+                    print(f"[CR-A] live Telegram sink not configured: {exc}")
+                    _dispatch_sink = None
 
             build_and_write_cr_runtime_dry_run(
                 hotlist_stats=stats,
