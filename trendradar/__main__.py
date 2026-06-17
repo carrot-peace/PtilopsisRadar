@@ -831,21 +831,28 @@ class NewsAnalyzer:
         # CR-A dispatch hook (PR-CR-A1).
         # Gated by PTILOPSIS_CR_DISPATCH_MODE (explicit) or
         # PTILOPSIS_CR_DRY_RUN=1 (compatibility alias → artifact).
+        # The old PTILOPSIS_CR_DRY_RUN gate has been fully replaced; its
+        # meaning is now interpreted exclusively through
+        # resolve_cr_dispatch_mode in dispatch_mode.py.
         # Default is off: CR-A does not run.
         # artifact / shadow: writes CR artifacts only, no dispatch sink.
         # live: may build a Telegram dispatch sink when the CR Telegram
         #       send gate is also enabled (see telegram_env.py).
-        from trendradar.cr.dispatch_mode import resolve_cr_dispatch_mode
+        from trendradar.cr.dispatch_mode import (
+            CR_DISPATCH_LIVE,
+            CR_DISPATCH_OFF,
+            resolve_cr_dispatch_mode,
+        )
 
         _cr_mode = resolve_cr_dispatch_mode(os.environ)
-        if _cr_mode != "off":
+        if _cr_mode != CR_DISPATCH_OFF:
             from trendradar.cr.models import CRRunContext
             from trendradar.cr.runtime_dry_run import (
                 build_and_write_cr_runtime_dry_run,
             )
 
             _dispatch_sink = None
-            if _cr_mode == "live":
+            if _cr_mode == CR_DISPATCH_LIVE:
                 from trendradar.cr.telegram_env import (
                     build_cr_telegram_sink_from_env,
                 )

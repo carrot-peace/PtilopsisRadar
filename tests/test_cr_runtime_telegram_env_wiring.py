@@ -30,7 +30,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
 
 MODE_RESOLVE_TOKEN = "resolve_cr_dispatch_mode"
-MODE_GATE_TOKEN = '_cr_mode != "off"'
+MODE_GATE_TOKEN = "_cr_mode != CR_DISPATCH_OFF"
+LIVE_GATE_TOKEN = "_cr_mode == CR_DISPATCH_LIVE"
 FACTORY_NAME = "build_cr_telegram_sink_from_env"
 FACTORY_IMPORT = "from trendradar.cr.telegram_env import"
 
@@ -42,9 +43,9 @@ def _main_source() -> str:
 def _hook_region(source: str) -> str:
     """Extract the CR-A dispatch hook region from __main__.py.
 
-    The region is the ``if _cr_mode != "off":`` block plus the contiguous
-    comment lines and the ``resolve_cr_dispatch_mode`` call above it.
-    Extraction is indentation-based.
+    The region is the ``if _cr_mode != CR_DISPATCH_OFF:`` block plus the
+    contiguous comment lines and the ``resolve_cr_dispatch_mode`` call above
+    it.  Extraction is indentation-based.
     """
     lines = source.splitlines()
     gate_idx = next(i for i, line in enumerate(lines) if MODE_GATE_TOKEN in line)
@@ -83,7 +84,8 @@ class TestSourceWiring(unittest.TestCase):
 
     REQUIRED_TOKENS = (
         "resolve_cr_dispatch_mode",
-        '_cr_mode != "off"',
+        "CR_DISPATCH_OFF",
+        "CR_DISPATCH_LIVE",
         "build_and_write_cr_runtime_dry_run",
     )
 
@@ -96,7 +98,7 @@ class TestSourceWiring(unittest.TestCase):
 
     def test_dispatch_sink_conditionally_built_for_live(self) -> None:
         source = _main_source()
-        self.assertIn('_cr_mode == "live"', source)
+        self.assertIn("_cr_mode == CR_DISPATCH_LIVE", source)
 
     def test_sink_passed_into_dry_run_call(self) -> None:
         region = _hook_region(_main_source())

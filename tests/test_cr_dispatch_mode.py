@@ -15,7 +15,13 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from trendradar.cr.dispatch_mode import resolve_cr_dispatch_mode
+from trendradar.cr.dispatch_mode import (
+    CR_DISPATCH_ARTIFACT,
+    CR_DISPATCH_LIVE,
+    CR_DISPATCH_OFF,
+    CR_DISPATCH_SHADOW,
+    resolve_cr_dispatch_mode,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -27,64 +33,64 @@ class TestModeResolution(unittest.TestCase):
     """Group A: resolve_cr_dispatch_mode returns the correct mode."""
 
     def test_env_unset_returns_off(self) -> None:
-        self.assertEqual(resolve_cr_dispatch_mode({}), "off")
+        self.assertEqual(resolve_cr_dispatch_mode({}), CR_DISPATCH_OFF)
 
     def test_explicit_off(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "off"}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_explicit_artifact(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "artifact"}),
-            "artifact",
+            CR_DISPATCH_ARTIFACT,
         )
 
     def test_explicit_shadow(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "shadow"}),
-            "shadow",
+            CR_DISPATCH_SHADOW,
         )
 
     def test_explicit_live(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "live"}),
-            "live",
+            CR_DISPATCH_LIVE,
         )
 
     def test_invalid_value_returns_off(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "bogus"}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_empty_value_returns_off(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": ""}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_whitespace_only_returns_off(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "   "}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_case_insensitive(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "ARTIFACT"}),
-            "artifact",
+            CR_DISPATCH_ARTIFACT,
         )
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "Live"}),
-            "live",
+            CR_DISPATCH_LIVE,
         )
 
     def test_stripped_value(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DISPATCH_MODE": "  shadow  "}),
-            "shadow",
+            CR_DISPATCH_SHADOW,
         )
 
 
@@ -99,25 +105,25 @@ class TestDryRunCompatAlias(unittest.TestCase):
     def test_dry_run_one_maps_to_artifact(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DRY_RUN": "1"}),
-            "artifact",
+            CR_DISPATCH_ARTIFACT,
         )
 
     def test_dry_run_zero_is_ignored(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DRY_RUN": "0"}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_dry_run_other_value_is_ignored(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DRY_RUN": "true"}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_dry_run_empty_is_ignored(self) -> None:
         self.assertEqual(
             resolve_cr_dispatch_mode({"PTILOPSIS_CR_DRY_RUN": ""}),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
 
@@ -135,7 +141,7 @@ class TestPrecedence(unittest.TestCase):
                 "PTILOPSIS_CR_DISPATCH_MODE": "live",
                 "PTILOPSIS_CR_DRY_RUN": "1",
             }),
-            "live",
+            CR_DISPATCH_LIVE,
         )
 
     def test_dispatch_mode_off_wins_over_dry_run(self) -> None:
@@ -144,7 +150,7 @@ class TestPrecedence(unittest.TestCase):
                 "PTILOPSIS_CR_DISPATCH_MODE": "off",
                 "PTILOPSIS_CR_DRY_RUN": "1",
             }),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
     def test_dispatch_mode_artifact_wins_over_dry_run(self) -> None:
@@ -153,7 +159,7 @@ class TestPrecedence(unittest.TestCase):
                 "PTILOPSIS_CR_DISPATCH_MODE": "artifact",
                 "PTILOPSIS_CR_DRY_RUN": "1",
             }),
-            "artifact",
+            CR_DISPATCH_ARTIFACT,
         )
 
     def test_invalid_dispatch_mode_wins_over_dry_run(self) -> None:
@@ -163,7 +169,7 @@ class TestPrecedence(unittest.TestCase):
                 "PTILOPSIS_CR_DISPATCH_MODE": "invalid",
                 "PTILOPSIS_CR_DRY_RUN": "1",
             }),
-            "off",
+            CR_DISPATCH_OFF,
         )
 
 
@@ -189,11 +195,13 @@ class TestRuntimeBehavior(unittest.TestCase):
 
     def test_main_checks_off_mode(self) -> None:
         source = _main_source()
-        self.assertIn('_cr_mode != "off"', source)
+        self.assertIn("CR_DISPATCH_OFF", source)
+        self.assertIn("_cr_mode != CR_DISPATCH_OFF", source)
 
     def test_main_checks_live_mode_for_sink(self) -> None:
         source = _main_source()
-        self.assertIn('_cr_mode == "live"', source)
+        self.assertIn("CR_DISPATCH_LIVE", source)
+        self.assertIn("_cr_mode == CR_DISPATCH_LIVE", source)
 
     def test_main_does_not_use_dry_run_as_gate(self) -> None:
         """The old PTILOPSIS_CR_DRY_RUN gate is replaced by dispatch mode."""
@@ -214,7 +222,7 @@ class TestRuntimeBehavior(unittest.TestCase):
         """In __main__.py, the sink is only built inside the live check."""
         source = _main_source()
         # Find the live-mode block
-        live_pos = source.index('_cr_mode == "live"')
+        live_pos = source.index("_cr_mode == CR_DISPATCH_LIVE")
         sink_build_pos = source.index("build_cr_telegram_sink_from_env", live_pos)
         # The sink build must be after the live check
         self.assertGreater(sink_build_pos, live_pos)
@@ -239,7 +247,7 @@ class TestSourceBoundary(unittest.TestCase):
         lines = source.splitlines()
         # Find the dispatch hook block
         gate_idx = next(
-            i for i, line in enumerate(lines) if '_cr_mode != "off"' in line
+            i for i, line in enumerate(lines) if "_cr_mode != CR_DISPATCH_OFF" in line
         )
         gate_indent = len(lines[gate_idx]) - len(lines[gate_idx].lstrip())
         end = gate_idx + 1
