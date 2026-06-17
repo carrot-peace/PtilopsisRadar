@@ -32,12 +32,19 @@ from collections.abc import Mapping
 from typing import Literal
 
 # ---------------------------------------------------------------------------
-# Mode type
+# Mode type + named constants
 # ---------------------------------------------------------------------------
 
 CRDispatchMode = Literal["off", "artifact", "shadow", "live"]
 
-_VALID_MODES: frozenset[str] = frozenset({"off", "artifact", "shadow", "live"})
+CR_DISPATCH_OFF: CRDispatchMode = "off"
+CR_DISPATCH_ARTIFACT: CRDispatchMode = "artifact"
+CR_DISPATCH_SHADOW: CRDispatchMode = "shadow"
+CR_DISPATCH_LIVE: CRDispatchMode = "live"
+
+_VALID_MODES: frozenset[str] = frozenset(
+    {CR_DISPATCH_OFF, CR_DISPATCH_ARTIFACT, CR_DISPATCH_SHADOW, CR_DISPATCH_LIVE}
+)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -73,10 +80,10 @@ def resolve_cr_dispatch_mode(env: Mapping[str, str]) -> CRDispatchMode:
         if dispatch_val in _VALID_MODES:
             return dispatch_val  # type: ignore[return-value]
         # Invalid value — fail closed.
-        return "off"
+        return CR_DISPATCH_OFF
 
     # Compatibility alias: PTILOPSIS_CR_DRY_RUN=1 → artifact.
     if env.get("PTILOPSIS_CR_DRY_RUN") == "1":
-        return "artifact"
+        return CR_DISPATCH_ARTIFACT
 
-    return "off"
+    return CR_DISPATCH_OFF

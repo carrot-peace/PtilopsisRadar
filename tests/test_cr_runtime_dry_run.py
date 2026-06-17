@@ -600,7 +600,7 @@ class TestMainHookTrigger(unittest.TestCase):
 
     def test_dispatch_mode_off_gate_present(self):
         source = self._main_source()
-        self.assertIn('_cr_mode != "off"', source)
+        self.assertIn("_cr_mode != CR_DISPATCH_OFF", source)
 
     def test_dry_run_compat_alias_still_referenced_in_dispatch_mode_module(self):
         """The dispatch_mode module references PTILOPSIS_CR_DRY_RUN as compat."""
