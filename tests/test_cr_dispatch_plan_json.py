@@ -425,7 +425,7 @@ class TestCandidateSummary(unittest.TestCase):
         )
         self.assertEqual(len(d["candidate_summary"]), 2)
         first = d["candidate_summary"][0]
-        self.assertEqual(first["event_key"], "ev1")
+        self.assertEqual(first["cluster_key"], "ev1")
         self.assertEqual(first["candidate_id"], "c1")
         self.assertEqual(first["title"], "Topic A")
         self.assertEqual(first["level"], DECISION_ALERT)
