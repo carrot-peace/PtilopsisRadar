@@ -71,7 +71,9 @@ class CRDispatchSink(Protocol):
 
     Implementations are provided by the caller.  The executor never builds a
     real external sender and is unaware of any specific delivery channel.  In
-    v0.1, exceptions raised by :meth:`submit` propagate to the caller.
+    v0.1, the executor collapses ``TimeoutError``, ``ConnectionError``, and
+    ``OSError`` raised by :meth:`submit` into ``failed_transport`` receipts;
+    other exceptions propagate to the caller.
     """
 
     def submit(

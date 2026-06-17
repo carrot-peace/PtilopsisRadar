@@ -43,9 +43,6 @@ STATUS_FAILED_RENDER = "failed_render"
 STATUS_HTTP_ERROR = "http_error"
 STATUS_UNKNOWN = "unknown"
 
-# Transport exceptions that collapse to failed_transport.
-TRANSPORT_EXCEPTIONS = (TimeoutError, ConnectionError, OSError)
-
 
 # ---------------------------------------------------------------------------
 # Receipt status resolution
