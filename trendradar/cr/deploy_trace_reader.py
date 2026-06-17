@@ -101,6 +101,11 @@ def _extract_receipt_summary(receipt: dict) -> dict[str, object]:
             "accepted": False,
             "status": "unknown",
             "detail": None,
+            "transport": None,
+            "http_status": None,
+            "sink_ok": None,
+            "exception_type": None,
+            "exception_message": None,
         }
     first = receipts[0]
     return {
@@ -108,6 +113,11 @@ def _extract_receipt_summary(receipt: dict) -> dict[str, object]:
         "accepted": first.get("accepted", False),
         "status": first.get("status", "unknown"),
         "detail": first.get("detail"),
+        "transport": first.get("transport"),
+        "http_status": first.get("http_status"),
+        "sink_ok": first.get("sink_ok"),
+        "exception_type": first.get("exception_type"),
+        "exception_message": first.get("exception_message"),
     }
 
 
@@ -119,7 +129,7 @@ def _extract_cooldown(plan: dict) -> dict[str, object] | None:
 def _extract_candidate_outcomes(receipt: dict, plan: dict) -> list[dict[str, object]]:
     """Extract candidate outcomes from receipt or plan."""
     outcomes = receipt.get("candidate_outcomes")
-    if outcomes:
+    if outcomes is not None:
         return outcomes
     cooldown = plan.get("cooldown")
     if cooldown and "entries" in cooldown:
@@ -211,7 +221,13 @@ def read_cr_deploy_trace(
         receipt_result.data.get("plan_decision") if has_receipt else None
     )
     cr_dispatch["plan_reason"] = plan_data.get("reason")
-    cr_dispatch["plan_should_dispatch"] = plan_data.get("should_dispatch")
+    receipt_data_early = receipt_result.data if has_receipt else {}
+    if has_plan:
+        cr_dispatch["plan_should_dispatch"] = plan_data.get("should_dispatch")
+    elif has_receipt:
+        cr_dispatch["plan_should_dispatch"] = receipt_data_early.get("plan_should_dispatch")
+    else:
+        cr_dispatch["plan_should_dispatch"] = None
 
     # Selected candidate.
     cr_dispatch["selected_candidate"] = _extract_selected_candidate(plan_data)
@@ -227,5 +243,25 @@ def read_cr_deploy_trace(
     cr_dispatch["candidate_outcomes"] = _extract_candidate_outcomes(
         receipt_data, plan_data,
     )
+
+    # Additional plan fields (Fix 4).
+    if has_plan:
+        cr_dispatch["created_at"] = plan_data.get("created_at")
+        cr_dispatch["candidate_counts"] = plan_data.get("candidate_counts")
+        cr_dispatch["candidate_summary"] = plan_data.get("candidate_summary", [])
+        cr_dispatch["message_preview"] = plan_data.get("message_preview")
+        cr_dispatch["missing_fields"] = plan_data.get("missing_fields", [])
+    elif has_receipt:
+        cr_dispatch["created_at"] = receipt_data.get("created_at")
+        cr_dispatch["candidate_counts"] = None
+        cr_dispatch["candidate_summary"] = []
+        cr_dispatch["message_preview"] = None
+        cr_dispatch["missing_fields"] = []
+    else:
+        cr_dispatch["created_at"] = None
+        cr_dispatch["candidate_counts"] = None
+        cr_dispatch["candidate_summary"] = []
+        cr_dispatch["message_preview"] = None
+        cr_dispatch["missing_fields"] = []
 
     return {"cr_dispatch": cr_dispatch}

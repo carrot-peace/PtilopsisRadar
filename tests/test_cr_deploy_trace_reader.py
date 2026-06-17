@@ -448,5 +448,160 @@ class TestNotConfiguredReceipt(unittest.TestCase):
             self.assertFalse(cr["receipt_summary"]["accepted"])
 
 
+# ---------------------------------------------------------------------------
+# Test Group I — Fix 1: empty candidate_outcomes preserved
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyCandidateOutcomes(unittest.TestCase):
+    def test_empty_outcomes_not_overridden_by_plan_cooldown(self):
+        """candidate_outcomes: [] must be preserved, not fall back to cooldown entries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path, candidate_outcomes=[])
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertEqual(cr["candidate_outcomes"], [])
+
+
+# ---------------------------------------------------------------------------
+# Test Group J — Fix 2: receipt-only plan_should_dispatch fallback
+# ---------------------------------------------------------------------------
+
+
+class TestReceiptOnlyPlanShouldDispatch(unittest.TestCase):
+    def test_receipt_plan_should_dispatch_used(self):
+        """Receipt-only: plan_should_dispatch comes from receipt."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_receipt(receipt_path, plan_should_dispatch=True)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertTrue(cr["plan_should_dispatch"])
+
+
+# ---------------------------------------------------------------------------
+# Test Group K — Fix 3: receipt transport/detail fields preserved
+# ---------------------------------------------------------------------------
+
+
+class TestReceiptTransportFields(unittest.TestCase):
+    def test_transport_fields_preserved(self):
+        """Receipt summary preserves transport/http_status/exception fields."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path, receipts=[
+                {
+                    "message_index": 0,
+                    "attempted": True,
+                    "accepted": False,
+                    "status": "failed_transport",
+                    "detail": "TimeoutError",
+                    "transport": "telegram",
+                    "http_status": None,
+                    "sink_ok": None,
+                    "exception_type": "TimeoutError",
+                    "exception_message": "connection timed out",
+                },
+            ])
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+            summary = cr["receipt_summary"]
+
+            self.assertEqual(summary["transport"], "telegram")
+            self.assertIsNone(summary["http_status"])
+            self.assertEqual(summary["exception_type"], "TimeoutError")
+            self.assertEqual(summary["exception_message"], "connection timed out")
+
+
+# ---------------------------------------------------------------------------
+# Test Group L — Fix 4: plan fields preserved
+# ---------------------------------------------------------------------------
+
+
+class TestPlanFieldsPreserved(unittest.TestCase):
+    def test_created_at_from_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path, created_at="2026-06-17T09:00:00+00:00")
+            _write_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertEqual(cr["created_at"], "2026-06-17T09:00:00+00:00")
+
+    def test_candidate_counts_from_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertIsNotNone(cr["candidate_counts"])
+            self.assertEqual(cr["candidate_counts"]["urgent"], 1)
+
+    def test_message_preview_from_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path, message_preview="Alert body text")
+            _write_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertEqual(cr["message_preview"], "Alert body text")
+
+    def test_created_at_from_receipt_when_plan_missing(self):
+        """Receipt-only: created_at comes from receipt."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_receipt(receipt_path, created_at="2026-06-17T10:00:00+00:00")
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertEqual(cr["created_at"], "2026-06-17T10:00:00+00:00")
+
+
+# ---------------------------------------------------------------------------
+# Test Group M — Fix 5: no-send boundary
+# ---------------------------------------------------------------------------
+
+
+class TestNoSendBoundary(unittest.TestCase):
+    """deploy_trace_reader must not reference send/transport modules."""
+
+    FORBIDDEN = (
+        "CRTelegramSink",
+        "build_cr_telegram_sink_from_env",
+        "execute_cr_dispatch_plan",
+        "urllib",
+    )
+
+    def test_no_forbidden_tokens(self):
+        import trendradar.cr.deploy_trace_reader as mod
+        source = Path(mod.__file__).read_text(encoding="utf-8")
+        for token in self.FORBIDDEN:
+            self.assertNotIn(token, source, f"forbidden token {token!r} present")
+
+
 if __name__ == "__main__":
+    unittest.main()
     unittest.main()
