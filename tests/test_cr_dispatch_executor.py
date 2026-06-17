@@ -291,6 +291,7 @@ class TestRuntimeDryRunSink(unittest.TestCase):
                 run_label="run-f",
                 artifact_config=self._artifact_config(tmp),
                 dispatch_sink=sink,
+                dispatch_mode="live",
             )
             self.assertIsInstance(
                 result.dispatch_execution, CRDispatchExecutionResult
@@ -304,10 +305,12 @@ class TestRuntimeDryRunSink(unittest.TestCase):
                 run_label="run-f",
                 artifact_config=self._artifact_config(tmp),
                 dispatch_sink=sink,
+                dispatch_mode="live",
             )
             plan = result.dispatch_plan
             execution = result.dispatch_execution
             # Execution attempt tracks the plan's dispatch decision exactly.
+            self.assertIsNotNone(execution)
             self.assertEqual(execution.attempted, plan.should_dispatch)
             if plan.should_dispatch:
                 self.assertEqual(

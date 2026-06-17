@@ -35,6 +35,9 @@ STATUS_NOT_EXECUTED = "not_executed"
 STATUS_SHADOW_ONLY = "shadow_only"
 STATUS_SKIPPED_NO_CANDIDATE = "skipped_no_candidate"
 STATUS_SKIPPED_SUPPRESS = "skipped_suppress"
+STATUS_SKIPPED_COOLDOWN = "skipped_cooldown"
+STATUS_SKIPPED_REPEAT = "skipped_repeat"
+STATUS_SKIPPED_STATE_ERROR = "skipped_state_error"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_ACCEPTED = "accepted"
 STATUS_REJECTED = "rejected"
@@ -112,6 +115,8 @@ def build_dispatch_receipts_json(
     dispatch_mode: str,
     execution: CRDispatchExecutionResult | None = None,
     created_at: str | None = None,
+    cooldown_override_reason: str | None = None,
+    cooldown_entries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Build the dispatch receipts JSON dict.
 
@@ -125,14 +130,26 @@ def build_dispatch_receipts_json(
         The execution result.  ``None`` when no sink was provided.
     created_at:
         ISO-8601 timestamp string.
+    cooldown_override_reason:
+        When set, the plan was overridden by cooldown enforcement.
+        Receipt status reflects this override (skipped_cooldown, skipped_repeat,
+        skipped_state_error).
+    cooldown_entries:
+        Per-candidate cooldown outcomes from enforcement.  When provided,
+        included in the receipt as ``candidate_outcomes``.
 
     Returns
     -------
     dict
         JSON-serializable dict conforming to ``cr-dispatch-receipts-v1``.
     """
+    # --- Cooldown override (applies to all modes) ---
+    if cooldown_override_reason is not None:
+        receipts = [
+            _build_skipped_receipt_entry(0, cooldown_override_reason, cooldown_override_reason)
+        ]
     # --- Mode-level skip (no execution possible) ---
-    if dispatch_mode == "artifact":
+    elif dispatch_mode == "artifact":
         receipts = _mode_receipts(plan, STATUS_NOT_EXECUTED, "artifact_mode_no_send")
     elif dispatch_mode == "shadow":
         receipts = _mode_receipts(plan, STATUS_SHADOW_ONLY, "shadow_mode_no_send")
@@ -148,7 +165,7 @@ def build_dispatch_receipts_json(
         # Live mode with execution.
         receipts = _execution_receipts(execution)
 
-    return {
+    result: dict[str, object] = {
         "schema_version": DISPATCH_RECEIPT_SCHEMA_VERSION,
         "run_id": plan.run_label,
         "created_at": created_at,
@@ -157,6 +174,9 @@ def build_dispatch_receipts_json(
         "plan_should_dispatch": plan.should_dispatch,
         "receipts": receipts,
     }
+    if cooldown_entries:
+        result["candidate_outcomes"] = cooldown_entries
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -55,6 +55,7 @@ DispatchPlanDecision = str
 DECISION_DISPATCH: DispatchPlanDecision = "dispatch"
 DECISION_NO_CANDIDATE: DispatchPlanDecision = "no_candidate"
 DECISION_SUPPRESSED: DispatchPlanDecision = "suppress"
+DECISION_COOLDOWN: DispatchPlanDecision = "cooldown"
 DECISION_UNKNOWN: DispatchPlanDecision = "unknown"
 
 
@@ -63,6 +64,9 @@ _REASON_TO_DECISION: dict[str, DispatchPlanDecision] = {
     "ready": DECISION_DISPATCH,
     "no_selected_candidates": DECISION_NO_CANDIDATE,
     "empty_text": DECISION_SUPPRESSED,
+    "skipped_cooldown": DECISION_COOLDOWN,
+    "skipped_repeat": DECISION_COOLDOWN,
+    "skipped_state_error": DECISION_COOLDOWN,
 }
 
 
@@ -244,6 +248,7 @@ def cr_dispatch_plan_to_json_dict(
     | list[CRPresentedCandidate]
     | None = None,
     created_at: str | None = None,
+    cooldown_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Serialize a :class:`CRDispatchPlan` to a JSON-serializable dict.
 
@@ -353,7 +358,7 @@ def cr_dispatch_plan_to_json_dict(
     if selected_event_key is None and plan.should_dispatch:
         missing_fields.append("selected_event_key")
 
-    return {
+    result = {
         "schema_version": DISPATCH_PLAN_SCHEMA_VERSION,
         "run_id": plan.run_label,
         "created_at": created_at,
@@ -371,3 +376,6 @@ def cr_dispatch_plan_to_json_dict(
         "message_preview": message_preview,
         "missing_fields": missing_fields,
     }
+    if cooldown_context is not None:
+        result["cooldown"] = cooldown_context
+    return result
