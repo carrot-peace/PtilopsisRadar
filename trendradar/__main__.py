@@ -828,28 +828,36 @@ class NewsAnalyzer:
                     rss_items=rss_items,
                 )
 
-        # CR runtime dry-run hook (PR9k) — inert by default.
-        # Only fires when PTILOPSIS_CR_DRY_RUN=1.  Writes CR Markdown / HTML
-        # audit artifacts from the current hotlist / RSS stats; sends nothing,
-        # persists no state, and does not alter normal runtime behavior.
-        # PR9p: the PR9o env factory may additionally supply a Telegram
-        # dispatch sink.  The factory returns None unless its own send env
-        # gate is enabled, so this hook still dispatches nothing by default.
-        if os.environ.get("PTILOPSIS_CR_DRY_RUN") == "1":
+        # CR-A dispatch hook (PR-CR-A1).
+        # Gated by PTILOPSIS_CR_DISPATCH_MODE (explicit) or
+        # PTILOPSIS_CR_DRY_RUN=1 (compatibility alias → artifact).
+        # Default is off: CR-A does not run.
+        # artifact / shadow: writes CR artifacts only, no dispatch sink.
+        # live: may build a Telegram dispatch sink when the CR Telegram
+        #       send gate is also enabled (see telegram_env.py).
+        from trendradar.cr.dispatch_mode import resolve_cr_dispatch_mode
+
+        _cr_mode = resolve_cr_dispatch_mode(os.environ)
+        if _cr_mode != "off":
             from trendradar.cr.models import CRRunContext
             from trendradar.cr.runtime_dry_run import (
                 build_and_write_cr_runtime_dry_run,
             )
-            from trendradar.cr.telegram_env import build_cr_telegram_sink_from_env
 
-            dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
+            _dispatch_sink = None
+            if _cr_mode == "live":
+                from trendradar.cr.telegram_env import (
+                    build_cr_telegram_sink_from_env,
+                )
+
+                _dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
 
             build_and_write_cr_runtime_dry_run(
                 hotlist_stats=stats,
                 rss_stats=rss_items,
                 run_label=f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}",
                 run_context=CRRunContext(mode=mode),
-                dispatch_sink=dispatch_sink,
+                dispatch_sink=_dispatch_sink,
             )
 
         return stats, html_file, ai_result, rss_items

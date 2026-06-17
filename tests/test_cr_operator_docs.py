@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DOC_PATH = PROJECT_ROOT / "docs" / "cr_telegram_operator_guide.md"
 
 ENV_VARS = (
+    "PTILOPSIS_CR_DISPATCH_MODE",
     "PTILOPSIS_CR_DRY_RUN",
     "PTILOPSIS_CR_TELEGRAM_SEND",
     "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN",
