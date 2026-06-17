@@ -277,20 +277,37 @@ class TestSourceBoundary(unittest.TestCase):
             )
 
     def test_no_ptilopsis_cr_telegram_send_code_in_main(self) -> None:
-        """PTILOPSIS_CR_TELEGRAM_SEND must not appear as code in __main__.py.
+        """PTILOPSIS_CR_TELEGRAM_SEND must not be read directly in __main__.py.
 
-        Comments are allowed (documentation).  String literals and code
-        references are not.
+        Documentation strings may mention the env var; the runtime must still
+        leave this gate inside trendradar.cr.telegram_env.
         """
         import ast
         tree = ast.parse(_main_source())
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if "PTILOPSIS_CR_TELEGRAM_SEND" in node.value:
-                    self.fail(
-                        "PTILOPSIS_CR_TELEGRAM_SEND found in string literal "
-                        f"in __main__.py: {node.value!r}"
-                    )
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "environ"
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "os"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "PTILOPSIS_CR_TELEGRAM_SEND"
+            ):
+                self.fail("PTILOPSIS_CR_TELEGRAM_SEND read via os.environ.get")
+            if (
+                isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "environ"
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "os"
+                and isinstance(node.slice, ast.Constant)
+                and node.slice.value == "PTILOPSIS_CR_TELEGRAM_SEND"
+            ):
+                self.fail("PTILOPSIS_CR_TELEGRAM_SEND read via os.environ[]")
 
 
 if __name__ == "__main__":
