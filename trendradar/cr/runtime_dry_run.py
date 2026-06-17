@@ -22,6 +22,7 @@ Design reference: PR9k, PR-CR-A2.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
@@ -122,18 +123,16 @@ class CRRuntimeDryRunResult:
     persist.  It records the explicit local dry-run write result.  ``None``
     means no write was attempted.
 
-    ``dispatch_plan_json_paths`` is populated when the dispatch mode is not
-    ``off``.  It records the resolved artifact paths for the dispatch plan
-    JSON file.  ``None`` means no dispatch plan JSON was written (mode
-    ``off``).
+    ``dispatch_plan_json_paths`` records the resolved artifact paths for the
+    dispatch plan JSON file.
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
     pipeline: CRPipelineResult
     artifact_paths: CRArtifactPaths
     dispatch_plan: CRDispatchPlan
+    dispatch_plan_json_paths: CRArtifactPaths
     dispatch_execution: CRDispatchExecutionResult | None = None
-    dispatch_plan_json_paths: CRArtifactPaths | None = None
     cooldown_audit: CRCooldownAuditContext | None = None
     cooldown_prior_snapshot_load: CREventStateLoadResult | None = None
     cooldown_state_transition_preview: (
@@ -502,6 +501,7 @@ def build_and_write_cr_runtime_dry_run(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         presented_candidates=pipeline_result.presented_candidates,
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
     dispatch_plan_json_paths = write_dispatch_plan_json(
         dispatch_plan_json_dict,
