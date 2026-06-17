@@ -1,18 +1,20 @@
 # coding=utf-8
 """
-Tests for CR Telegram env-gated runtime wiring (PR9p).
+Tests for CR Telegram env-gated runtime wiring (PR-CR-A1 update).
 
-PR9p wires the PR9o env sink factory into the existing PR9k CR dry-run hook
-in ``trendradar/__main__.py``.  These tests inspect the source by path (no
-import of ``trendradar.__main__``, which requires third-party runtime deps)
-and assert:
+PR-CR-A1 replaces the PTILOPSIS_CR_DRY_RUN gate with
+``resolve_cr_dispatch_mode`` in ``trendradar/__main__.py``.  The Telegram
+sink factory is now reachable only through the ``live`` dispatch mode path.
+
+These tests inspect the source by path (no import of ``trendradar.__main__``,
+which requires third-party runtime deps) and assert:
 
   Group A — the wiring tokens are present;
-  Group B — the factory import stays lazy, inside the PTILOPSIS_CR_DRY_RUN
-            gate, never at module top level;
+  Group B — the factory import stays lazy, inside the dispatch-mode gate,
+            never at module top level;
   Group C — no independent Telegram runtime branch exists: the send gate
             name never appears in __main__.py, and the factory is reachable
-            only through the dry-run hook;
+            only through the live-mode hook;
   Group D — the hook region introduces no forbidden subsystem tokens.
 
 No real network calls.  No real tokens.  No environment mutation.
@@ -27,11 +29,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
 
-GATE_TOKEN = 'os.environ.get("PTILOPSIS_CR_DRY_RUN")'
+MODE_RESOLVE_TOKEN = "resolve_cr_dispatch_mode"
+MODE_GATE_TOKEN = '_cr_mode != "off"'
 FACTORY_NAME = "build_cr_telegram_sink_from_env"
-FACTORY_IMPORT = (
-    "from trendradar.cr.telegram_env import build_cr_telegram_sink_from_env"
-)
+FACTORY_IMPORT = "from trendradar.cr.telegram_env import"
 
 
 def _main_source() -> str:
@@ -39,19 +40,23 @@ def _main_source() -> str:
 
 
 def _hook_region(source: str) -> str:
-    """Extract the CR dry-run hook region from __main__.py.
+    """Extract the CR-A dispatch hook region from __main__.py.
 
-    The region is the ``if`` block gated by PTILOPSIS_CR_DRY_RUN plus the
-    contiguous comment lines immediately above it.  Extraction is
-    indentation-based: the block ends at the first non-blank line whose
-    indent is less than or equal to the gate line's indent.
+    The region is the ``if _cr_mode != "off":`` block plus the contiguous
+    comment lines and the ``resolve_cr_dispatch_mode`` call above it.
+    Extraction is indentation-based.
     """
     lines = source.splitlines()
-    gate_idx = next(i for i, line in enumerate(lines) if GATE_TOKEN in line)
+    gate_idx = next(i for i, line in enumerate(lines) if MODE_GATE_TOKEN in line)
     gate_indent = len(lines[gate_idx]) - len(lines[gate_idx].lstrip())
 
+    # Walk backwards to include the resolve call and comments above the gate.
     start = gate_idx
-    while start > 0 and lines[start - 1].strip().startswith("#"):
+    while start > 0 and (
+        lines[start - 1].strip().startswith("#")
+        or MODE_RESOLVE_TOKEN in lines[start - 1]
+        or not lines[start - 1].strip()
+    ):
         start -= 1
 
     end = gate_idx + 1
@@ -77,10 +82,8 @@ class TestSourceWiring(unittest.TestCase):
     """Group A: required wiring tokens are present in __main__.py."""
 
     REQUIRED_TOKENS = (
-        "PTILOPSIS_CR_DRY_RUN",
-        "build_cr_telegram_sink_from_env",
-        "dispatch_sink =",
-        "dispatch_sink=dispatch_sink",
+        "resolve_cr_dispatch_mode",
+        '_cr_mode != "off"',
         "build_and_write_cr_runtime_dry_run",
     )
 
@@ -91,17 +94,14 @@ class TestSourceWiring(unittest.TestCase):
                 token, source, f"required wiring token {token!r} missing"
             )
 
-    def test_factory_called_with_os_environ(self) -> None:
+    def test_dispatch_sink_conditionally_built_for_live(self) -> None:
         source = _main_source()
-        self.assertIn(
-            "dispatch_sink = build_cr_telegram_sink_from_env(os.environ)",
-            source,
-        )
+        self.assertIn('_cr_mode == "live"', source)
 
     def test_sink_passed_into_dry_run_call(self) -> None:
         region = _hook_region(_main_source())
         self.assertIn("build_and_write_cr_runtime_dry_run(", region)
-        self.assertIn("dispatch_sink=dispatch_sink", region)
+        self.assertIn("dispatch_sink=_dispatch_sink", region)
 
 
 # ---------------------------------------------------------------------------
@@ -110,16 +110,16 @@ class TestSourceWiring(unittest.TestCase):
 
 
 class TestLazyImportBoundary(unittest.TestCase):
-    """Group B: factory import stays lazy, inside the dry-run gate."""
+    """Group B: factory import stays lazy, inside the dispatch-mode gate."""
 
     def test_factory_import_present_and_after_gate(self) -> None:
         source = _main_source()
         self.assertIn(FACTORY_IMPORT, source)
-        gate_pos = source.index(GATE_TOKEN)
+        gate_pos = source.index(MODE_GATE_TOKEN)
         self.assertGreater(
             source.index(FACTORY_NAME),
             gate_pos,
-            "factory must first appear after the PTILOPSIS_CR_DRY_RUN gate",
+            "factory must first appear after the dispatch-mode gate",
         )
 
     def test_no_top_level_telegram_import_via_ast(self) -> None:
@@ -153,19 +153,21 @@ class TestLazyImportBoundary(unittest.TestCase):
 
 
 class TestNoIndependentTelegramPath(unittest.TestCase):
-    """Group C: Telegram is reachable only through the CR dry-run hook."""
+    """Group C: Telegram is reachable only through the CR live-mode hook."""
 
-    def test_send_gate_name_absent_from_main(self) -> None:
+    def test_send_gate_name_not_used_as_code_in_main(self) -> None:
         # The send gate is checked inside the PR9o factory, never in
-        # __main__.py — so no separate runtime branch can exist on it.
-        self.assertNotIn("PTILOPSIS_CR_TELEGRAM_SEND", _main_source())
-
-    def test_dry_run_is_still_the_only_cr_env_gate(self) -> None:
-        source = _main_source()
-        self.assertEqual(source.count(GATE_TOKEN), 1)
-        self.assertNotIn(
-            "PTILOPSIS_CR_", source.replace("PTILOPSIS_CR_DRY_RUN", "")
-        )
+        # __main__.py code — so no separate runtime branch can exist on it.
+        # Comments are allowed (documentation).
+        import ast
+        tree = ast.parse(_main_source())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if "PTILOPSIS_CR_TELEGRAM_SEND" in node.value:
+                    self.fail(
+                        "PTILOPSIS_CR_TELEGRAM_SEND found in string literal "
+                        f"in __main__.py: {node.value!r}"
+                    )
 
     def test_factory_only_referenced_inside_hook_region(self) -> None:
         source = _main_source()
@@ -173,7 +175,7 @@ class TestNoIndependentTelegramPath(unittest.TestCase):
         self.assertEqual(
             source.count(FACTORY_NAME),
             region.count(FACTORY_NAME),
-            "factory referenced outside the CR dry-run hook region",
+            "factory referenced outside the CR dispatch hook region",
         )
         # Exactly two references: the lazy import and the single call.
         self.assertEqual(region.count(FACTORY_NAME), 2)
@@ -211,7 +213,7 @@ class TestHookRegionBoundary(unittest.TestCase):
             self.assertNotIn(
                 token,
                 region,
-                f"forbidden token {token!r} present in CR dry-run hook region",
+                f"forbidden token {token!r} present in CR dispatch hook region",
             )
 
     def test_hook_region_imports_only_cr_modules(self) -> None:

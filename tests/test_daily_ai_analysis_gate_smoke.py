@@ -123,6 +123,12 @@ _stub_pkg("trendradar.core.scheduler")
 _stub_pkg("trendradar.core.cdn")
 _stub_pkg("trendradar.crawler")
 
+# trendradar.cr.dispatch_mode is pure (no external deps).  Provide a
+# minimal stub so resolve_cr_dispatch_mode returns "off" in tests.
+_dm = types.ModuleType("trendradar.cr.dispatch_mode")
+_dm.resolve_cr_dispatch_mode = lambda env: "off"
+sys.modules["trendradar.cr.dispatch_mode"] = _dm
+
 _MAIN = _load_real("trendradar.__main__", "trendradar/__main__.py")
 NewsAnalyzer = _MAIN.NewsAnalyzer
 

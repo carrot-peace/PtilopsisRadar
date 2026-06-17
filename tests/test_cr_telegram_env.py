@@ -432,26 +432,27 @@ class TestBoundaryChecks(unittest.TestCase):
                 token, text, f"telegram_env.py must not contain {token!r}"
             )
 
-    def test_main_imports_telegram_env_only_inside_dry_run_gate(self) -> None:
-        # PR9p wires the env factory into the CR dry-run hook.  The import
-        # must stay lazy (inside the PTILOPSIS_CR_DRY_RUN gate) — never at
-        # module top level.
+    def test_main_imports_telegram_env_only_inside_dispatch_mode_gate(self) -> None:
+        # PR-CR-A1 wires the env factory into the CR dispatch hook.  The import
+        # must stay lazy (inside the dispatch-mode gate) — never at module top
+        # level.
         from pathlib import Path
 
         source = Path(__file__).resolve().parent.parent / "trendradar" / "__main__.py"
         text = source.read_text(encoding="utf-8")
-        self.assertIn(
-            "from trendradar.cr.telegram_env import build_cr_telegram_sink_from_env",
-            text,
-        )
+        self.assertIn("build_cr_telegram_sink_from_env", text)
+        # The import statement (not comments) must be inside the gate.
+        import_pattern = "from trendradar.cr.telegram_env import"
+        self.assertIn(import_pattern, text)
         for line in text.splitlines():
-            if "telegram_env" in line:
+            stripped = line.strip()
+            if stripped.startswith("from ") and "telegram_env" in stripped:
                 self.assertTrue(
                     line.startswith(" "),
-                    f"telegram_env must not be referenced at top level: {line!r}",
+                    f"telegram_env import must not be at top level: {line!r}",
                 )
-        gate_pos = text.index('os.environ.get("PTILOPSIS_CR_DRY_RUN")')
-        self.assertGreater(text.index("telegram_env"), gate_pos)
+        gate_pos = text.index('resolve_cr_dispatch_mode')
+        self.assertGreater(text.index(import_pattern), gate_pos)
 
     def test_runtime_dry_run_does_not_import_telegram_env(self) -> None:
         from pathlib import Path

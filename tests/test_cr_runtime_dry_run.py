@@ -582,7 +582,7 @@ class TestSourceBoundary(unittest.TestCase):
 
 
 class TestMainHookTrigger(unittest.TestCase):
-    """__main__ CR dry-run hook must be gated solely by PTILOPSIS_CR_DRY_RUN."""
+    """__main__ CR dispatch hook is gated by resolve_cr_dispatch_mode."""
 
     def _main_source(self) -> str:
         # Read by path (no import) so the check does not depend on the runtime's
@@ -594,19 +594,27 @@ class TestMainHookTrigger(unittest.TestCase):
         )
         return main_path.read_text(encoding="utf-8")
 
-    def test_dry_run_env_trigger_present(self):
+    def test_dispatch_mode_resolution_used(self):
         source = self._main_source()
+        self.assertIn("resolve_cr_dispatch_mode", source)
+
+    def test_dispatch_mode_off_gate_present(self):
+        source = self._main_source()
+        self.assertIn('_cr_mode != "off"', source)
+
+    def test_dry_run_compat_alias_still_referenced_in_dispatch_mode_module(self):
+        """The dispatch_mode module references PTILOPSIS_CR_DRY_RUN as compat."""
+        dm_path = (
+            Path(__file__).resolve().parent.parent
+            / "trendradar"
+            / "cr"
+            / "dispatch_mode.py"
+        )
+        source = dm_path.read_text(encoding="utf-8")
         self.assertIn("PTILOPSIS_CR_DRY_RUN", source)
 
-    def test_dry_run_is_only_cr_trigger(self):
+    def test_build_and_write_cr_runtime_dry_run_called(self):
         source = self._main_source()
-        # Exactly one env gate introduced for CR dry-run.
-        self.assertEqual(
-            source.count('os.environ.get("PTILOPSIS_CR_DRY_RUN")'), 1
-        )
-        # No other PTILOPSIS_CR_* env trigger is introduced.
-        self.assertNotIn("PTILOPSIS_CR_", source.replace("PTILOPSIS_CR_DRY_RUN", ""))
-        # The gate guards the dry-run bridge call.
         self.assertIn("build_and_write_cr_runtime_dry_run", source)
 
 
