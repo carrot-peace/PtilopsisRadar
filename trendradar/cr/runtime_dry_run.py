@@ -36,6 +36,11 @@ from trendradar.cr.cooldown_audit import (
     CRCooldownAuditContext,
     build_cr_cooldown_audit_context,
 )
+from trendradar.cr.cooldown_enforce import (
+    CRCooldownEnforcementResult,
+    DEFAULT_DISPATCH_STATE_PATH,
+    enforce_cr_cooldown_for_candidates,
+)
 from trendradar.cr.cooldown_policy import CRCooldownPolicy
 from trendradar.cr.dispatch_executor import (
     CRDispatchExecutionResult,
@@ -145,6 +150,8 @@ class CRRuntimeDryRunResult:
         CREventStateTransitionPreview | None
     ) = None
     cooldown_next_snapshot_save: CREventStateSaveResult | None = None
+    cooldown_enforcement: CRCooldownEnforcementResult | None = None
+    dispatch_state_save: CREventStateSaveResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +285,7 @@ def build_and_write_cr_runtime_dry_run(
     urgent_threshold: float = 80.0,
     dispatch_sink: CRDispatchSink | None = None,
     dispatch_mode: str | None = None,
+    dispatch_state_path: str | Path | None = None,
     include_cooldown_audit: bool = False,
     cooldown_policy: CRCooldownPolicy | None = None,
     cooldown_prior_snapshot: CREventStateSnapshot | None = None,
@@ -327,6 +335,11 @@ def build_and_write_cr_runtime_dry_run(
         When provided, the dispatch plan and receipt JSON are written with
         this mode recorded.  When ``None`` (default), the mode field defaults
         to ``artifact``.
+    dispatch_state_path:
+        Path to the CR dispatch state JSON file.  When provided, cooldown
+        enforcement reads prior dispatch state from this path and (for live
+        mode only) writes updated state after accepted dispatch.  When
+        ``None`` (default), ``DEFAULT_DISPATCH_STATE_PATH`` is used.
     include_cooldown_audit:
         Opt-in, artifact-only flag (default ``False``).  When ``True``, the
         Markdown / HTML audit artifacts additionally render repeat-preview and
@@ -500,15 +513,114 @@ def build_and_write_cr_runtime_dry_run(
 
     # 6. Plan CR-A dispatch (pure — nothing is sent).
     dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
-
-    # 6b. Write dispatch plan JSON (PR-CR-A2).
     effective_dispatch_mode = dispatch_mode or "artifact"
+    now = datetime.now(timezone.utc)
+
+    # 6a. Load prior dispatch state and enforce cooldown (PR-CR-A4).
+    effective_state_path = dispatch_state_path or DEFAULT_DISPATCH_STATE_PATH
+    dispatch_state_load = load_cr_event_state_snapshot(effective_state_path)
+    prior_snapshot_provided = dispatch_state_load.loaded
+    state_load_error: str | None = dispatch_state_load.error
+    seen_states: dict[str, CRSeenEventState] | None = None
+    if dispatch_state_load.error is None:
+        seen_states = cr_event_state_snapshot_to_seen_states(
+            dispatch_state_load.snapshot
+        )
+
+    cooldown_enforcement: CRCooldownEnforcementResult | None = None
+    cooldown_override_reason: str | None = None
+    eligible_cr_a_candidates = pipeline_result.cr_a_candidates  # default: all
+    if dispatch_plan.should_dispatch and pipeline_result.cr_a_candidates:
+        cooldown_enforcement = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=pipeline_result.cr_a_candidates,
+            seen_states=seen_states,
+            prior_snapshot_provided=prior_snapshot_provided,
+            state_error=state_load_error,
+            policy=cooldown_policy,
+            now=now,
+        )
+        # Blocker 5: use per-candidate eligible set.
+        eligible_cr_a_candidates = cooldown_enforcement.eligible_candidates
+        if not cooldown_enforcement.should_dispatch:
+            cooldown_override_reason = cooldown_enforcement.override_reason
+            dispatch_plan = CRDispatchPlan(
+                should_dispatch=False,
+                messages=(),
+                reason=cooldown_override_reason or "skipped_cooldown",
+                run_label=dispatch_plan.run_label,
+                candidate_count=dispatch_plan.candidate_count,
+                urgent_count=dispatch_plan.urgent_count,
+                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+            )
+        elif eligible_cr_a_candidates != pipeline_result.cr_a_candidates:
+            # Some candidates filtered out — rebuild plan with eligible only.
+            # Regenerate cr_a_text from filtered candidates.
+            from trendradar.cr.pipeline import CRPipelineResult
+            from trendradar.cr.presentation import (
+                CRPresentationRun,
+                render_cr_a_text,
+            )
+            eligible_run = CRPresentationRun(
+                run_label=pipeline_result.run_label,
+                candidates=list(eligible_cr_a_candidates),
+                high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+            )
+            filtered_cr_a_text = render_cr_a_text(eligible_run)
+            filtered_pipeline = CRPipelineResult(
+                run_label=pipeline_result.run_label,
+                primitives=pipeline_result.primitives,
+                candidates=pipeline_result.candidates,
+                score_results=pipeline_result.score_results,
+                decisions=pipeline_result.decisions,
+                presented_candidates=pipeline_result.presented_candidates,
+                cr_a_candidates=eligible_cr_a_candidates,
+                cr_a_text=filtered_cr_a_text,
+                markdown_audit_text=pipeline_result.markdown_audit_text,
+                html_audit_text=pipeline_result.html_audit_text,
+                high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+            )
+            dispatch_plan = build_cr_a_dispatch_plan(filtered_pipeline)
+
+    # 6b. Build cooldown context for plan JSON (per-candidate entries).
+    cooldown_context: dict[str, object] | None = None
+    if cooldown_enforcement is not None and cooldown_enforcement.entries:
+        eligible_keys = {pc.cluster_key for pc in eligible_cr_a_candidates}
+        entries_list: list[dict[str, object]] = []
+        for e in cooldown_enforcement.entries:
+            last_dispatched_at = None
+            if seen_states and e.event_key in seen_states:
+                last_dispatched_at = seen_states[e.event_key].seen_at
+            is_eligible = e.event_key in eligible_keys
+            entries_list.append({
+                "candidate_id": e.candidate_id,
+                "event_key": e.event_key,
+                "current_level": e.current_level,
+                "last_level": e.previous_level,
+                "last_dispatched_at": last_dispatched_at,
+                "cooldown_seconds": e.cooldown_seconds,
+                "cooldown_remaining_seconds": e.cooldown_remaining_seconds,
+                "is_escalation": e.is_escalation,
+                "allowed_by_escalation": e.is_escalation and is_eligible,
+                "suppressed_by_cooldown": not is_eligible,
+                "decision": e.cooldown_action if is_eligible else (
+                    cooldown_override_reason or "skipped_cooldown"
+                ),
+            })
+        cooldown_context = {
+            "state_available": cooldown_enforcement.state_available,
+            "state_error": cooldown_enforcement.state_error,
+            "policy_version": "cr-cooldown-v1",
+            "entries": entries_list,
+        }
+
+    # 6c. Write dispatch plan JSON (PR-CR-A2 + PR-CR-A4 cooldown context).
     dispatch_plan_json_dict = cr_dispatch_plan_to_json_dict(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         presented_candidates=pipeline_result.presented_candidates,
-        cr_a_candidates=pipeline_result.cr_a_candidates,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        cr_a_candidates=eligible_cr_a_candidates,
+        created_at=now.isoformat(),
+        cooldown_context=cooldown_context,
     )
     dispatch_plan_json_paths = write_dispatch_plan_json(
         dispatch_plan_json_dict,
@@ -517,24 +629,64 @@ def build_and_write_cr_runtime_dry_run(
     )
 
     # 7. Optionally execute against an injected local sink (no real delivery).
+    # Blocker 3: only execute sink in live mode when not cooldown-overridden.
     dispatch_execution = None
-    if dispatch_sink is not None:
-        dispatch_execution = execute_cr_dispatch_plan(
-            dispatch_plan, sink=dispatch_sink
-        )
+    if dispatch_sink is not None and effective_dispatch_mode == "live":
+        if cooldown_override_reason is None:
+            dispatch_execution = execute_cr_dispatch_plan(
+                dispatch_plan, sink=dispatch_sink
+            )
 
-    # 7b. Build and write dispatch receipt JSON (PR-CR-A3).
+    # 7b. Build and write dispatch receipt JSON (PR-CR-A3 + PR-CR-A4 cooldown).
+    cooldown_entries_for_receipt = cooldown_context.get("entries") if cooldown_context else None
     dispatch_receipt_json_dict = build_dispatch_receipts_json(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         execution=dispatch_execution,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=now.isoformat(),
+        cooldown_override_reason=cooldown_override_reason,
+        cooldown_entries=cooldown_entries_for_receipt,
     )
     dispatch_receipt_json_paths = write_dispatch_receipts_json(
         dispatch_receipt_json_dict,
         run_label=run_label,
         config=artifact_config,
     )
+
+    # 7c. Update dispatch state on live+accepted (PR-CR-A4).
+    # Blocker 4: update all eligible CR-A candidates, not just first.
+    dispatch_state_save: CREventStateSaveResult | None = None
+    if (
+        effective_dispatch_mode == "live"
+        and cooldown_override_reason is None
+        and dispatch_execution is not None
+        and dispatch_execution.accepted_count > 0
+        and dispatch_execution.receipts
+        and dispatch_execution.receipts[0].accepted
+    ):
+        from trendradar.cr.state_snapshot import (
+            CREventStateEntry,
+            merge_cr_event_state_entries,
+        )
+        # Blocker 2: use pc.cluster_key as canonical event key.
+        update_entries: list[CREventStateEntry] = []
+        for pc in eligible_cr_a_candidates:
+            update_entries.append(CREventStateEntry(
+                event_key=pc.cluster_key,
+                decision_level=pc.decision_level,
+                score=pc.total_score,
+                seen_at=now.isoformat(),
+                title=pc.display_title,
+                candidate_id=pc.candidate_id,
+            ))
+        if update_entries:
+            updated_snapshot = merge_cr_event_state_entries(
+                dispatch_state_load.snapshot,
+                tuple(update_entries),
+            )
+            dispatch_state_save = save_cr_event_state_snapshot(
+                updated_snapshot, effective_state_path
+            )
 
     # 8. Return.
     return CRRuntimeDryRunResult(
@@ -549,4 +701,6 @@ def build_and_write_cr_runtime_dry_run(
         cooldown_prior_snapshot_load=cooldown_prior_snapshot_load,
         cooldown_state_transition_preview=cooldown_state_transition_preview,
         cooldown_next_snapshot_save=cooldown_next_snapshot_save,
+        cooldown_enforcement=cooldown_enforcement,
+        dispatch_state_save=dispatch_state_save,
     )
