@@ -71,7 +71,9 @@ class CRDispatchSink(Protocol):
 
     Implementations are provided by the caller.  The executor never builds a
     real external sender and is unaware of any specific delivery channel.  In
-    v0.1, exceptions raised by :meth:`submit` propagate to the caller.
+    v0.1, the executor collapses ``TimeoutError``, ``ConnectionError``, and
+    ``OSError`` raised by :meth:`submit` into ``failed_transport`` receipts;
+    other exceptions propagate to the caller.
     """
 
     def submit(
@@ -130,6 +132,13 @@ class CRNoopDispatchSink:
 
 
 # ---------------------------------------------------------------------------
+# Transport exception matching
+# ---------------------------------------------------------------------------
+
+TRANSPORT_EXCEPTIONS = (TimeoutError, ConnectionError, OSError)
+
+
+# ---------------------------------------------------------------------------
 # Executor
 # ---------------------------------------------------------------------------
 
@@ -143,7 +152,9 @@ def execute_cr_dispatch_plan(
 
     Pure orchestration: does not mutate the plan or its messages, does not
     re-check eligibility, re-render text, or recompute decisions, and sends
-    nothing real.  Sink exceptions are allowed to propagate (v0.1).
+    nothing real.  Transport exceptions (timeout, connection, OS errors) are
+    caught per-message and collapsed into ``failed_transport`` receipts so the
+    caller always receives a structured result.
 
     Behavior:
       - ``plan.should_dispatch is False`` → the sink is never called;
@@ -153,6 +164,8 @@ def execute_cr_dispatch_plan(
         with its positional ``message_index``; ``attempted=True``,
         ``reason="executed"``, and ``accepted_count`` is the number of
         receipts whose ``accepted`` is ``True``.
+      - If a sink submit raises a transport exception, a ``failed_transport``
+        receipt is produced for that message; other messages continue.
 
     Returns
     -------
@@ -171,7 +184,17 @@ def execute_cr_dispatch_plan(
     # Ready plan — submit each message in order.
     receipts: list[CRDispatchReceipt] = []
     for index, message in enumerate(plan.messages):
-        receipt = sink.submit(message, message_index=index)
+        try:
+            receipt = sink.submit(message, message_index=index)
+        except TRANSPORT_EXCEPTIONS as exc:
+            receipt = CRDispatchReceipt(
+                message_index=index,
+                accepted=False,
+                status="failed_transport",
+                detail=type(exc).__name__,
+                candidate_count=message.candidate_count,
+                run_label=message.run_label,
+            )
         receipts.append(receipt)
 
     accepted_count = sum(1 for r in receipts if r.accepted)
