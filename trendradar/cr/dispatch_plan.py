@@ -240,6 +240,9 @@ def cr_dispatch_plan_to_json_dict(
     presented_candidates: tuple[CRPresentedCandidate, ...]
     | list[CRPresentedCandidate]
     | None = None,
+    cr_a_candidates: tuple[CRPresentedCandidate, ...]
+    | list[CRPresentedCandidate]
+    | None = None,
     created_at: str | None = None,
 ) -> dict[str, object]:
     """Serialize a :class:`CRDispatchPlan` to a JSON-serializable dict.
@@ -258,6 +261,10 @@ def cr_dispatch_plan_to_json_dict(
         All presented candidates from the pipeline (not just CR-A selected).
         Used to populate ``candidate_summary`` and ``candidate_counts``.
         When ``None``, summary fields are empty.
+    cr_a_candidates:
+        The CR-A selected candidates (the actual dispatch targets).
+        Used to populate ``selected_*`` fields.  When ``None``, falls back
+        to scanning ``presented_candidates`` for backward compatibility.
     created_at:
         ISO-8601 timestamp string.  When ``None``, the field is ``None``.
 
@@ -320,10 +327,11 @@ def cr_dispatch_plan_to_json_dict(
     selected_score: float | None = None
 
     if plan.should_dispatch and plan.messages:
-        first_msg = plan.messages[0]
-        if plan.candidate_count > 0 and presented_candidates:
-            # Find the first push-eligible candidate (sorted by level/score).
-            for pc in presented_candidates:
+        # Prefer cr_a_candidates (the actual dispatch targets).
+        # Fall back to scanning presented_candidates for backward compat.
+        source = cr_a_candidates if cr_a_candidates else presented_candidates
+        if plan.candidate_count > 0 and source:
+            for pc in source:
                 if pc.decision.push_eligible and pc.decision_level in (
                     DECISION_ALERT,
                     DECISION_URGENT,

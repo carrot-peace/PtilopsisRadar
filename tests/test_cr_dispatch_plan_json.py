@@ -341,7 +341,10 @@ class TestSelectedCandidate(unittest.TestCase):
         )
         plan = build_cr_a_dispatch_plan(pipeline)
         d = cr_dispatch_plan_to_json_dict(
-            plan, dispatch_mode="artifact", presented_candidates=presented
+            plan,
+            dispatch_mode="artifact",
+            presented_candidates=presented,
+            cr_a_candidates=presented,
         )
         self.assertEqual(d["selected_event_key"], "ev1")
         self.assertEqual(d["selected_candidate_id"], "c1")
@@ -357,6 +360,45 @@ class TestSelectedCandidate(unittest.TestCase):
         self.assertIsNone(d["selected_title"])
         self.assertIsNone(d["selected_level"])
         self.assertIsNone(d["selected_score"])
+
+    def test_selected_from_cr_a_candidates_not_presented(self):
+        """selected_* must come from cr_a_candidates, not presented_candidates.
+
+        When presented_candidates contains a lower-ranked candidate before the
+        CR-A selected one, the JSON must still report the CR-A candidate.
+        """
+        alert_low = _make_presented(
+            candidate_id="c-low",
+            cluster_key="ev-low",
+            display_title="Low Alert",
+            decision_level=DECISION_ALERT,
+            total_score=60.0,
+        )
+        urgent_high = _make_presented(
+            candidate_id="c-high",
+            cluster_key="ev-high",
+            display_title="High Urgent",
+            decision_level=DECISION_URGENT,
+            total_score=95.0,
+        )
+        presented = (alert_low, urgent_high)
+        cr_a = (urgent_high,)
+        pipeline = _make_pipeline(
+            cr_a_candidates=cr_a,
+            presented_candidates=presented,
+            cr_a_text="body",
+        )
+        plan = build_cr_a_dispatch_plan(pipeline)
+        d = cr_dispatch_plan_to_json_dict(
+            plan,
+            dispatch_mode="artifact",
+            presented_candidates=presented,
+            cr_a_candidates=cr_a,
+        )
+        self.assertEqual(d["selected_candidate_id"], "c-high")
+        self.assertEqual(d["selected_level"], DECISION_URGENT)
+        self.assertEqual(d["selected_title"], "High Urgent")
+        self.assertEqual(d["selected_score"], 95.0)
 
 
 # ---------------------------------------------------------------------------
