@@ -501,6 +501,7 @@ def build_and_write_cr_runtime_dry_run(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         presented_candidates=pipeline_result.presented_candidates,
+        cr_a_candidates=pipeline_result.cr_a_candidates,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     dispatch_plan_json_paths = write_dispatch_plan_json(
