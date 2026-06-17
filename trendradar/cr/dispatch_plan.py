@@ -55,8 +55,6 @@ DispatchPlanDecision = str
 DECISION_DISPATCH: DispatchPlanDecision = "dispatch"
 DECISION_NO_CANDIDATE: DispatchPlanDecision = "no_candidate"
 DECISION_SUPPRESSED: DispatchPlanDecision = "suppress"
-DECISION_WATCH_ONLY: DispatchPlanDecision = "watch_only"
-DECISION_NOT_CONFIGURED: DispatchPlanDecision = "not_configured"
 DECISION_UNKNOWN: DispatchPlanDecision = "unknown"
 
 
