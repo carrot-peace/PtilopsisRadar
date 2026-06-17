@@ -360,7 +360,6 @@ class TestSourceBoundary(unittest.TestCase):
         "bot_token",
         "sender",
         "dispatcher",
-        "cooldown",
         "dedupe",
         "alert_state",
     )

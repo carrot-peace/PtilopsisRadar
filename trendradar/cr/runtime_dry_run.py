@@ -36,6 +36,11 @@ from trendradar.cr.cooldown_audit import (
     CRCooldownAuditContext,
     build_cr_cooldown_audit_context,
 )
+from trendradar.cr.cooldown_enforce import (
+    CRCooldownEnforcementResult,
+    DEFAULT_DISPATCH_STATE_PATH,
+    enforce_cr_cooldown_for_candidates,
+)
 from trendradar.cr.cooldown_policy import CRCooldownPolicy
 from trendradar.cr.dispatch_executor import (
     CRDispatchExecutionResult,
@@ -145,6 +150,8 @@ class CRRuntimeDryRunResult:
         CREventStateTransitionPreview | None
     ) = None
     cooldown_next_snapshot_save: CREventStateSaveResult | None = None
+    cooldown_enforcement: CRCooldownEnforcementResult | None = None
+    dispatch_state_save: CREventStateSaveResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +285,7 @@ def build_and_write_cr_runtime_dry_run(
     urgent_threshold: float = 80.0,
     dispatch_sink: CRDispatchSink | None = None,
     dispatch_mode: str | None = None,
+    dispatch_state_path: str | Path | None = None,
     include_cooldown_audit: bool = False,
     cooldown_policy: CRCooldownPolicy | None = None,
     cooldown_prior_snapshot: CREventStateSnapshot | None = None,
@@ -327,6 +335,11 @@ def build_and_write_cr_runtime_dry_run(
         When provided, the dispatch plan and receipt JSON are written with
         this mode recorded.  When ``None`` (default), the mode field defaults
         to ``artifact``.
+    dispatch_state_path:
+        Path to the CR dispatch state JSON file.  When provided, cooldown
+        enforcement reads prior dispatch state from this path and (for live
+        mode only) writes updated state after accepted dispatch.  When
+        ``None`` (default), ``DEFAULT_DISPATCH_STATE_PATH`` is used.
     include_cooldown_audit:
         Opt-in, artifact-only flag (default ``False``).  When ``True``, the
         Markdown / HTML audit artifacts additionally render repeat-preview and
@@ -500,15 +513,70 @@ def build_and_write_cr_runtime_dry_run(
 
     # 6. Plan CR-A dispatch (pure — nothing is sent).
     dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
-
-    # 6b. Write dispatch plan JSON (PR-CR-A2).
     effective_dispatch_mode = dispatch_mode or "artifact"
+    now = datetime.now(timezone.utc)
+
+    # 6a. Load prior dispatch state and enforce cooldown (PR-CR-A4).
+    effective_state_path = dispatch_state_path or DEFAULT_DISPATCH_STATE_PATH
+    dispatch_state_load = load_cr_event_state_snapshot(effective_state_path)
+    prior_snapshot_provided = dispatch_state_load.loaded or dispatch_state_load.error is None
+    seen_states: dict[str, CRSeenEventState] | None = None
+    if dispatch_state_load.error is None:
+        seen_states = cr_event_state_snapshot_to_seen_states(
+            dispatch_state_load.snapshot
+        )
+
+    cooldown_enforcement: CRCooldownEnforcementResult | None = None
+    cooldown_override_reason: str | None = None
+    if dispatch_plan.should_dispatch and pipeline_result.cr_a_candidates:
+        cooldown_enforcement = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=pipeline_result.cr_a_candidates,
+            seen_states=seen_states,
+            prior_snapshot_provided=prior_snapshot_provided,
+            policy=cooldown_policy,
+            now=now,
+        )
+        if not cooldown_enforcement.should_dispatch:
+            cooldown_override_reason = cooldown_enforcement.override_reason
+            # Override the plan to skip dispatch.
+            dispatch_plan = CRDispatchPlan(
+                should_dispatch=False,
+                messages=(),
+                reason=cooldown_override_reason or "skipped_cooldown",
+                run_label=dispatch_plan.run_label,
+                candidate_count=dispatch_plan.candidate_count,
+                urgent_count=dispatch_plan.urgent_count,
+                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+            )
+
+    # 6b. Build cooldown context for plan JSON.
+    cooldown_context: dict[str, object] | None = None
+    if cooldown_enforcement is not None and cooldown_enforcement.entries:
+        entry = cooldown_enforcement.entries[0]
+        cooldown_context = {
+            "state_available": cooldown_enforcement.state_available,
+            "state_error": cooldown_enforcement.state_error,
+            "policy_version": "cr-cooldown-v1",
+            "event_key": entry.event_key,
+            "last_dispatched_at": seen_states.get(entry.event_key).seen_at if seen_states and entry.event_key in seen_states else None,
+            "last_level": entry.previous_level,
+            "current_level": entry.current_level,
+            "cooldown_seconds": entry.cooldown_seconds,
+            "cooldown_remaining_seconds": entry.cooldown_remaining_seconds,
+            "is_escalation": entry.is_escalation,
+            "suppressed_by_cooldown": cooldown_override_reason is not None,
+            "allowed_by_escalation": entry.is_escalation and cooldown_override_reason is None,
+            "decision": entry.cooldown_action if cooldown_override_reason is None else cooldown_override_reason,
+        }
+
+    # 6c. Write dispatch plan JSON (PR-CR-A2 + PR-CR-A4 cooldown context).
     dispatch_plan_json_dict = cr_dispatch_plan_to_json_dict(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         presented_candidates=pipeline_result.presented_candidates,
         cr_a_candidates=pipeline_result.cr_a_candidates,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=now.isoformat(),
+        cooldown_context=cooldown_context,
     )
     dispatch_plan_json_paths = write_dispatch_plan_json(
         dispatch_plan_json_dict,
@@ -517,24 +585,56 @@ def build_and_write_cr_runtime_dry_run(
     )
 
     # 7. Optionally execute against an injected local sink (no real delivery).
+    # Skip execution only if cooldown overrode an otherwise-ready plan.
     dispatch_execution = None
     if dispatch_sink is not None:
-        dispatch_execution = execute_cr_dispatch_plan(
-            dispatch_plan, sink=dispatch_sink
-        )
+        if cooldown_override_reason is None:
+            dispatch_execution = execute_cr_dispatch_plan(
+                dispatch_plan, sink=dispatch_sink
+            )
+        # If cooldown overrode, don't call the sink at all.
 
-    # 7b. Build and write dispatch receipt JSON (PR-CR-A3).
+    # 7b. Build and write dispatch receipt JSON (PR-CR-A3 + PR-CR-A4 cooldown).
     dispatch_receipt_json_dict = build_dispatch_receipts_json(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         execution=dispatch_execution,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=now.isoformat(),
+        cooldown_override_reason=cooldown_override_reason,
     )
     dispatch_receipt_json_paths = write_dispatch_receipts_json(
         dispatch_receipt_json_dict,
         run_label=run_label,
         config=artifact_config,
     )
+
+    # 7c. Update dispatch state on live+accepted (PR-CR-A4).
+    dispatch_state_save: CREventStateSaveResult | None = None
+    if (
+        effective_dispatch_mode == "live"
+        and cooldown_override_reason is None
+        and dispatch_execution is not None
+        and dispatch_execution.accepted_count > 0
+        and dispatch_execution.receipts
+        and dispatch_execution.receipts[0].accepted
+    ):
+        # Update state with the dispatched candidate.
+        from trendradar.cr.state_snapshot import (
+            build_cr_event_state_entry_from_presented_candidate,
+            merge_cr_event_state_entries,
+        )
+        if pipeline_result.cr_a_candidates:
+            pc = pipeline_result.cr_a_candidates[0]
+            update_entry = build_cr_event_state_entry_from_presented_candidate(
+                pc, seen_at=now.isoformat()
+            )
+            updated_snapshot = merge_cr_event_state_entries(
+                dispatch_state_load.snapshot,
+                (update_entry,),
+            )
+            dispatch_state_save = save_cr_event_state_snapshot(
+                updated_snapshot, effective_state_path
+            )
 
     # 8. Return.
     return CRRuntimeDryRunResult(
@@ -549,4 +649,6 @@ def build_and_write_cr_runtime_dry_run(
         cooldown_prior_snapshot_load=cooldown_prior_snapshot_load,
         cooldown_state_transition_preview=cooldown_state_transition_preview,
         cooldown_next_snapshot_save=cooldown_next_snapshot_save,
+        cooldown_enforcement=cooldown_enforcement,
+        dispatch_state_save=dispatch_state_save,
     )
