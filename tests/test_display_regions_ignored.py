@@ -88,6 +88,15 @@ def _load_main_module():
     _stub_pkg("trendradar.ai")
     _stub_pkg("trendradar.telegram_bot")
     _stub_pkg("trendradar.telegram_bot.access")
+    # trendradar.cr.dispatch_mode is pure (no external deps).  Provide a
+    # minimal stub so resolve_cr_dispatch_mode returns "off" in tests.
+    _dm = types.ModuleType("trendradar.cr.dispatch_mode")
+    _dm.resolve_cr_dispatch_mode = lambda env: "off"
+    _dm.CR_DISPATCH_OFF = "off"
+    _dm.CR_DISPATCH_ARTIFACT = "artifact"
+    _dm.CR_DISPATCH_SHADOW = "shadow"
+    _dm.CR_DISPATCH_LIVE = "live"
+    sys.modules["trendradar.cr.dispatch_mode"] = _dm
 
     spec = importlib.util.spec_from_file_location(
         "trendradar.__main__", os.path.join(ROOT, "trendradar/__main__.py")
