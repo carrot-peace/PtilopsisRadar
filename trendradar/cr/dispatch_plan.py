@@ -1,6 +1,6 @@
 # coding=utf-8
 """
-CR-A dispatch plan (PR9l) v0.1.
+CR-A dispatch plan (PR9l, PR-CR-A2) v0.1.
 
 Pure, side-effect-free planning layer for the CR-A automatic alert channel.
 
@@ -13,14 +13,20 @@ It produces a plan object only.  It performs no delivery, holds no recipient /
 channel / token / parse-mode details, keeps no run-to-run state, and applies no
 rate limiting.  Actual sending is a future PR.
 
-Design reference: PR9l.
+Design reference: PR9l, PR-CR-A2.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
-from trendradar.cr.decision import DECISION_URGENT
+from trendradar.cr.decision import (
+    DECISION_ALERT,
+    DECISION_SUPPRESS,
+    DECISION_URGENT,
+    DECISION_WATCH,
+)
 from trendradar.cr.pipeline import CRPipelineResult
 from trendradar.cr.presentation import CRPresentedCandidate
 
@@ -31,6 +37,35 @@ from trendradar.cr.presentation import CRPresentedCandidate
 
 # Generic, channel-agnostic message format.  No per-channel parse mode yet.
 FORMAT_PLAIN_TEXT = "plain_text"
+
+
+# ---------------------------------------------------------------------------
+# Dispatch plan JSON schema version
+# ---------------------------------------------------------------------------
+
+DISPATCH_PLAN_SCHEMA_VERSION = "cr-dispatch-plan-v1"
+
+
+# ---------------------------------------------------------------------------
+# Dispatch plan decision constants
+# ---------------------------------------------------------------------------
+
+DispatchPlanDecision = str
+
+DECISION_DISPATCH: DispatchPlanDecision = "dispatch"
+DECISION_NO_CANDIDATE: DispatchPlanDecision = "no_candidate"
+DECISION_SUPPRESSED: DispatchPlanDecision = "suppress"
+DECISION_WATCH_ONLY: DispatchPlanDecision = "watch_only"
+DECISION_NOT_CONFIGURED: DispatchPlanDecision = "not_configured"
+DECISION_UNKNOWN: DispatchPlanDecision = "unknown"
+
+
+# Map plan.reason → JSON decision.
+_REASON_TO_DECISION: dict[str, DispatchPlanDecision] = {
+    "ready": DECISION_DISPATCH,
+    "no_selected_candidates": DECISION_NO_CANDIDATE,
+    "empty_text": DECISION_SUPPRESSED,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +120,26 @@ def _count_urgent(candidates: tuple[CRPresentedCandidate, ...]) -> int:
     re-score or re-decide anything.
     """
     return sum(1 for c in candidates if c.decision_level == DECISION_URGENT)
+
+
+def count_by_level(
+    candidates: tuple[CRPresentedCandidate, ...] | list[CRPresentedCandidate],
+) -> dict[str, int]:
+    """Count candidates by decision level.
+
+    Returns a dict with keys ``urgent``, ``alert``, ``watch``, ``suppress``.
+    """
+    counts: dict[str, int] = {
+        DECISION_URGENT: 0,
+        DECISION_ALERT: 0,
+        DECISION_WATCH: 0,
+        DECISION_SUPPRESS: 0,
+    }
+    for c in candidates:
+        level = c.decision_level
+        if level in counts:
+            counts[level] += 1
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -173,3 +228,141 @@ def build_cr_a_dispatch_plan(
         urgent_count=urgent_count,
         high_score_suppressed_count=high_score_suppressed_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# JSON serialization
+# ---------------------------------------------------------------------------
+
+
+def cr_dispatch_plan_to_json_dict(
+    plan: CRDispatchPlan,
+    *,
+    dispatch_mode: str,
+    presented_candidates: tuple[CRPresentedCandidate, ...]
+    | list[CRPresentedCandidate]
+    | None = None,
+    created_at: str | None = None,
+) -> dict[str, object]:
+    """Serialize a :class:`CRDispatchPlan` to a JSON-serializable dict.
+
+    This is the authoritative JSON representation for one CR-A run.
+    Deploy trace and future operator tools should prefer this JSON over
+    parsing Markdown/HTML.
+
+    Parameters
+    ----------
+    plan:
+        The dispatch plan to serialize.
+    dispatch_mode:
+        The active dispatch mode (``artifact``, ``shadow``, or ``live``).
+    presented_candidates:
+        All presented candidates from the pipeline (not just CR-A selected).
+        Used to populate ``candidate_summary`` and ``candidate_counts``.
+        When ``None``, summary fields are empty.
+    created_at:
+        ISO-8601 timestamp string.  When ``None``, the field is ``None``.
+
+    Returns
+    -------
+    dict
+        JSON-serializable dict conforming to ``cr-dispatch-plan-v1``.
+    """
+    # --- Resolve decision ---
+    decision = _REASON_TO_DECISION.get(plan.reason, DECISION_UNKNOWN)
+
+    # --- Candidate summary ---
+    candidate_summary: list[dict[str, object]] = []
+    if presented_candidates is not None:
+        for pc in presented_candidates:
+            candidate: object = pc.candidate
+            source_items = getattr(candidate, "source_items", None) or []
+            source_ids: set[str] = set()
+            for item in source_items:
+                sid = getattr(item, "source_id", None)
+                if sid:
+                    source_ids.add(sid)
+            candidate_summary.append(
+                {
+                    "event_key": pc.cluster_key,
+                    "candidate_id": pc.candidate_id,
+                    "cluster_key": pc.cluster_key,
+                    "title": pc.display_title,
+                    "level": pc.decision_level,
+                    "score": pc.total_score,
+                    "push_eligible": pc.decision.push_eligible,
+                    "trigger_reasons": list(pc.trigger_reasons),
+                    "suppress_reasons": list(pc.suppress_labels),
+                    "source_count": len(source_items),
+                    "platform_count": len(source_ids),
+                }
+            )
+
+    # --- Candidate counts by level ---
+    level_counts = count_by_level(presented_candidates or ())
+
+    push_eligible_count = 0
+    if presented_candidates is not None:
+        push_eligible_count = sum(
+            1 for pc in presented_candidates if pc.decision.push_eligible
+        )
+
+    candidate_counts = {
+        "urgent": level_counts[DECISION_URGENT],
+        "alert": level_counts[DECISION_ALERT],
+        "watch": level_counts[DECISION_WATCH],
+        "suppress": level_counts[DECISION_SUPPRESS],
+        "push_eligible": push_eligible_count,
+    }
+
+    # --- Selected candidate (first CR-A candidate when dispatching) ---
+    selected_event_key: str | None = None
+    selected_candidate_id: str | None = None
+    selected_title: str | None = None
+    selected_level: str | None = None
+    selected_score: float | None = None
+
+    if plan.should_dispatch and plan.messages:
+        first_msg = plan.messages[0]
+        if plan.candidate_count > 0 and presented_candidates:
+            # Find the first push-eligible candidate (sorted by level/score).
+            for pc in presented_candidates:
+                if pc.decision.push_eligible and pc.decision_level in (
+                    DECISION_ALERT,
+                    DECISION_URGENT,
+                ):
+                    selected_event_key = pc.cluster_key
+                    selected_candidate_id = pc.candidate_id
+                    selected_title = pc.display_title
+                    selected_level = pc.decision_level
+                    selected_score = pc.total_score
+                    break
+
+    # --- Message preview ---
+    message_preview: str | None = None
+    if plan.should_dispatch and plan.messages:
+        message_preview = plan.messages[0].text
+
+    # --- Missing fields ---
+    missing_fields: list[str] = []
+    if selected_event_key is None and plan.should_dispatch:
+        missing_fields.append("selected_event_key")
+
+    return {
+        "schema_version": DISPATCH_PLAN_SCHEMA_VERSION,
+        "run_id": plan.run_label,
+        "created_at": created_at,
+        "dispatch_mode": dispatch_mode,
+        "should_dispatch": plan.should_dispatch,
+        "decision": decision,
+        "reason": plan.reason,
+        "selected_event_key": selected_event_key,
+        "selected_candidate_id": selected_candidate_id,
+        "selected_title": selected_title,
+        "selected_level": selected_level,
+        "selected_score": selected_score,
+        "candidate_counts": candidate_counts,
+        "candidate_summary": candidate_summary,
+        "message_preview": message_preview,
+        "missing_fields": missing_fields,
+    }
