@@ -1,9 +1,10 @@
 # coding=utf-8
 """
-CR runtime dry-run hook (PR9k) v0.1.
+CR runtime dry-run hook (PR9k, PR-CR-A2) v0.1.
 
 CR-internal glue that connects real runtime-produced hotlist / RSS stats to
-the offline CR pipeline, then writes Markdown / HTML audit artifacts.
+the offline CR pipeline, then writes Markdown / HTML audit artifacts and
+dispatch plan JSON.
 
 This is a *dry-run* bridge only.  It answers exactly one system question:
 
@@ -13,19 +14,23 @@ This is a *dry-run* bridge only.  It answers exactly one system question:
 It deliberately stays inside the CR layer: it only converts stats via the
 existing CR adapter, runs the existing CR pipeline, and writes through explicit
 CR boundaries.  It performs no delivery, no suppression / de-duplication, no
-AI-result integration, and reads no runtime configuration.  CR-A text and JSON
-outputs are out of scope here.
+AI-result integration, and reads no runtime configuration.
 
-Design reference: PR9k.
+Design reference: PR9k, PR-CR-A2.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
-from trendradar.cr.artifacts import CRArtifactConfig, CRArtifactPaths
+from trendradar.cr.artifacts import (
+    CRArtifactConfig,
+    CRArtifactPaths,
+    write_dispatch_plan_json,
+)
 from trendradar.cr.cooldown_audit import (
     CRCooldownAuditContext,
     build_cr_cooldown_audit_context,
@@ -36,7 +41,11 @@ from trendradar.cr.dispatch_executor import (
     CRDispatchSink,
     execute_cr_dispatch_plan,
 )
-from trendradar.cr.dispatch_plan import CRDispatchPlan, build_cr_a_dispatch_plan
+from trendradar.cr.dispatch_plan import (
+    CRDispatchPlan,
+    build_cr_a_dispatch_plan,
+    cr_dispatch_plan_to_json_dict,
+)
 from trendradar.cr.html import CRHTMLRenderConfig
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -113,12 +122,16 @@ class CRRuntimeDryRunResult:
     explicitly supplied, and the transition preview has a next snapshot to
     persist.  It records the explicit local dry-run write result.  ``None``
     means no write was attempted.
+
+    ``dispatch_plan_json_paths`` records the resolved artifact paths for the
+    dispatch plan JSON file.
     """
 
     primitives: tuple[CRPrimitiveRecord, ...]
     pipeline: CRPipelineResult
     artifact_paths: CRArtifactPaths
     dispatch_plan: CRDispatchPlan
+    dispatch_plan_json_paths: CRArtifactPaths
     dispatch_execution: CRDispatchExecutionResult | None = None
     cooldown_audit: CRCooldownAuditContext | None = None
     cooldown_prior_snapshot_load: CREventStateLoadResult | None = None
@@ -258,6 +271,7 @@ def build_and_write_cr_runtime_dry_run(
     artifact_config: CRArtifactConfig | None = None,
     urgent_threshold: float = 80.0,
     dispatch_sink: CRDispatchSink | None = None,
+    dispatch_mode: str | None = None,
     include_cooldown_audit: bool = False,
     cooldown_policy: CRCooldownPolicy | None = None,
     cooldown_prior_snapshot: CREventStateSnapshot | None = None,
@@ -302,6 +316,11 @@ def build_and_write_cr_runtime_dry_run(
         executed against it and the result is stored in ``dispatch_execution``.
         When ``None`` (default), dispatch is not executed and
         ``dispatch_execution`` is ``None``.  No real delivery either way.
+    dispatch_mode:
+        Active CR dispatch mode (``artifact``, ``shadow``, or ``live``).
+        When provided, the dispatch plan JSON is written with this mode
+        recorded.  When ``None`` (default), the dispatch plan JSON is still
+        written but the mode field defaults to ``artifact``.
     include_cooldown_audit:
         Opt-in, artifact-only flag (default ``False``).  When ``True``, the
         Markdown / HTML audit artifacts additionally render repeat-preview and
@@ -476,6 +495,21 @@ def build_and_write_cr_runtime_dry_run(
     # 6. Plan CR-A dispatch (pure — nothing is sent).
     dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
 
+    # 6b. Write dispatch plan JSON (PR-CR-A2).
+    effective_dispatch_mode = dispatch_mode or "artifact"
+    dispatch_plan_json_dict = cr_dispatch_plan_to_json_dict(
+        dispatch_plan,
+        dispatch_mode=effective_dispatch_mode,
+        presented_candidates=pipeline_result.presented_candidates,
+        cr_a_candidates=pipeline_result.cr_a_candidates,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    dispatch_plan_json_paths = write_dispatch_plan_json(
+        dispatch_plan_json_dict,
+        run_label=run_label,
+        config=artifact_config,
+    )
+
     # 7. Optionally execute against an injected local sink (no real delivery).
     dispatch_execution = None
     if dispatch_sink is not None:
@@ -490,6 +524,7 @@ def build_and_write_cr_runtime_dry_run(
         artifact_paths=artifact_paths,
         dispatch_plan=dispatch_plan,
         dispatch_execution=dispatch_execution,
+        dispatch_plan_json_paths=dispatch_plan_json_paths,
         cooldown_audit=cooldown_audit_context,
         cooldown_prior_snapshot_load=cooldown_prior_snapshot_load,
         cooldown_state_transition_preview=cooldown_state_transition_preview,
