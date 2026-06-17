@@ -116,6 +116,7 @@ def build_dispatch_receipts_json(
     execution: CRDispatchExecutionResult | None = None,
     created_at: str | None = None,
     cooldown_override_reason: str | None = None,
+    cooldown_entries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Build the dispatch receipts JSON dict.
 
@@ -133,6 +134,9 @@ def build_dispatch_receipts_json(
         When set, the plan was overridden by cooldown enforcement.
         Receipt status reflects this override (skipped_cooldown, skipped_repeat,
         skipped_state_error).
+    cooldown_entries:
+        Per-candidate cooldown outcomes from enforcement.  When provided,
+        included in the receipt as ``candidate_outcomes``.
 
     Returns
     -------
@@ -161,7 +165,7 @@ def build_dispatch_receipts_json(
         # Live mode with execution.
         receipts = _execution_receipts(execution)
 
-    return {
+    result: dict[str, object] = {
         "schema_version": DISPATCH_RECEIPT_SCHEMA_VERSION,
         "run_id": plan.run_label,
         "created_at": created_at,
@@ -170,6 +174,9 @@ def build_dispatch_receipts_json(
         "plan_should_dispatch": plan.should_dispatch,
         "receipts": receipts,
     }
+    if cooldown_entries:
+        result["candidate_outcomes"] = cooldown_entries
+    return result
 
 
 # ---------------------------------------------------------------------------
