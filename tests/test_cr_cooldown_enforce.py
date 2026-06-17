@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trendradar.cr.artifacts import CRArtifactConfig
 from trendradar.cr.cooldown_enforce import (
+    CRCooldownEnforcementEntry,
     CRCooldownEnforcementResult,
     enforce_cr_cooldown,
     enforce_cr_cooldown_for_candidates,
@@ -433,5 +434,234 @@ class TestSourceBoundary(unittest.TestCase):
             self.assertNotIn(token, source, f"forbidden token {token!r} present")
 
 
+# ---------------------------------------------------------------------------
+# Test Group J — Blocker 1: Malformed state fails closed
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedStateFailClosed(unittest.TestCase):
+    def test_enforcement_blocks_on_state_error(self):
+        """enforce_cr_cooldown_for_candidates with state_error → fail closed."""
+        from unittest.mock import MagicMock
+        pc = MagicMock()
+        pc.cluster_key = "ev1"
+        pc.candidate_id = "c1"
+        pc.decision_level = "alert"
+
+        result = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=(pc,),
+            seen_states=None,
+            prior_snapshot_provided=False,
+            state_error="malformed event state JSON: JSONDecodeError",
+        )
+        self.assertFalse(result.should_dispatch)
+        self.assertEqual(result.override_reason, "skipped_state_error")
+        self.assertEqual(result.eligible_candidates, ())
+
+    def test_enforcement_entry_for_state_error(self):
+        """State error produces entries with not_evaluated action."""
+        from unittest.mock import MagicMock
+        pc = MagicMock()
+        pc.cluster_key = "ev1"
+        pc.candidate_id = "c1"
+        pc.decision_level = "alert"
+
+        result = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=(pc,),
+            seen_states=None,
+            prior_snapshot_provided=False,
+            state_error="schema_version mismatch",
+        )
+        self.assertEqual(len(result.entries), 1)
+        self.assertEqual(result.entries[0].cooldown_action, "not_evaluated")
+        self.assertFalse(result.state_available)
+
+    def test_state_error_does_not_allow_dispatch(self):
+        """Even with no prior state, state_error blocks."""
+        from unittest.mock import MagicMock
+        pc = MagicMock()
+        pc.cluster_key = "ev-new"
+        pc.candidate_id = "c-new"
+        pc.decision_level = "urgent"
+
+        result = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=(pc,),
+            seen_states={},
+            prior_snapshot_provided=False,
+            state_error="malformed event state JSON",
+        )
+        self.assertFalse(result.should_dispatch)
+        self.assertEqual(result.override_reason, "skipped_state_error")
+
+
+# ---------------------------------------------------------------------------
+# Test Group K — Blocker 2: Canonical event key consistency
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalEventKey(unittest.TestCase):
+    def test_state_write_uses_cluster_key(self):
+        """State entries must use pc.cluster_key as event_key."""
+        from trendradar.cr.state_snapshot import (
+            CREventStateEntry,
+            merge_cr_event_state_entries,
+            cr_event_state_snapshot_to_seen_states,
+            empty_cr_event_state_snapshot,
+        )
+        now = datetime.now(timezone.utc)
+        # Simulate what runtime does: write with cluster_key.
+        entry = CREventStateEntry(
+            event_key="ev-A",  # cluster_key
+            decision_level="alert",
+            score=70.0,
+            seen_at=now.isoformat(),
+            title="Topic A",
+            candidate_id="c-A",
+        )
+        snapshot = merge_cr_event_state_entries(
+            empty_cr_event_state_snapshot(), (entry,)
+        )
+        seen = cr_event_state_snapshot_to_seen_states(snapshot)
+        # Lookup by same key should find it.
+        self.assertIn("ev-A", seen)
+        self.assertEqual(seen["ev-A"].decision_level, "alert")
+
+    def test_cooldown_lookup_matches_state_write_key(self):
+        """Cooldown lookup key must match state write key."""
+        now = datetime.now(timezone.utc)
+        seen_states = {
+            "ev-A": CRSeenEventState(
+                event_key="ev-A",
+                decision_level="alert",
+                score=70.0,
+                seen_at=now.isoformat(),
+            ),
+        }
+        # Lookup by cluster_key "ev-A".
+        result = enforce_cr_cooldown(
+            event_key="ev-A",
+            candidate_id="c-A",
+            current_level="alert",
+            seen_state=seen_states.get("ev-A"),
+            prior_snapshot_provided=True,
+            policy=CRCooldownPolicy(same_level_cooldown_minutes=360),
+            now=now,
+        )
+        # Should be blocked (same-level repeat inside cooldown).
+        self.assertFalse(result.should_dispatch)
+
+
+# ---------------------------------------------------------------------------
+# Test Group L — Blocker 3: artifact/shadow never execute sink
+# ---------------------------------------------------------------------------
+
+
+class TestModeGatedExecution(unittest.TestCase):
+    def test_artifact_with_injected_sink_no_call(self):
+        """artifact + injected sink → sink call count 0."""
+        sink = CRMemoryDispatchSink()
+        with tempfile.TemporaryDirectory() as tmp:
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="art-sink",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
+                dispatch_mode="artifact",
+                dispatch_sink=sink,
+            )
+            self.assertEqual(len(sink.submitted_messages), 0)
+
+    def test_shadow_with_injected_sink_no_call(self):
+        """shadow + injected sink → sink call count 0."""
+        sink = CRMemoryDispatchSink()
+        with tempfile.TemporaryDirectory() as tmp:
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="shd-sink",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
+                dispatch_mode="shadow",
+                dispatch_sink=sink,
+            )
+            self.assertEqual(len(sink.submitted_messages), 0)
+
+
+# ---------------------------------------------------------------------------
+# Test Group M — Blocker 4: update all CR-A candidates
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateAllCandidates(unittest.TestCase):
+    def test_live_accepted_updates_all_candidates(self):
+        """Live accepted dispatch updates state for all CR-A candidates."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "dispatch_state.json"
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats(),
+                run_label="upd-all",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                dispatch_state_path=str(state_path),
+            )
+            if result.dispatch_state_save and result.dispatch_state_save.saved:
+                # Verify state was saved.
+                load_result = load_cr_event_state_snapshot(state_path)
+                self.assertTrue(load_result.loaded)
+                # All cr_a_candidates should be in state.
+                from trendradar.cr.state_snapshot import cr_event_state_snapshot_to_seen_states
+                seen = cr_event_state_snapshot_to_seen_states(load_result.snapshot)
+                for pc in result.pipeline.cr_a_candidates:
+                    self.assertIn(pc.cluster_key, seen)
+
+
+# ---------------------------------------------------------------------------
+# Test Group N — Blocker 5: batch escalation filtering
+# ---------------------------------------------------------------------------
+
+
+class TestBatchEscalationFiltering(unittest.TestCase):
+    def test_escalation_does_not_release_unrelated_repeat(self):
+        """escalation bypass per-candidate: only escalated candidate passes."""
+        now = datetime.now(timezone.utc)
+        seen_states = {
+            "ev-A": CRSeenEventState(
+                event_key="ev-A",
+                decision_level="alert",
+                score=70.0,
+                seen_at=now.isoformat(),
+            ),
+            "ev-B": CRSeenEventState(
+                event_key="ev-B",
+                decision_level="alert",
+                score=70.0,
+                seen_at=now.isoformat(),
+            ),
+        }
+        # Candidate A: escalation alert→urgent (should be allowed).
+        # Candidate B: same-level alert repeat (should be blocked).
+        from unittest.mock import MagicMock
+        pc_a = MagicMock()
+        pc_a.cluster_key = "ev-A"
+        pc_a.candidate_id = "c-A"
+        pc_a.decision_level = "urgent"
+
+        pc_b = MagicMock()
+        pc_b.cluster_key = "ev-B"
+        pc_b.candidate_id = "c-B"
+        pc_b.decision_level = "alert"
+
+        result = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=(pc_a, pc_b),
+            seen_states=seen_states,
+            prior_snapshot_provided=True,
+            policy=CRCooldownPolicy(same_level_cooldown_minutes=360),
+            now=now,
+        )
+        # A should be eligible (escalation), B should not.
+        eligible_keys = {pc.cluster_key for pc in result.eligible_candidates}
+        self.assertIn("ev-A", eligible_keys)
+        self.assertNotIn("ev-B", eligible_keys)
+
+
 if __name__ == "__main__":
+    unittest.main()
     unittest.main()

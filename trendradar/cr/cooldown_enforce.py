@@ -91,6 +91,7 @@ class CRCooldownEnforcementResult:
     should_dispatch: bool
     override_reason: str | None  # None = no override, else skip reason
     entries: tuple[CRCooldownEnforcementEntry, ...]
+    eligible_candidates: tuple  # CR-A candidates that passed cooldown
     state_available: bool
     state_error: str | None
 
@@ -236,6 +237,7 @@ def enforce_cr_cooldown(
             should_dispatch=True,
             override_reason=None,
             entries=(entry,),
+            eligible_candidates=(),  # caller fills this
             state_available=prior_snapshot_provided,
             state_error=None,
         )
@@ -245,6 +247,7 @@ def enforce_cr_cooldown(
             should_dispatch=True,
             override_reason=None,
             entries=(entry,),
+            eligible_candidates=(),
             state_available=prior_snapshot_provided,
             state_error=None,
         )
@@ -259,6 +262,7 @@ def enforce_cr_cooldown(
             should_dispatch=False,
             override_reason=reason,
             entries=(entry,),
+            eligible_candidates=(),
             state_available=prior_snapshot_provided,
             state_error=None,
         )
@@ -268,6 +272,7 @@ def enforce_cr_cooldown(
         should_dispatch=True,
         override_reason=None,
         entries=(entry,),
+        eligible_candidates=(),
         state_available=prior_snapshot_provided,
         state_error=None,
     )
@@ -278,29 +283,55 @@ def enforce_cr_cooldown_for_candidates(
     cr_a_candidates: tuple,
     seen_states: Mapping[str, CRSeenEventState] | None,
     prior_snapshot_provided: bool,
+    state_error: str | None = None,
     policy: CRCooldownPolicy | None = None,
     now: datetime | None = None,
 ) -> CRCooldownEnforcementResult:
     """Enforce cooldown for all CR-A selected candidates.
 
-    If ANY candidate is blocked by cooldown, the entire plan is blocked.
-    Escalation bypass allows dispatch if at least one candidate escalates.
+    Per-candidate enforcement: each candidate is evaluated independently.
+    Escalation bypass applies per-candidate, not globally.
+    Returns only eligible candidates in ``eligible_candidates``.
 
-    Returns the combined enforcement result.
+    When ``state_error`` is set (malformed/invalid state), fails closed:
+    no candidates are eligible and dispatch is blocked.
     """
     if not cr_a_candidates:
         return CRCooldownEnforcementResult(
             should_dispatch=True,
             override_reason=None,
             entries=(),
+            eligible_candidates=(),
             state_available=prior_snapshot_provided,
-            state_error=None,
+            state_error=state_error,
+        )
+
+    # Blocker 1: fail closed on state errors.
+    if state_error is not None:
+        entries = tuple(
+            CRCooldownEnforcementEntry(
+                event_key=pc.cluster_key,
+                candidate_id=pc.candidate_id,
+                current_level=pc.decision_level or "unknown",
+                previous_level=None,
+                cooldown_action="not_evaluated",
+                is_escalation=False,
+                cooldown_seconds=None,
+                cooldown_remaining_seconds=None,
+            )
+            for pc in cr_a_candidates
+        )
+        return CRCooldownEnforcementResult(
+            should_dispatch=False,
+            override_reason="skipped_state_error",
+            entries=entries,
+            eligible_candidates=(),
+            state_available=False,
+            state_error=state_error,
         )
 
     entries: list[CRCooldownEnforcementEntry] = []
-    any_blocked = False
-    any_escalation = False
-    block_reason: str | None = None
+    eligible: list = []
 
     for pc in cr_a_candidates:
         event_key = pc.cluster_key
@@ -317,40 +348,45 @@ def enforce_cr_cooldown_for_candidates(
         )
         entries.extend(result.entries)
 
-        if not result.should_dispatch:
-            any_blocked = True
-            if block_reason is None:
-                block_reason = result.override_reason
+        if result.should_dispatch:
+            eligible.append(pc)
 
-        if result.entries and result.entries[0].is_escalation:
-            any_escalation = True
+    any_blocked = len(eligible) < len(list(cr_a_candidates))
+    has_eligible = len(eligible) > 0
 
-    # Escalation bypass: if any candidate escalates, allow dispatch.
-    if any_blocked and any_escalation:
-        # Check if the blocking is due to cooldown (not state error).
-        # Escalation bypasses cooldown but not state errors.
-        if block_reason != "skipped_state_error":
-            return CRCooldownEnforcementResult(
-                should_dispatch=True,
-                override_reason=None,
-                entries=tuple(entries),
-                state_available=prior_snapshot_provided,
-                state_error=None,
-            )
-
-    if any_blocked:
+    if not any_blocked:
         return CRCooldownEnforcementResult(
-            should_dispatch=False,
-            override_reason=block_reason,
+            should_dispatch=True,
+            override_reason=None,
             entries=tuple(entries),
+            eligible_candidates=tuple(eligible),
             state_available=prior_snapshot_provided,
             state_error=None,
         )
 
+    if has_eligible:
+        # Some candidates passed (escalation or new), some blocked.
+        # Allow dispatch with filtered candidate set.
+        return CRCooldownEnforcementResult(
+            should_dispatch=True,
+            override_reason=None,
+            entries=tuple(entries),
+            eligible_candidates=tuple(eligible),
+            state_available=prior_snapshot_provided,
+            state_error=None,
+        )
+
+    # All candidates blocked.
+    block_reason = "skipped_cooldown"
+    for e in entries:
+        if e.cooldown_action == "cooldown":
+            block_reason = "skipped_cooldown"
+            break
     return CRCooldownEnforcementResult(
-        should_dispatch=True,
-        override_reason=None,
+        should_dispatch=False,
+        override_reason=block_reason,
         entries=tuple(entries),
+        eligible_candidates=(),
         state_available=prior_snapshot_provided,
         state_error=None,
     )
