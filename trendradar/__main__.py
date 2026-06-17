@@ -865,6 +865,7 @@ class NewsAnalyzer:
                 run_label=f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}",
                 run_context=CRRunContext(mode=mode),
                 dispatch_sink=_dispatch_sink,
+                dispatch_mode=_cr_mode,
             )
 
         return stats, html_file, ai_result, rss_items

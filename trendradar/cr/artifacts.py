@@ -1,18 +1,21 @@
 # coding=utf-8
 """
-CR artifact path resolver / writer (PR9h) + combined render/write helper.
+CR artifact path resolver / writer (PR9h, PR-CR-A2) + combined render/write
+helper.
 
-This layer writes already-rendered Markdown / HTML strings to deterministic CR
-artifact paths under a dedicated CR artifact root.  Purely internal — it does
-NOT integrate with runtime, the existing report / archive modules, storage,
-config.yaml, messaging delivery, or AI result models.  It does NOT implement
-retention cleanup or daily HTML consolidation.
+This layer writes already-rendered Markdown / HTML / JSON strings to
+deterministic CR artifact paths under a dedicated CR artifact root.  Purely
+internal — it does NOT integrate with runtime, the existing report / archive
+modules, storage, config.yaml, messaging delivery, or AI result models.  It
+does NOT implement retention cleanup or daily HTML consolidation.
 
-Design reference: PR9h (paths / writer), PR9i (combined render/write helper).
+Design reference: PR9h (paths / writer), PR9i (combined render/write helper),
+PR-CR-A2 (dispatch plan JSON).
 """
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -91,9 +94,11 @@ class CRArtifactConfig:
     root_dir: Path | str = Path("output/cr")
     markdown_archive_dirname: str = "archive/markdown"
     html_archive_dirname: str = "archive/html"
+    dispatch_plan_archive_dirname: str = "archive/dispatch_plan"
     latest_dirname: str = "latest"
     markdown_filename: str = "cr_markdown.md"
     html_filename: str = "cr.html"
+    dispatch_plan_filename: str = "dispatch_plan.json"
     encoding: str = "utf-8"
 
     def __post_init__(self) -> None:
@@ -103,9 +108,16 @@ class CRArtifactConfig:
         _validate_relative_dirname(
             self.html_archive_dirname, "html_archive_dirname"
         )
+        _validate_relative_dirname(
+            self.dispatch_plan_archive_dirname,
+            "dispatch_plan_archive_dirname",
+        )
         _validate_relative_dirname(self.latest_dirname, "latest_dirname")
         _validate_filename(self.markdown_filename, "markdown_filename")
         _validate_filename(self.html_filename, "html_filename")
+        _validate_filename(
+            self.dispatch_plan_filename, "dispatch_plan_filename"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +136,8 @@ class CRArtifactPaths:
     html_archive_path: Path
     latest_markdown_path: Path
     latest_html_path: Path
+    dispatch_plan_archive_path: Path = Path()
+    dispatch_plan_latest_path: Path = Path()
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +211,11 @@ def resolve_cr_artifact_paths(
           archive/
             markdown/{safe_run_label}.md
             html/{safe_run_label}.html
+            dispatch_plan/{safe_run_label}.json
           latest/
             cr_markdown.md
             cr.html
+            dispatch_plan.json
 
     Returns paths only — does NOT create directories.  All returned paths are
     verified to stay under ``config.root_dir``; a path that would escape the
@@ -213,6 +229,7 @@ def resolve_cr_artifact_paths(
 
     markdown_archive_dir = root / config.markdown_archive_dirname
     html_archive_dir = root / config.html_archive_dirname
+    dispatch_plan_archive_dir = root / config.dispatch_plan_archive_dirname
     latest_dir = root / config.latest_dirname
 
     paths = CRArtifactPaths(
@@ -220,6 +237,10 @@ def resolve_cr_artifact_paths(
         html_archive_path=html_archive_dir / f"{safe}.html",
         latest_markdown_path=latest_dir / config.markdown_filename,
         latest_html_path=latest_dir / config.html_filename,
+        dispatch_plan_archive_path=(
+            dispatch_plan_archive_dir / f"{safe}.json"
+        ),
+        dispatch_plan_latest_path=latest_dir / config.dispatch_plan_filename,
     )
 
     # Root containment check — resolved comparison, not string prefixes.
@@ -229,6 +250,8 @@ def resolve_cr_artifact_paths(
         paths.html_archive_path,
         paths.latest_markdown_path,
         paths.latest_html_path,
+        paths.dispatch_plan_archive_path,
+        paths.dispatch_plan_latest_path,
     ):
         if not p.resolve().is_relative_to(root_resolved):
             raise ValueError(
@@ -258,6 +281,51 @@ def write_text_artifact(
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding=encoding, newline="")
     return p
+
+
+def write_json_artifact(
+    path: Path | str,
+    data: dict[str, object],
+    *,
+    encoding: str = "utf-8",
+) -> Path:
+    """Write *data* as formatted JSON to *path*, creating parent directories.
+
+    Uses 2-space indentation and non-ASCII-safe encoding.  Returns the written
+    :class:`~pathlib.Path`.  Does NOT swallow exceptions, print, or log.
+    """
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding=encoding,
+        newline="",
+    )
+    return p
+
+
+def write_dispatch_plan_json(
+    plan_dict: dict[str, object],
+    *,
+    run_label: str,
+    config: CRArtifactConfig | None = None,
+) -> CRArtifactPaths:
+    """Write a dispatch plan JSON dict to archive + latest artifact paths.
+
+    Writes to ``dispatch_plan_archive_path`` and ``dispatch_plan_latest_path``.
+    Returns the resolved :class:`CRArtifactPaths`.
+    """
+    if config is None:
+        config = CRArtifactConfig()
+
+    paths = resolve_cr_artifact_paths(run_label=run_label, config=config)
+    write_json_artifact(
+        paths.dispatch_plan_archive_path, plan_dict, encoding=config.encoding
+    )
+    write_json_artifact(
+        paths.dispatch_plan_latest_path, plan_dict, encoding=config.encoding
+    )
+    return paths
 
 
 # ---------------------------------------------------------------------------
