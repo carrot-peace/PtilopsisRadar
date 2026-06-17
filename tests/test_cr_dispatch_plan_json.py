@@ -604,7 +604,6 @@ class TestArtifactWriting(unittest.TestCase):
     def test_dispatch_plan_json_paths_populated_on_result(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = self._run(tmp)
-            self.assertIsNotNone(result.dispatch_plan_json_paths)
             self.assertIsInstance(
                 result.dispatch_plan_json_paths.dispatch_plan_latest_path, Path
             )
@@ -627,7 +626,6 @@ class TestModeBehavior(unittest.TestCase):
                 artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
                 dispatch_mode="artifact",
             )
-            self.assertIsNotNone(result.dispatch_plan_json_paths)
             path = result.dispatch_plan_json_paths.dispatch_plan_latest_path
             self.assertTrue(path.exists())
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -641,7 +639,6 @@ class TestModeBehavior(unittest.TestCase):
                 artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
                 dispatch_mode="shadow",
             )
-            self.assertIsNotNone(result.dispatch_plan_json_paths)
             path = result.dispatch_plan_json_paths.dispatch_plan_latest_path
             self.assertTrue(path.exists())
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -657,7 +654,6 @@ class TestModeBehavior(unittest.TestCase):
                 dispatch_mode="live",
                 dispatch_sink=None,
             )
-            self.assertIsNotNone(result.dispatch_plan_json_paths)
             path = result.dispatch_plan_json_paths.dispatch_plan_latest_path
             self.assertTrue(path.exists())
             data = json.loads(path.read_text(encoding="utf-8"))
