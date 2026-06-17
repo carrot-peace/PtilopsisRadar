@@ -282,7 +282,6 @@ def cr_dispatch_plan_to_json_dict(
                     source_ids.add(sid)
             candidate_summary.append(
                 {
-                    "event_key": pc.cluster_key,
                     "candidate_id": pc.candidate_id,
                     "cluster_key": pc.cluster_key,
                     "title": pc.display_title,
