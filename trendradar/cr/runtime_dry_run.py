@@ -554,7 +554,18 @@ def build_and_write_cr_runtime_dry_run(
             )
         elif eligible_cr_a_candidates != pipeline_result.cr_a_candidates:
             # Some candidates filtered out — rebuild plan with eligible only.
+            # Regenerate cr_a_text from filtered candidates.
             from trendradar.cr.pipeline import CRPipelineResult
+            from trendradar.cr.presentation import (
+                CRPresentationRun,
+                render_cr_a_text,
+            )
+            eligible_run = CRPresentationRun(
+                run_label=pipeline_result.run_label,
+                candidates=list(eligible_cr_a_candidates),
+                high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+            )
+            filtered_cr_a_text = render_cr_a_text(eligible_run)
             filtered_pipeline = CRPipelineResult(
                 run_label=pipeline_result.run_label,
                 primitives=pipeline_result.primitives,
@@ -563,34 +574,43 @@ def build_and_write_cr_runtime_dry_run(
                 decisions=pipeline_result.decisions,
                 presented_candidates=pipeline_result.presented_candidates,
                 cr_a_candidates=eligible_cr_a_candidates,
-                cr_a_text=pipeline_result.cr_a_text,
+                cr_a_text=filtered_cr_a_text,
                 markdown_audit_text=pipeline_result.markdown_audit_text,
                 html_audit_text=pipeline_result.html_audit_text,
                 high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
             )
             dispatch_plan = build_cr_a_dispatch_plan(filtered_pipeline)
 
-    # 6b. Build cooldown context for plan JSON.
+    # 6b. Build cooldown context for plan JSON (per-candidate entries).
     cooldown_context: dict[str, object] | None = None
     if cooldown_enforcement is not None and cooldown_enforcement.entries:
-        entry = cooldown_enforcement.entries[0]
-        last_dispatched_at = None
-        if seen_states and entry.event_key in seen_states:
-            last_dispatched_at = seen_states[entry.event_key].seen_at
+        eligible_keys = {pc.cluster_key for pc in eligible_cr_a_candidates}
+        entries_list: list[dict[str, object]] = []
+        for e in cooldown_enforcement.entries:
+            last_dispatched_at = None
+            if seen_states and e.event_key in seen_states:
+                last_dispatched_at = seen_states[e.event_key].seen_at
+            is_eligible = e.event_key in eligible_keys
+            entries_list.append({
+                "candidate_id": e.candidate_id,
+                "event_key": e.event_key,
+                "current_level": e.current_level,
+                "last_level": e.previous_level,
+                "last_dispatched_at": last_dispatched_at,
+                "cooldown_seconds": e.cooldown_seconds,
+                "cooldown_remaining_seconds": e.cooldown_remaining_seconds,
+                "is_escalation": e.is_escalation,
+                "allowed_by_escalation": e.is_escalation and is_eligible,
+                "suppressed_by_cooldown": not is_eligible,
+                "decision": e.cooldown_action if is_eligible else (
+                    cooldown_override_reason or "skipped_cooldown"
+                ),
+            })
         cooldown_context = {
             "state_available": cooldown_enforcement.state_available,
             "state_error": cooldown_enforcement.state_error,
             "policy_version": "cr-cooldown-v1",
-            "event_key": entry.event_key,
-            "last_dispatched_at": last_dispatched_at,
-            "last_level": entry.previous_level,
-            "current_level": entry.current_level,
-            "cooldown_seconds": entry.cooldown_seconds,
-            "cooldown_remaining_seconds": entry.cooldown_remaining_seconds,
-            "is_escalation": entry.is_escalation,
-            "suppressed_by_cooldown": cooldown_override_reason is not None,
-            "allowed_by_escalation": entry.is_escalation and cooldown_override_reason is None,
-            "decision": entry.cooldown_action if cooldown_override_reason is None else cooldown_override_reason,
+            "entries": entries_list,
         }
 
     # 6c. Write dispatch plan JSON (PR-CR-A2 + PR-CR-A4 cooldown context).
@@ -618,12 +638,14 @@ def build_and_write_cr_runtime_dry_run(
             )
 
     # 7b. Build and write dispatch receipt JSON (PR-CR-A3 + PR-CR-A4 cooldown).
+    cooldown_entries_for_receipt = cooldown_context.get("entries") if cooldown_context else None
     dispatch_receipt_json_dict = build_dispatch_receipts_json(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         execution=dispatch_execution,
         created_at=now.isoformat(),
         cooldown_override_reason=cooldown_override_reason,
+        cooldown_entries=cooldown_entries_for_receipt,
     )
     dispatch_receipt_json_paths = write_dispatch_receipts_json(
         dispatch_receipt_json_dict,

@@ -662,6 +662,193 @@ class TestBatchEscalationFiltering(unittest.TestCase):
         self.assertNotIn("ev-B", eligible_keys)
 
 
+# ---------------------------------------------------------------------------
+# Test Group O — Mixed candidate text filtering
+# ---------------------------------------------------------------------------
+
+
+class TestMixedCandidateTextFiltering(unittest.TestCase):
+    def test_cooldown_entries_in_plan_json(self):
+        """Cooldown entries appear in plan JSON with per-candidate outcomes."""
+        from unittest.mock import MagicMock
+        from trendradar.cr.dispatch_plan import (
+            CRDispatchPlan,
+            cr_dispatch_plan_to_json_dict,
+        )
+        from trendradar.cr.cooldown_enforce import enforce_cr_cooldown_for_candidates
+
+        now = datetime.now(timezone.utc)
+        seen_states = {
+            "ev-A": CRSeenEventState(
+                event_key="ev-A", decision_level="alert",
+                score=70.0, seen_at=now.isoformat(),
+            ),
+            "ev-B": CRSeenEventState(
+                event_key="ev-B", decision_level="alert",
+                score=70.0, seen_at=now.isoformat(),
+            ),
+        }
+        pc_a = MagicMock()
+        pc_a.cluster_key = "ev-A"
+        pc_a.candidate_id = "c-A"
+        pc_a.decision_level = "urgent"
+
+        pc_b = MagicMock()
+        pc_b.cluster_key = "ev-B"
+        pc_b.candidate_id = "c-B"
+        pc_b.decision_level = "alert"
+
+        enforcement = enforce_cr_cooldown_for_candidates(
+            cr_a_candidates=(pc_a, pc_b),
+            seen_states=seen_states,
+            prior_snapshot_provided=True,
+            policy=CRCooldownPolicy(same_level_cooldown_minutes=360),
+            now=now,
+        )
+        eligible_keys = {pc.cluster_key for pc in enforcement.eligible_candidates}
+        entries_list = []
+        for e in enforcement.entries:
+            is_eligible = e.event_key in eligible_keys
+            entries_list.append({
+                "candidate_id": e.candidate_id,
+                "event_key": e.event_key,
+                "is_escalation": e.is_escalation,
+                "allowed_by_escalation": e.is_escalation and is_eligible,
+                "suppressed_by_cooldown": not is_eligible,
+                "decision": e.cooldown_action if is_eligible else "skipped_cooldown",
+            })
+
+        plan = CRDispatchPlan(
+            should_dispatch=True,
+            messages=(),
+            reason="ready",
+            run_label="test",
+            candidate_count=1,
+            urgent_count=1,
+            high_score_suppressed_count=0,
+        )
+        d = cr_dispatch_plan_to_json_dict(
+            plan,
+            dispatch_mode="live",
+            cooldown_context={
+                "state_available": True,
+                "state_error": None,
+                "policy_version": "cr-cooldown-v1",
+                "entries": entries_list,
+            },
+        )
+        # Verify entries exist.
+        self.assertIn("cooldown", d)
+        entries = d["cooldown"]["entries"]
+        self.assertEqual(len(entries), 2)
+        # A: escalation allowed.
+        a_entry = [e for e in entries if e["candidate_id"] == "c-A"][0]
+        self.assertTrue(a_entry["is_escalation"])
+        self.assertTrue(a_entry["allowed_by_escalation"])
+        self.assertFalse(a_entry["suppressed_by_cooldown"])
+        # B: repeat blocked.
+        b_entry = [e for e in entries if e["candidate_id"] == "c-B"][0]
+        self.assertFalse(b_entry["is_escalation"])
+        self.assertFalse(b_entry["allowed_by_escalation"])
+        self.assertTrue(b_entry["suppressed_by_cooldown"])
+
+    def test_cooldown_entries_in_receipt_json(self):
+        """Cooldown entries appear in receipt JSON as candidate_outcomes."""
+        from trendradar.cr.dispatch_plan import CRDispatchPlan
+        from trendradar.cr.dispatch_receipt import build_dispatch_receipts_json
+
+        plan = CRDispatchPlan(
+            should_dispatch=True,
+            messages=(),
+            reason="ready",
+            run_label="test",
+            candidate_count=1,
+            urgent_count=1,
+            high_score_suppressed_count=0,
+        )
+        entries = [
+            {
+                "candidate_id": "c-A",
+                "event_key": "ev-A",
+                "is_escalation": True,
+                "allowed_by_escalation": True,
+                "suppressed_by_cooldown": False,
+                "decision": "eligible_escalation_bypass",
+            },
+            {
+                "candidate_id": "c-B",
+                "event_key": "ev-B",
+                "is_escalation": False,
+                "allowed_by_escalation": False,
+                "suppressed_by_cooldown": True,
+                "decision": "skipped_cooldown",
+            },
+        ]
+        d = build_dispatch_receipts_json(
+            plan,
+            dispatch_mode="live",
+            cooldown_entries=entries,
+        )
+        self.assertIn("candidate_outcomes", d)
+        self.assertEqual(len(d["candidate_outcomes"]), 2)
+        b_outcome = [o for o in d["candidate_outcomes"] if o["candidate_id"] == "c-B"][0]
+        self.assertTrue(b_outcome["suppressed_by_cooldown"])
+        self.assertEqual(b_outcome["decision"], "skipped_cooldown")
+
+    def test_filtered_text_excludes_skipped_candidate(self):
+        """Filtered pipeline text only contains eligible candidates."""
+        from trendradar.cr.presentation import (
+            CRPresentationRun,
+            render_cr_a_text,
+            CRPresentedCandidate,
+        )
+        from trendradar.cr.decision import CRDecision
+        from trendradar.cr.scoring import CRScoreResult
+        from trendradar.cr.models import CRCandidate
+
+        def _make_pc(cid, key, title, level):
+            cand = CRCandidate(
+                candidate_id=cid, cluster_key=key,
+                display_title=title, representative_url=None, source_items=[],
+            )
+            sr = CRScoreResult(
+                candidate_id=cid, cluster_key=key,
+                profile_version="v", total_score=70.0,
+                trigger_reasons=[], debug={},
+            )
+            dec = CRDecision(
+                candidate_id=cid, cluster_key=key,
+                profile_version="v", policy_version="v",
+                level=level, total_score=70.0, push_eligible=True,
+                suppress_labels=[], trigger_reasons=[], debug={},
+            )
+            return CRPresentedCandidate(
+                candidate=cand, score_result=sr, decision=dec,
+                candidate_id=cid, cluster_key=key,
+                display_title=title, representative_url=None,
+                decision_level=level, total_score=70.0,
+                trigger_reasons=[], suppress_labels=[],
+            )
+
+        pc_a = _make_pc("c-A", "ev-A", "Topic A", "urgent")
+        pc_b = _make_pc("c-B", "ev-B", "Topic B", "alert")
+
+        # Full text contains both.
+        full_run = CRPresentationRun(
+            run_label="test", candidates=[pc_a, pc_b],
+        )
+        full_text = render_cr_a_text(full_run)
+        self.assertIn("Topic A", full_text)
+        self.assertIn("Topic B", full_text)
+
+        # Filtered text (only A) excludes B.
+        filtered_run = CRPresentationRun(
+            run_label="test", candidates=[pc_a],
+        )
+        filtered_text = render_cr_a_text(filtered_run)
+        self.assertIn("Topic A", filtered_text)
+        self.assertNotIn("Topic B", filtered_text)
+
+
 if __name__ == "__main__":
-    unittest.main()
     unittest.main()
