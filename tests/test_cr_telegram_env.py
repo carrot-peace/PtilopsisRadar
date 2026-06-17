@@ -468,6 +468,58 @@ class TestBoundaryChecks(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Test Group G — Partial config graceful handling
+# ---------------------------------------------------------------------------
+
+
+class TestPartialConfigGraceful(unittest.TestCase):
+    """Group G: partial live Telegram config must not crash the runtime.
+
+    When SEND=1 but credentials are missing, the ValueError should be
+    catchable so the caller can treat it as no sink (not_configured receipt).
+    """
+
+    def test_missing_token_value_error_is_catchable(self) -> None:
+        """Caller can catch ValueError and treat as no sink."""
+        env = {
+            "PTILOPSIS_CR_TELEGRAM_SEND": "1",
+            "PTILOPSIS_CR_TELEGRAM_CHAT_ID": FAKE_CHAT_ID,
+        }
+        sink = None
+        try:
+            sink = build_cr_telegram_sink_from_env(env)
+        except ValueError:
+            sink = None
+        self.assertIsNone(sink)
+
+    def test_missing_chat_id_value_error_is_catchable(self) -> None:
+        """Caller can catch ValueError and treat as no sink."""
+        env = {
+            "PTILOPSIS_CR_TELEGRAM_SEND": "1",
+            "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
+        }
+        sink = None
+        try:
+            sink = build_cr_telegram_sink_from_env(env)
+        except ValueError:
+            sink = None
+        self.assertIsNone(sink)
+
+    def test_partial_config_does_not_return_sink(self) -> None:
+        """Partial config never returns a usable sink."""
+        env = {
+            "PTILOPSIS_CR_TELEGRAM_SEND": "1",
+            # Missing both token and chat_id.
+        }
+        sink = None
+        try:
+            sink = build_cr_telegram_sink_from_env(env)
+        except ValueError:
+            sink = None
+        self.assertIsNone(sink)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
