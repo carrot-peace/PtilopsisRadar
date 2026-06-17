@@ -8,7 +8,10 @@ No environment mutation except via ``patch.dict`` where safe.
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from trendradar.cr.telegram_env import (
     build_cr_telegram_sink_config_from_env,
@@ -517,6 +520,164 @@ class TestPartialConfigGraceful(unittest.TestCase):
         except ValueError:
             sink = None
         self.assertIsNone(sink)
+
+
+# ---------------------------------------------------------------------------
+# Test Group I — Integration: live dispatch end-to-end
+# ---------------------------------------------------------------------------
+
+
+def _live_dispatch_hotlist_stats() -> list[dict]:
+    """Hotlist stats with a low rank to reliably produce a dispatch-ready plan."""
+    return [
+        {
+            "word": "AI",
+            "titles": [
+                {
+                    "title": "AI Title",
+                    "source_name": "weibo",
+                    "source_id": "weibo",
+                    "ranks": [1],
+                    "count": 10,
+                    "first_time": "09:30",
+                    "last_time": "12:00",
+                    "url": "https://example.com",
+                    "mobileUrl": "",
+                    "is_new": False,
+                    "rank_timeline": [],
+                }
+            ],
+            "count": 1,
+            "position": 0,
+        }
+    ]
+
+
+class TestLiveDispatchWithFakeHTTPClient(unittest.TestCase):
+    """Group I (Test A): runtime_dry_run end-to-end with injected FakeHTTPClient sink.
+
+    Exercises the full live Telegram path without a real network call.  The
+    sink is built from a complete env with a _FakeHTTPClient injected via
+    http_client=.  Verifies that dispatch executes, the receipt is accepted,
+    and cooldown state is written to a temp path.
+    """
+
+    def test_live_dispatch_accepted_state_written(self) -> None:
+        """Live mode + FakeHTTPClient: dispatch executes, receipt accepted, cooldown state written."""
+        from trendradar.cr.artifacts import CRArtifactConfig
+        from trendradar.cr.decision import CRDecisionPolicy
+        from trendradar.cr.pipeline import CRPipelineConfig
+        from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
+
+        full_env = {
+            "PTILOPSIS_CR_TELEGRAM_SEND": "1",
+            "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
+            "PTILOPSIS_CR_TELEGRAM_CHAT_ID": FAKE_CHAT_ID,
+        }
+        sink = build_cr_telegram_sink_from_env(full_env, http_client=_FakeHTTPClient())
+        self.assertIsNotNone(sink)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "dispatch_state.json"
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_live_dispatch_hotlist_stats(),
+                run_label="test-live-a",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
+                pipeline_config=CRPipelineConfig(
+                    decision=CRDecisionPolicy(alert_threshold=1.0)
+                ),
+                dispatch_sink=sink,
+                dispatch_mode="live",
+                dispatch_state_path=str(state_path),
+            )
+
+            # Plan must have dispatched with low threshold + non-empty stats.
+            self.assertTrue(
+                result.dispatch_plan.should_dispatch,
+                "expected plan to dispatch with low alert_threshold and non-empty stats",
+            )
+            # Execution must have been attempted.
+            self.assertIsNotNone(result.dispatch_execution)
+            self.assertTrue(result.dispatch_execution.attempted)
+
+            # Receipt artifact must contain an accepted entry.
+            data = json.loads(
+                result.dispatch_receipt_json_paths.dispatch_receipt_latest_path
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(data["dispatch_mode"], "live")
+            self.assertTrue(data["plan_should_dispatch"])
+            self.assertTrue(
+                any(r["status"] == "accepted" for r in data["receipts"]),
+                f"expected accepted receipt, got: {data['receipts']}",
+            )
+
+            # Cooldown state must have been written after accepted dispatch.
+            self.assertIsNotNone(result.dispatch_state_save)
+            self.assertTrue(result.dispatch_state_save.saved)
+            self.assertTrue(state_path.exists())
+
+
+class TestLivePartialConfigReceipt(unittest.TestCase):
+    """Group I (Test B): SEND=1 + missing token → no crash, not_configured receipt.
+
+    Wiring-level check that live mode + partial env → dispatch_sink=None →
+    dispatch_receipts.json contains status: not_configured and no exception is
+    raised.  Complements TestPartialConfigGraceful (factory layer) by verifying
+    the outcome at the artifact layer.
+    """
+
+    def test_partial_config_no_crash_not_configured_receipt(self) -> None:
+        """SEND=1 + missing token: no crash, dispatch_receipts.json has not_configured."""
+        from trendradar.cr.artifacts import CRArtifactConfig
+        from trendradar.cr.decision import CRDecisionPolicy
+        from trendradar.cr.pipeline import CRPipelineConfig
+        from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
+
+        # Partial env: SEND enabled + chat_id, token missing.
+        partial_env = {
+            "PTILOPSIS_CR_TELEGRAM_SEND": "1",
+            "PTILOPSIS_CR_TELEGRAM_CHAT_ID": FAKE_CHAT_ID,
+        }
+
+        # Simulate runtime wiring: catch ValueError, fall back to no sink.
+        dispatch_sink = None
+        try:
+            dispatch_sink = build_cr_telegram_sink_from_env(partial_env)
+        except ValueError:
+            dispatch_sink = None
+        self.assertIsNone(dispatch_sink)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Must not raise — partial config must not crash.
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_live_dispatch_hotlist_stats(),
+                run_label="test-live-b",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
+                pipeline_config=CRPipelineConfig(
+                    decision=CRDecisionPolicy(alert_threshold=1.0)
+                ),
+                dispatch_mode="live",
+                dispatch_sink=dispatch_sink,
+            )
+
+            # Plan must have dispatched (low threshold + non-empty stats).
+            self.assertTrue(
+                result.dispatch_plan.should_dispatch,
+                "expected plan to dispatch with low alert_threshold and non-empty stats",
+            )
+
+            # Receipt must contain not_configured — live mode with no sink.
+            data = json.loads(
+                result.dispatch_receipt_json_paths.dispatch_receipt_latest_path
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(data["dispatch_mode"], "live")
+            self.assertTrue(data["plan_should_dispatch"])
+            self.assertTrue(
+                any(r["status"] == "not_configured" for r in data["receipts"]),
+                f"expected not_configured with no sink in live mode, got: {data['receipts']}",
+            )
 
 
 # ---------------------------------------------------------------------------
