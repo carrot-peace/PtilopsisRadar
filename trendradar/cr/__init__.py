@@ -171,6 +171,14 @@ from trendradar.cr.telegram_env import (
     build_cr_telegram_sink_config_from_env,
     build_cr_telegram_sink_from_env,
 )
+from trendradar.cr.dispatch_mode import (
+    CRDispatchMode,
+    CR_DISPATCH_OFF,
+    CR_DISPATCH_ARTIFACT,
+    CR_DISPATCH_SHADOW,
+    CR_DISPATCH_LIVE,
+    resolve_cr_dispatch_mode,
+)
 from trendradar.cr.runtime_dry_run import (
     CRRuntimeDryRunResult,
     build_and_write_cr_runtime_dry_run,
@@ -290,6 +298,12 @@ __all__ = [
     "cr_telegram_send_enabled",
     "build_cr_telegram_sink_config_from_env",
     "build_cr_telegram_sink_from_env",
+    "CRDispatchMode",
+    "CR_DISPATCH_OFF",
+    "CR_DISPATCH_ARTIFACT",
+    "CR_DISPATCH_SHADOW",
+    "CR_DISPATCH_LIVE",
+    "resolve_cr_dispatch_mode",
     "CRRuntimeDryRunResult",
     "build_and_write_cr_runtime_dry_run",
 ]
