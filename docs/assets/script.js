@@ -119,7 +119,7 @@ const STORAGE_KEY_FREQUENCY_TIME = 'trendradar_frequency_time';
 const STORAGE_KEY_TIMELINE_TIME = 'trendradar_timeline_time';
 
 // 官网配置文件 URL（GitHub 主源）
-const GITHUB_RAW_BASE = 'https://raw.githubusercontent.com/sansan0/TrendRadar/refs/heads/master/';
+const GITHUB_RAW_BASE = 'https://raw.githubusercontent.com/carrot-peace/PtilopsisRadar/refs/heads/master/';
 const REMOTE_CONFIG_URL = GITHUB_RAW_BASE + 'config/config.yaml';
 const REMOTE_FREQUENCY_URL = GITHUB_RAW_BASE + 'config/frequency_words.txt';
 const REMOTE_TIMELINE_URL = GITHUB_RAW_BASE + 'config/timeline.yaml';
@@ -128,9 +128,9 @@ const REMOTE_VERSION_URL = GITHUB_RAW_BASE + 'version_configs';
 // 所有源（GitHub 主源 + CDN 备用源），按优先级排列
 const ALL_SOURCES = [
     GITHUB_RAW_BASE,
-    'https://fastly.jsdelivr.net/gh/sansan0/TrendRadar@master/',
-    'https://cdn.jsdelivr.net/gh/sansan0/TrendRadar@master/',
-    'https://gcore.jsdelivr.net/gh/sansan0/TrendRadar@master/',
+    'https://fastly.jsdelivr.net/gh/carrot-peace/PtilopsisRadar@master/',
+    'https://cdn.jsdelivr.net/gh/carrot-peace/PtilopsisRadar@master/',
+    'https://gcore.jsdelivr.net/gh/carrot-peace/PtilopsisRadar@master/',
 ];
 let lastOkIndex = 0;
 
