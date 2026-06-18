@@ -882,7 +882,7 @@ class NewsAnalyzer:
                 try:
                     _dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
                 except ValueError as exc:
-                    print(f"[CR-A] live Telegram sink not configured: {exc}")
+                    print(f"[CR-A] live Telegram sink not configured: {exc}", file=sys.stderr)
                     _dispatch_sink = None
 
             _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
@@ -984,7 +984,7 @@ class NewsAnalyzer:
             try:
                 sink = build_dr_telegram_sink_from_env(os.environ)
             except ValueError as exc:
-                print(f"[DR] live Telegram sink not configured: {exc}")
+                print(f"[DR] live Telegram sink not configured: {exc}", file=sys.stderr)
             execution = execute_dr_dispatch_plan(plan, sink=sink)
             print(
                 f"[DR] dispatch live result: {execution.reason}, "
