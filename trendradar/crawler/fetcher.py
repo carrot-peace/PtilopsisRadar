@@ -37,6 +37,7 @@ class DataFetcher:
         self,
         proxy_url: Optional[str] = None,
         api_url: Optional[str] = None,
+        max_retries: int = 4,
     ):
         """
         初始化数据获取器
@@ -44,9 +45,11 @@ class DataFetcher:
         Args:
             proxy_url: 代理服务器 URL（可选）
             api_url: API 基础 URL（可选，默认使用 DEFAULT_API_URL）
+            max_retries: 单平台请求最大重试次数（默认 2）
         """
         self.proxy_url = proxy_url
         self.api_url = api_url or self.DEFAULT_API_URL
+        self.max_retries = max_retries
 
     @staticmethod
     def _check_domain_safety(
@@ -86,7 +89,7 @@ class DataFetcher:
     def fetch_data(
         self,
         id_info: Union[str, Tuple[str, str]],
-        max_retries: int = 2,
+        max_retries: int = 4,
         min_retry_wait: int = 3,
         max_retry_wait: int = 5,
     ) -> Tuple[Optional[str], str, str]:
@@ -180,7 +183,7 @@ class DataFetcher:
                 name = id_value
 
             id_to_name[id_value] = name
-            response, _, _ = self.fetch_data(id_info)
+            response, _, _ = self.fetch_data(id_info, max_retries=self.max_retries)
 
             if response:
                 try:
