@@ -36,3 +36,6 @@ coverage.xml
 .DS_Store
 .vscode/
 .idea/
+
+# Alma snapshot tool
+.alma-snapshots/
