@@ -59,6 +59,16 @@ def _write_plan(path: Path, **overrides) -> None:
             "policy_version": "cr-cooldown-v1",
             "entries": [],
         },
+        "quiet_hours": {
+            "enabled": True,
+            "timezone": "Asia/Shanghai",
+            "in_quiet_hours": True,
+            "allow_urgent_bypass": False,
+            "bypass_applied": False,
+            "decision": "deferred_quiet_hours",
+            "deferred_count": 1,
+            "entries": [],
+        },
     }
     plan.update(overrides)
     path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
@@ -160,6 +170,35 @@ class TestWriterUsesReader(unittest.TestCase):
             self.assertEqual(data["schema_version"], DEPLOY_TRACE_SCHEMA_VERSION)
             self.assertIn("cr_dispatch", data)
             self.assertEqual(data["cr_dispatch"]["decision_source"], "authoritative_plan_receipt")
+
+    def test_output_contains_quiet_hours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cr_dir = Path(tmp) / "cr" / "latest"
+            cr_dir.mkdir(parents=True)
+            plan_path = cr_dir / "dispatch_plan.json"
+            receipt_path = cr_dir / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path)
+
+            trace_dir = Path(tmp) / "trace"
+            config = DeployTraceConfig(root_dir=trace_dir)
+            result = write_deploy_trace(
+                run_label="run-001",
+                plan_path=plan_path,
+                receipt_path=receipt_path,
+                config=config,
+            )
+
+            self.assertEqual(
+                result.cr_dispatch["quiet_hours"]["decision"],
+                "deferred_quiet_hours",
+            )
+            latest = json.loads(result.latest_path.read_text(encoding="utf-8"))
+            archive = json.loads(result.archive_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                latest["cr_dispatch"]["quiet_hours"],
+                archive["cr_dispatch"]["quiet_hours"],
+            )
 
 
 # ---------------------------------------------------------------------------

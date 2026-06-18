@@ -126,6 +126,11 @@ def _extract_cooldown(plan: dict) -> dict[str, object] | None:
     return plan.get("cooldown")
 
 
+def _extract_quiet_hours(plan: dict) -> dict[str, object] | None:
+    """Extract quiet-hours context from plan data."""
+    return plan.get("quiet_hours")
+
+
 def _extract_candidate_outcomes(receipt: dict, plan: dict) -> list[dict[str, object]]:
     """Extract candidate outcomes from receipt or plan."""
     outcomes = receipt.get("candidate_outcomes")
@@ -234,6 +239,9 @@ def read_cr_deploy_trace(
 
     # Cooldown.
     cr_dispatch["cooldown"] = _extract_cooldown(plan_data)
+
+    # Quiet hours.
+    cr_dispatch["quiet_hours"] = _extract_quiet_hours(plan_data)
 
     # Receipt summary.
     receipt_data = receipt_result.data if has_receipt else {}

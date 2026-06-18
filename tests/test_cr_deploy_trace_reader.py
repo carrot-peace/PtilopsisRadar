@@ -79,6 +79,21 @@ def _write_plan(path: Path, **overrides) -> None:
                 },
             ],
         },
+        "quiet_hours": {
+            "enabled": True,
+            "timezone": "Asia/Shanghai",
+            "local_time": "2026-06-17T23:30:00+08:00",
+            "start": "23:00",
+            "end": "08:00",
+            "in_quiet_hours": True,
+            "allow_urgent_bypass": False,
+            "bypass_applied": False,
+            "deferred_until": "2026-06-18T08:00:00+08:00",
+            "decision": "deferred_quiet_hours",
+            "reason": "quiet_hours_active",
+            "deferred_count": 1,
+            "entries": [],
+        },
     }
     plan.update(overrides)
     path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -199,6 +214,20 @@ class TestBothPresent(unittest.TestCase):
             self.assertIsNotNone(cr["cooldown"])
             entries = cr["cooldown"]["entries"]
             self.assertEqual(len(entries), 2)
+
+    def test_quiet_hours_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertIsNotNone(cr["quiet_hours"])
+            self.assertTrue(cr["quiet_hours"]["enabled"])
+            self.assertEqual(cr["quiet_hours"]["decision"], "deferred_quiet_hours")
 
     def test_candidate_outcomes_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -38,6 +38,10 @@ STATUS_SKIPPED_SUPPRESS = "skipped_suppress"
 STATUS_SKIPPED_COOLDOWN = "skipped_cooldown"
 STATUS_SKIPPED_REPEAT = "skipped_repeat"
 STATUS_SKIPPED_STATE_ERROR = "skipped_state_error"
+STATUS_DEFERRED_QUIET_HOURS = "deferred_quiet_hours"
+STATUS_SKIPPED_QUIET_HOURS = "skipped_quiet_hours"
+STATUS_SKIPPED_DEFERRED_QUEUE_ERROR = "skipped_deferred_queue_error"
+STATUS_QUIET_HOURS_CONFIG_ERROR = "quiet_hours_config_error"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_ACCEPTED = "accepted"
 STATUS_REJECTED = "rejected"
@@ -88,9 +92,10 @@ def _build_skipped_receipt_entry(
     message_index: int,
     status: str,
     detail: str,
+    **extra: object,
 ) -> dict[str, object]:
     """Build a receipt entry for a skipped / not-executed plan."""
-    return {
+    entry: dict[str, object] = {
         "message_index": message_index,
         "attempted": False,
         "accepted": False,
@@ -102,6 +107,8 @@ def _build_skipped_receipt_entry(
         "exception_type": None,
         "exception_message": None,
     }
+    entry.update(extra)
+    return entry
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +124,8 @@ def build_dispatch_receipts_json(
     created_at: str | None = None,
     cooldown_override_reason: str | None = None,
     cooldown_entries: list[dict[str, object]] | None = None,
+    pre_receipts: list[dict[str, object]] | None = None,
+    override_receipts: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Build the dispatch receipts JSON dict.
 
@@ -144,7 +153,9 @@ def build_dispatch_receipts_json(
         JSON-serializable dict conforming to ``cr-dispatch-receipts-v1``.
     """
     # --- Cooldown override (applies to all modes) ---
-    if cooldown_override_reason is not None:
+    if override_receipts is not None:
+        receipts = list(override_receipts)
+    elif cooldown_override_reason is not None:
         receipts = [
             _build_skipped_receipt_entry(0, cooldown_override_reason, cooldown_override_reason)
         ]
@@ -164,6 +175,9 @@ def build_dispatch_receipts_json(
     else:
         # Live mode with execution.
         receipts = _execution_receipts(execution)
+
+    if pre_receipts:
+        receipts = list(pre_receipts) + receipts
 
     result: dict[str, object] = {
         "schema_version": DISPATCH_RECEIPT_SCHEMA_VERSION,
@@ -212,6 +226,15 @@ def _plan_skip_receipts(plan: CRDispatchPlan) -> list[dict[str, object]]:
     elif plan.reason == "empty_text":
         status = STATUS_SKIPPED_SUPPRESS
         detail = "empty_text"
+    elif plan.reason == "deferred_quiet_hours":
+        status = STATUS_DEFERRED_QUIET_HOURS
+        detail = "quiet_hours_active"
+    elif plan.reason == "quiet_hours_config_error":
+        status = STATUS_QUIET_HOURS_CONFIG_ERROR
+        detail = "quiet_hours_config_error"
+    elif plan.reason == "skipped_deferred_queue_error":
+        status = STATUS_SKIPPED_DEFERRED_QUEUE_ERROR
+        detail = "deferred_queue_error"
     else:
         status = STATUS_UNKNOWN
         detail = plan.reason
