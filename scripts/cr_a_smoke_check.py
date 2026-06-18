@@ -35,6 +35,7 @@ DEFAULT_PLAN_PATH = "output/cr/latest/dispatch_plan.json"
 DEFAULT_RECEIPTS_PATH = "output/cr/latest/dispatch_receipts.json"
 DEFAULT_DEPLOY_TRACE_PATH = "output/meta/deploy_trace/latest.json"
 DEFAULT_DEFERRED_QUEUE_PATH = "output/cr/state/cr_deferred_dispatch_queue.json"
+DEFAULT_LIFECYCLE_REPORT_PATH = "output/cr/latest/lifecycle_report.json"
 
 ACCEPTED_STATUS = "accepted"
 
@@ -90,12 +91,81 @@ def _assert_no_false_success(entries: list[dict]) -> None:
             )
 
 
+def _check_lifecycle_report(data: object) -> None:
+    """Validate lifecycle report invariants.
+
+    Raises :class:`SmokeCheckError` on any violation.
+    """
+    if not isinstance(data, dict):
+        raise SmokeCheckError("lifecycle report root must be a JSON object")
+
+    schema_version = data.get("schema_version")
+    if schema_version != "cr-lifecycle-report-v1":
+        raise SmokeCheckError(
+            f"lifecycle report schema_version expected 'cr-lifecycle-report-v1', "
+            f"got {schema_version!r}"
+        )
+
+    mode = data.get("mode")
+    if mode not in ("preview", "enforce"):
+        raise SmokeCheckError(f"lifecycle report mode must be preview or enforce, got {mode!r}")
+
+    # Counts must be non-negative integers.
+    for field in ("input_count", "kept_count", "would_evict_count", "evicted_count"):
+        value = data.get(field)
+        if not isinstance(value, int) or value < 0:
+            raise SmokeCheckError(f"lifecycle report {field} must be a non-negative integer")
+
+    input_count = data["input_count"]
+    kept_count = data["kept_count"]
+    would_evict_count = data["would_evict_count"]
+    evicted_count = data["evicted_count"]
+
+    if mode == "preview":
+        if input_count != kept_count + would_evict_count:
+            raise SmokeCheckError(
+                f"lifecycle report preview: input_count ({input_count}) != "
+                f"kept_count ({kept_count}) + would_evict_count ({would_evict_count})"
+            )
+        if evicted_count != 0:
+            raise SmokeCheckError(
+                f"lifecycle report preview: evicted_count must be 0, got {evicted_count}"
+            )
+    elif mode == "enforce":
+        if input_count != kept_count + evicted_count:
+            raise SmokeCheckError(
+                f"lifecycle report enforce: input_count ({input_count}) != "
+                f"kept_count ({kept_count}) + evicted_count ({evicted_count})"
+            )
+        if would_evict_count != evicted_count:
+            raise SmokeCheckError(
+                f"lifecycle report enforce: would_evict_count ({would_evict_count}) != "
+                f"evicted_count ({evicted_count})"
+            )
+
+    # TTL values must be positive.
+    ttl_for_level = data.get("ttl_for_level")
+    if isinstance(ttl_for_level, dict):
+        for level, ttl in ttl_for_level.items():
+            if not isinstance(ttl, (int, float)) or ttl <= 0:
+                raise SmokeCheckError(
+                    f"lifecycle report ttl_for_level[{level!r}] must be positive, got {ttl}"
+                )
+
+    errors = data.get("errors")
+    if isinstance(errors, list) and len(errors) > 0:
+        raise SmokeCheckError(
+            f"lifecycle report has {len(errors)} error(s): {'; '.join(str(e) for e in errors[:3])}"
+        )
+
+
 def run_smoke_check(
     *,
     plan_path: str = DEFAULT_PLAN_PATH,
     receipts_path: str = DEFAULT_RECEIPTS_PATH,
     deploy_trace_path: str = DEFAULT_DEPLOY_TRACE_PATH,
     deferred_queue_path: str = DEFAULT_DEFERRED_QUEUE_PATH,
+    lifecycle_report_path: str = DEFAULT_LIFECYCLE_REPORT_PATH,
 ) -> list[str]:
     """Run all smoke checks. Returns human-readable status lines.
 
@@ -124,6 +194,15 @@ def run_smoke_check(
     else:
         lines.append("[SKIP] invariant: no receipts to check")
 
+    # Lifecycle report (optional — SKIP when absent).
+    lifecycle_data, lifecycle_state = _load_json_if_exists(Path(lifecycle_report_path))
+    lines.append(f"[{lifecycle_state.upper():>4}] lifecycle_report    {lifecycle_report_path}")
+    if lifecycle_state == "ok":
+        _check_lifecycle_report(lifecycle_data)
+        lines.append("[  OK] lifecycle report invariants")
+    else:
+        lines.append("[SKIP] lifecycle report: file absent")
+
     return lines
 
 
@@ -133,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--receipts-path", default=DEFAULT_RECEIPTS_PATH)
     parser.add_argument("--deploy-trace-path", default=DEFAULT_DEPLOY_TRACE_PATH)
     parser.add_argument("--deferred-queue-path", default=DEFAULT_DEFERRED_QUEUE_PATH)
+    parser.add_argument("--lifecycle-report-path", default=DEFAULT_LIFECYCLE_REPORT_PATH)
     args = parser.parse_args(argv)
 
     try:
@@ -141,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             receipts_path=args.receipts_path,
             deploy_trace_path=args.deploy_trace_path,
             deferred_queue_path=args.deferred_queue_path,
+            lifecycle_report_path=args.lifecycle_report_path,
         )
     except SmokeCheckError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

@@ -36,6 +36,7 @@ class CRSmokeCheckTest(unittest.TestCase):
         self.receipts = self.base / "dispatch_receipts.json"
         self.trace = self.base / "latest.json"
         self.queue = self.base / "cr_deferred_dispatch_queue.json"
+        self.lifecycle = self.base / "lifecycle_report.json"
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -46,6 +47,7 @@ class CRSmokeCheckTest(unittest.TestCase):
             receipts_path=str(self.receipts),
             deploy_trace_path=str(self.trace),
             deferred_queue_path=str(self.queue),
+            lifecycle_report_path=str(self.lifecycle),
         )
 
     def test_all_missing_files_are_tolerated(self) -> None:
@@ -110,6 +112,7 @@ class CRSmokeCheckTest(unittest.TestCase):
                 "--receipts-path", str(self.receipts),
                 "--deploy-trace-path", str(self.trace),
                 "--deferred-queue-path", str(self.queue),
+                "--lifecycle-report-path", str(self.lifecycle),
             ]
         )
         self.assertEqual(code, 0)
@@ -125,9 +128,141 @@ class CRSmokeCheckTest(unittest.TestCase):
                 "--receipts-path", str(self.receipts),
                 "--deploy-trace-path", str(self.trace),
                 "--deferred-queue-path", str(self.queue),
+                "--lifecycle-report-path", str(self.lifecycle),
             ]
         )
         self.assertEqual(code, 1)
+
+
+def _valid_lifecycle_report(**overrides: object) -> dict:
+    """Return a valid lifecycle report dict, with optional overrides."""
+    report = {
+        "schema_version": "cr-lifecycle-report-v1",
+        "enabled": True,
+        "mode": "preview",
+        "state_path": "output/cr/state/cr_dispatch_state.json",
+        "generated_at": "2026-06-22T12:00:00+00:00",
+        "ttl_floor_seconds": 604800,
+        "ttl_for_level": {
+            "alert": 604800,
+            "urgent": 604800,
+            "watch": 604800,
+            "suppress": 604800,
+        },
+        "input_count": 10,
+        "kept_count": 8,
+        "would_evict_count": 2,
+        "evicted_count": 0,
+        "phase_counts": {"active": 8, "evictable": 2},
+        "would_evict": [],
+        "errors": [],
+    }
+    report.update(overrides)
+    return report
+
+
+class CRLifecycleReportSmokeCheckTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name)
+        self.lifecycle = self.base / "lifecycle_report.json"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self):
+        return smoke.run_smoke_check(
+            plan_path=str(self.base / "no_plan.json"),
+            receipts_path=str(self.base / "no_receipts.json"),
+            deploy_trace_path=str(self.base / "no_trace.json"),
+            deferred_queue_path=str(self.base / "no_queue.json"),
+            lifecycle_report_path=str(self.lifecycle),
+        )
+
+    def test_absent_report_is_skip(self) -> None:
+        lines = self._run()
+        self.assertTrue(any("SKIP" in line and "lifecycle" in line.lower() for line in lines))
+
+    def test_valid_preview_report_passes(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report())
+        lines = self._run()
+        self.assertTrue(any("lifecycle report invariants" in line for line in lines))
+
+    def test_valid_enforce_report_passes(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            mode="enforce",
+            would_evict_count=2,
+            evicted_count=2,
+            kept_count=8,
+        ))
+        lines = self._run()
+        self.assertTrue(any("lifecycle report invariants" in line for line in lines))
+
+    def test_wrong_schema_version_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(schema_version="wrong"))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_invalid_mode_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(mode="bogus"))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_negative_count_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(input_count=-1))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_preview_count_mismatch_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            input_count=10, kept_count=5, would_evict_count=2,
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_preview_nonzero_evicted_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(evicted_count=1))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_enforce_count_mismatch_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            mode="enforce",
+            input_count=10, kept_count=5, evicted_count=2,
+            would_evict_count=2,
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_enforce_would_evict_mismatch_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            mode="enforce",
+            would_evict_count=3,
+            evicted_count=2,
+            kept_count=8,
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_nonempty_errors_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            errors=["state load error: malformed"],
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_negative_ttl_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            ttl_for_level={"alert": -1, "urgent": 604800, "watch": 604800, "suppress": 604800},
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_malformed_json_fails(self) -> None:
+        self.lifecycle.parent.mkdir(parents=True, exist_ok=True)
+        self.lifecycle.write_text("{bad json", encoding="utf-8")
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
 
 
 if __name__ == "__main__":
