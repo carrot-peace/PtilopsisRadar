@@ -67,6 +67,9 @@ _REASON_TO_DECISION: dict[str, DispatchPlanDecision] = {
     "skipped_cooldown": DECISION_COOLDOWN,
     "skipped_repeat": DECISION_COOLDOWN,
     "skipped_state_error": DECISION_COOLDOWN,
+    "deferred_quiet_hours": DECISION_DISPATCH,
+    "quiet_hours_config_error": DECISION_SUPPRESSED,
+    "skipped_deferred_queue_error": DECISION_SUPPRESSED,
 }
 
 
@@ -249,6 +252,7 @@ def cr_dispatch_plan_to_json_dict(
     | None = None,
     created_at: str | None = None,
     cooldown_context: dict[str, object] | None = None,
+    quiet_hours_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Serialize a :class:`CRDispatchPlan` to a JSON-serializable dict.
 
@@ -378,4 +382,6 @@ def cr_dispatch_plan_to_json_dict(
     }
     if cooldown_context is not None:
         result["cooldown"] = cooldown_context
+    if quiet_hours_context is not None:
+        result["quiet_hours"] = quiet_hours_context
     return result

@@ -92,38 +92,65 @@ def _extract_selected_candidate(plan: dict) -> dict[str, object]:
     }
 
 
-def _extract_receipt_summary(receipt: dict) -> dict[str, object]:
-    """Extract receipt summary from the first message-level receipt."""
-    receipts = receipt.get("receipts", [])
-    if not receipts:
-        return {
-            "attempted": False,
-            "accepted": False,
-            "status": "unknown",
-            "detail": None,
-            "transport": None,
-            "http_status": None,
-            "sink_ok": None,
-            "exception_type": None,
-            "exception_message": None,
-        }
-    first = receipts[0]
+def _summarize_receipt(receipt: dict) -> dict[str, object]:
+    """Summarize one message-level receipt entry.
+
+    Carries the transport-level fields plus the source / deferral / identity
+    fields that distinguish deferred-flush receipts from current-run receipts.
+    """
     return {
-        "attempted": first.get("attempted", False),
-        "accepted": first.get("accepted", False),
-        "status": first.get("status", "unknown"),
-        "detail": first.get("detail"),
-        "transport": first.get("transport"),
-        "http_status": first.get("http_status"),
-        "sink_ok": first.get("sink_ok"),
-        "exception_type": first.get("exception_type"),
-        "exception_message": first.get("exception_message"),
+        "attempted": receipt.get("attempted", False),
+        "accepted": receipt.get("accepted", False),
+        "status": receipt.get("status", "unknown"),
+        "detail": receipt.get("detail"),
+        "transport": receipt.get("transport"),
+        "http_status": receipt.get("http_status"),
+        "sink_ok": receipt.get("sink_ok"),
+        "exception_type": receipt.get("exception_type"),
+        "exception_message": receipt.get("exception_message"),
+        "source": receipt.get("source"),
+        "deferred_until": receipt.get("deferred_until"),
+        "candidate_id": receipt.get("candidate_id"),
+        "event_key": receipt.get("event_key"),
+        "title": receipt.get("title"),
     }
+
+
+def _empty_receipt_summary() -> dict[str, object]:
+    """Backward-compatible empty receipt summary (no receipts present)."""
+    return {
+        "attempted": False,
+        "accepted": False,
+        "status": "unknown",
+        "detail": None,
+        "transport": None,
+        "http_status": None,
+        "sink_ok": None,
+        "exception_type": None,
+        "exception_message": None,
+        "source": None,
+        "deferred_until": None,
+        "candidate_id": None,
+        "event_key": None,
+        "title": None,
+    }
+
+
+def _is_deferred_flush_receipt(receipt: dict) -> bool:
+    """Identify a receipt produced by flushing the deferred dispatch queue."""
+    if receipt.get("source") == "deferred_queue":
+        return True
+    return receipt.get("detail") == "flushed_deferred"
 
 
 def _extract_cooldown(plan: dict) -> dict[str, object] | None:
     """Extract cooldown context from plan data."""
     return plan.get("cooldown")
+
+
+def _extract_quiet_hours(plan: dict) -> dict[str, object] | None:
+    """Extract quiet-hours context from plan data."""
+    return plan.get("quiet_hours")
 
 
 def _extract_candidate_outcomes(receipt: dict, plan: dict) -> list[dict[str, object]]:
@@ -235,9 +262,35 @@ def read_cr_deploy_trace(
     # Cooldown.
     cr_dispatch["cooldown"] = _extract_cooldown(plan_data)
 
-    # Receipt summary.
+    # Quiet hours.
+    cr_dispatch["quiet_hours"] = _extract_quiet_hours(plan_data)
+
+    # Receipt summary (backward compatible) + multi-receipt visibility.
+    # A post-quiet live run emits deferred-flush receipt(s) followed by the
+    # current-run receipt(s); all are preserved in order so the trace never
+    # hides the current-run outcome behind receipts[0].
     receipt_data = receipt_result.data if has_receipt else {}
-    cr_dispatch["receipt_summary"] = _extract_receipt_summary(receipt_data)
+    raw_receipts = receipt_data.get("receipts", []) if has_receipt else []
+    if not isinstance(raw_receipts, list):
+        raw_receipts = []
+    valid_receipts = [r for r in raw_receipts if isinstance(r, dict)]
+    receipt_summaries = [_summarize_receipt(r) for r in valid_receipts]
+
+    deferred_flush_summaries: list[dict[str, object]] = []
+    current_receipt_summary: dict[str, object] | None = None
+    for receipt, summary in zip(valid_receipts, receipt_summaries):
+        if _is_deferred_flush_receipt(receipt):
+            deferred_flush_summaries.append(summary)
+        else:
+            current_receipt_summary = summary
+
+    cr_dispatch["receipt_summary"] = (
+        receipt_summaries[0] if receipt_summaries else _empty_receipt_summary()
+    )
+    cr_dispatch["receipts_count"] = len(receipt_summaries)
+    cr_dispatch["receipt_summaries"] = receipt_summaries
+    cr_dispatch["deferred_flush_summaries"] = deferred_flush_summaries
+    cr_dispatch["current_receipt_summary"] = current_receipt_summary
 
     # Candidate outcomes.
     cr_dispatch["candidate_outcomes"] = _extract_candidate_outcomes(

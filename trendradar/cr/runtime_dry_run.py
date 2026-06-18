@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
 from trendradar.cr.artifacts import (
@@ -45,14 +46,30 @@ from trendradar.cr.cooldown_policy import CRCooldownPolicy
 from trendradar.cr.dispatch_executor import (
     CRDispatchExecutionResult,
     CRDispatchSink,
+    TRANSPORT_EXCEPTIONS,
     execute_cr_dispatch_plan,
 )
 from trendradar.cr.dispatch_plan import (
+    CRDispatchMessage,
     CRDispatchPlan,
     build_cr_a_dispatch_plan,
     cr_dispatch_plan_to_json_dict,
 )
 from trendradar.cr.dispatch_receipt import build_dispatch_receipts_json
+from trendradar.cr.decision import DECISION_URGENT
+from trendradar.cr.deferred_queue import (
+    CRDeferredDispatchEntry,
+    CRDeferredDispatchQueue,
+    CRDeferredQueueLoadResult,
+    CRDeferredQueueSaveResult,
+    DEFAULT_DEFERRED_QUEUE_PATH,
+    load_deferred_dispatch_queue,
+    ordered_entries_for_flush,
+    remove_deferred_entries,
+    save_deferred_dispatch_queue,
+    stable_deferred_entry_id,
+    upsert_deferred_entry,
+)
 from trendradar.cr.html import CRHTMLRenderConfig
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -67,9 +84,16 @@ from trendradar.cr.pipeline import (
     write_cr_pipeline_artifacts,
 )
 from trendradar.cr.repeat_preview import CRSeenEventState
+from trendradar.cr.quiet_hours import (
+    CRQuietHoursEvaluation,
+    evaluate_cr_quiet_hours,
+    quiet_hours_evaluation_to_plan_dict,
+)
 from trendradar.cr.state_snapshot import (
+    CREventStateEntry,
     CREventStateSnapshot,
     cr_event_state_snapshot_to_seen_states,
+    merge_cr_event_state_entries,
 )
 from trendradar.cr.state_store import (
     CREventStateLoadResult,
@@ -152,6 +176,9 @@ class CRRuntimeDryRunResult:
     cooldown_next_snapshot_save: CREventStateSaveResult | None = None
     cooldown_enforcement: CRCooldownEnforcementResult | None = None
     dispatch_state_save: CREventStateSaveResult | None = None
+    quiet_hours: CRQuietHoursEvaluation | None = None
+    deferred_queue_load: CRDeferredQueueLoadResult | None = None
+    deferred_queue_save: CRDeferredQueueSaveResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +297,289 @@ def _pipeline_result_with_state_transition_preview(
 
 
 # ---------------------------------------------------------------------------
+# Dispatch / queue helpers
+# ---------------------------------------------------------------------------
+
+
+def _plan_for_candidates(
+    pipeline_result: CRPipelineResult,
+    candidates: tuple,
+) -> CRDispatchPlan:
+    from trendradar.cr.presentation import CRPresentationRun, render_cr_a_text
+
+    run = CRPresentationRun(
+        run_label=pipeline_result.run_label,
+        candidates=list(candidates),
+        high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+    )
+    filtered = CRPipelineResult(
+        run_label=pipeline_result.run_label,
+        primitives=pipeline_result.primitives,
+        candidates=pipeline_result.candidates,
+        score_results=pipeline_result.score_results,
+        decisions=pipeline_result.decisions,
+        presented_candidates=pipeline_result.presented_candidates,
+        cr_a_candidates=candidates,
+        cr_a_text=render_cr_a_text(run),
+        markdown_audit_text=pipeline_result.markdown_audit_text,
+        html_audit_text=pipeline_result.html_audit_text,
+        high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+    )
+    return build_cr_a_dispatch_plan(filtered)
+
+
+def _single_candidate_message(
+    pc: object,
+    *,
+    run_label: str,
+    high_score_suppressed_count: int,
+) -> CRDispatchMessage:
+    from trendradar.cr.presentation import CRPresentationRun, render_cr_a_text
+
+    run = CRPresentationRun(
+        run_label=run_label,
+        candidates=[pc],
+        high_score_suppressed_count=high_score_suppressed_count,
+    )
+    level = getattr(pc, "decision_level", None)
+    return CRDispatchMessage(
+        text=render_cr_a_text(run),
+        format="plain_text",
+        candidate_count=1,
+        run_label=run_label,
+        urgent_count=1 if level == DECISION_URGENT else 0,
+        high_score_suppressed_count=high_score_suppressed_count,
+    )
+
+
+def _candidate_payload(pc: object) -> dict[str, object]:
+    return {
+        "candidate_id": getattr(pc, "candidate_id", None),
+        "event_key": getattr(pc, "cluster_key", None),
+        "title": getattr(pc, "display_title", None),
+        "level": getattr(pc, "decision_level", None),
+        "score": getattr(pc, "total_score", None),
+        "representative_url": getattr(pc, "representative_url", None),
+        "trigger_reasons": list(getattr(pc, "trigger_reasons", []) or []),
+        "suppress_labels": list(getattr(pc, "suppress_labels", []) or []),
+    }
+
+
+def _deferred_entry_for_candidate(
+    pc: object,
+    *,
+    deferred_at: str,
+    deferred_until: str,
+    run_label: str,
+    high_score_suppressed_count: int,
+) -> CRDeferredDispatchEntry:
+    event_key = getattr(pc, "cluster_key")
+    message = _single_candidate_message(
+        pc,
+        run_label=run_label,
+        high_score_suppressed_count=high_score_suppressed_count,
+    )
+    return CRDeferredDispatchEntry(
+        entry_id=stable_deferred_entry_id(event_key),
+        event_key=event_key,
+        candidate_id=getattr(pc, "candidate_id"),
+        title=getattr(pc, "display_title"),
+        level=getattr(pc, "decision_level"),
+        score=float(getattr(pc, "total_score")),
+        deferred_at=deferred_at,
+        deferred_until=deferred_until,
+        reason="quiet_hours",
+        message_text=message.text,
+        candidate_payload=_candidate_payload(pc),
+        last_seen_at=deferred_at,
+    )
+
+
+def _accepted_levels_from_seen_states(
+    seen_states: dict[str, CRSeenEventState] | None,
+) -> dict[str, str | None]:
+    if not seen_states:
+        return {}
+    return {key: value.decision_level for key, value in seen_states.items()}
+
+
+def _queue_with_candidates(
+    queue: CRDeferredDispatchQueue,
+    candidates: tuple,
+    *,
+    accepted_levels: Mapping[str, str | None],
+    deferred_at: str,
+    deferred_until: str,
+    run_label: str,
+    high_score_suppressed_count: int,
+) -> CRDeferredDispatchQueue:
+    updated = queue
+    for pc in candidates:
+        entry = _deferred_entry_for_candidate(
+            pc,
+            deferred_at=deferred_at,
+            deferred_until=deferred_until,
+            run_label=run_label,
+            high_score_suppressed_count=high_score_suppressed_count,
+        )
+        updated = upsert_deferred_entry(
+            updated, entry, accepted_levels=accepted_levels
+        )
+    return updated
+
+
+def _deferred_receipts_for_candidates(
+    candidates: tuple,
+    *,
+    deferred_until: str | None,
+) -> list[dict[str, object]]:
+    receipts: list[dict[str, object]] = []
+    for index, pc in enumerate(candidates):
+        receipts.append({
+            "message_index": index,
+            "attempted": False,
+            "accepted": False,
+            "status": "deferred_quiet_hours",
+            "detail": "quiet_hours_active",
+            "transport": None,
+            "http_status": None,
+            "sink_ok": None,
+            "exception_type": None,
+            "exception_message": None,
+            "deferred_until": deferred_until,
+            "event_key": getattr(pc, "cluster_key", None),
+            "candidate_id": getattr(pc, "candidate_id", None),
+        })
+    return receipts
+
+
+def _flush_receipt_entry(
+    *,
+    message_index: int,
+    attempted: bool,
+    accepted: bool,
+    status: str,
+    detail: str,
+    entry: CRDeferredDispatchEntry,
+) -> dict[str, object]:
+    return {
+        "message_index": message_index,
+        "attempted": attempted,
+        "accepted": accepted,
+        "status": status,
+        "detail": detail,
+        "transport": None,
+        "http_status": None,
+        "sink_ok": None,
+        "exception_type": None,
+        "exception_message": None,
+        "source": "deferred_queue",
+        "event_key": entry.event_key,
+        "candidate_id": entry.candidate_id,
+    }
+
+
+def _flush_deferred_queue(
+    queue: CRDeferredDispatchQueue,
+    *,
+    sink: CRDispatchSink | None,
+    run_label: str,
+) -> tuple[list[dict[str, object]], set[str]]:
+    receipts: list[dict[str, object]] = []
+    accepted_event_keys: set[str] = set()
+    for index, entry in enumerate(ordered_entries_for_flush(queue)):
+        if sink is None:
+            receipts.append(
+                _flush_receipt_entry(
+                    message_index=index,
+                    attempted=False,
+                    accepted=False,
+                    status="not_configured",
+                    detail="deferred_flush_not_configured",
+                    entry=entry,
+                )
+            )
+            continue
+        message = CRDispatchMessage(
+            text=entry.message_text,
+            format="plain_text",
+            candidate_count=1,
+            run_label=run_label,
+            urgent_count=1 if entry.level == DECISION_URGENT else 0,
+            high_score_suppressed_count=0,
+        )
+        try:
+            sink_receipt = sink.submit(message, message_index=index)
+        except TRANSPORT_EXCEPTIONS as exc:
+            receipts.append(
+                _flush_receipt_entry(
+                    message_index=index,
+                    attempted=True,
+                    accepted=False,
+                    status="failed_transport",
+                    detail=type(exc).__name__,
+                    entry=entry,
+                )
+            )
+            continue
+        status = sink_receipt.status
+        if status not in {"accepted", "rejected", "failed_transport", "http_error"}:
+            status = "unknown"
+        detail = "flushed_deferred" if sink_receipt.accepted else sink_receipt.detail
+        receipts.append(
+            _flush_receipt_entry(
+                message_index=index,
+                attempted=True,
+                accepted=sink_receipt.accepted,
+                status=status,
+                detail=detail,
+                entry=entry,
+            )
+        )
+        if sink_receipt.accepted:
+            accepted_event_keys.add(entry.event_key)
+    return receipts, accepted_event_keys
+
+
+def _state_entries_for_candidates(
+    candidates: tuple,
+    *,
+    seen_at: str,
+) -> list[CREventStateEntry]:
+    return [
+        CREventStateEntry(
+            event_key=pc.cluster_key,
+            decision_level=pc.decision_level,
+            score=pc.total_score,
+            seen_at=seen_at,
+            title=pc.display_title,
+            candidate_id=pc.candidate_id,
+        )
+        for pc in candidates
+    ]
+
+
+def _state_entries_for_queue(
+    entries: tuple[CRDeferredDispatchEntry, ...],
+    *,
+    accepted_keys: set[str],
+    seen_at: str,
+) -> list[CREventStateEntry]:
+    return [
+        CREventStateEntry(
+            event_key=entry.event_key,
+            decision_level=entry.level,
+            score=entry.score,
+            seen_at=seen_at,
+            title=entry.title,
+            candidate_id=entry.candidate_id,
+        )
+        for entry in entries
+        if entry.event_key in accepted_keys
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Bridge
 # ---------------------------------------------------------------------------
 
@@ -291,6 +601,9 @@ def build_and_write_cr_runtime_dry_run(
     cooldown_prior_snapshot: CREventStateSnapshot | None = None,
     cooldown_prior_snapshot_path: str | Path | None = None,
     cooldown_next_snapshot_path: str | Path | None = None,
+    quiet_hours_env: Mapping[str, str] | None = None,
+    now: datetime | None = None,
+    deferred_queue_path: str | Path | None = None,
 ) -> CRRuntimeDryRunResult:
     """Convert real runtime stats and write CR audit artifacts (dry-run).
 
@@ -514,7 +827,15 @@ def build_and_write_cr_runtime_dry_run(
     # 6. Plan CR-A dispatch (pure — nothing is sent).
     dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
     effective_dispatch_mode = dispatch_mode or "artifact"
-    now = datetime.now(timezone.utc)
+    effective_now = now if now is not None else datetime.now(timezone.utc)
+    if effective_now.tzinfo is None:
+        effective_now = effective_now.replace(tzinfo=timezone.utc)
+    now_iso = effective_now.isoformat()
+    quiet_hours = evaluate_cr_quiet_hours(
+        quiet_hours_env,
+        now=effective_now,
+    )
+    effective_queue_path = deferred_queue_path or DEFAULT_DEFERRED_QUEUE_PATH
 
     # 6a. Load prior dispatch state and enforce cooldown (PR-CR-A4).
     effective_state_path = dispatch_state_path or DEFAULT_DISPATCH_STATE_PATH
@@ -527,17 +848,97 @@ def build_and_write_cr_runtime_dry_run(
             dispatch_state_load.snapshot
         )
 
+    deferred_queue_load: CRDeferredQueueLoadResult | None = None
+    deferred_queue_save: CRDeferredQueueSaveResult | None = None
+    pre_receipts: list[dict[str, object]] = []
+    override_receipts: list[dict[str, object]] | None = None
+    queue_error_reason: str | None = None
+    state_update_entries: list[CREventStateEntry] = []
+
+    # 6b. Live post-quiet flush happens before current-run cooldown checks so
+    #     accepted flushes become prior state for the current run.
+    if (
+        effective_dispatch_mode == "live"
+        and quiet_hours.enabled
+        and quiet_hours.decision != "quiet_hours_config_error"
+        and not quiet_hours.in_quiet_hours
+    ):
+        deferred_queue_load = load_deferred_dispatch_queue(effective_queue_path)
+        if deferred_queue_load.error is not None:
+            queue_error_reason = "skipped_deferred_queue_error"
+            dispatch_plan = CRDispatchPlan(
+                should_dispatch=False,
+                messages=(),
+                reason=queue_error_reason,
+                run_label=dispatch_plan.run_label,
+                candidate_count=dispatch_plan.candidate_count,
+                urgent_count=dispatch_plan.urgent_count,
+                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+            )
+            override_receipts = [{
+                "message_index": 0,
+                "attempted": False,
+                "accepted": False,
+                "status": "skipped_deferred_queue_error",
+                "detail": "deferred_queue_error",
+                "transport": None,
+                "http_status": None,
+                "sink_ok": None,
+                "exception_type": None,
+                "exception_message": None,
+            }]
+        elif deferred_queue_load.queue.entries:
+            queue_before_flush = deferred_queue_load.queue
+            pre_receipts, accepted_flush_keys = _flush_deferred_queue(
+                queue_before_flush,
+                sink=dispatch_sink,
+                run_label=run_label,
+            )
+            if accepted_flush_keys:
+                flushed_entries = ordered_entries_for_flush(queue_before_flush)
+                state_update_entries.extend(
+                    _state_entries_for_queue(
+                        flushed_entries,
+                        accepted_keys=accepted_flush_keys,
+                        seen_at=now_iso,
+                    )
+                )
+                updated_snapshot = merge_cr_event_state_entries(
+                    dispatch_state_load.snapshot,
+                    tuple(state_update_entries),
+                )
+                dispatch_state_load = replace(
+                    dispatch_state_load,
+                    snapshot=updated_snapshot,
+                    loaded=True,
+                    error=None,
+                )
+                seen_states = cr_event_state_snapshot_to_seen_states(
+                    updated_snapshot
+                )
+                deferred_queue_save = save_deferred_dispatch_queue(
+                    remove_deferred_entries(
+                        queue_before_flush, accepted_flush_keys
+                    ),
+                    effective_queue_path,
+                )
+
     cooldown_enforcement: CRCooldownEnforcementResult | None = None
     cooldown_override_reason: str | None = None
     eligible_cr_a_candidates = pipeline_result.cr_a_candidates  # default: all
-    if dispatch_plan.should_dispatch and pipeline_result.cr_a_candidates:
+    if (
+        dispatch_plan.should_dispatch
+        and pipeline_result.cr_a_candidates
+        and queue_error_reason is None
+        and quiet_hours.decision != "quiet_hours_config_error"
+    ):
         cooldown_enforcement = enforce_cr_cooldown_for_candidates(
             cr_a_candidates=pipeline_result.cr_a_candidates,
             seen_states=seen_states,
             prior_snapshot_provided=prior_snapshot_provided,
             state_error=state_load_error,
             policy=cooldown_policy,
-            now=now,
+            now=effective_now,
         )
         # Blocker 5: use per-candidate eligible set.
         eligible_cr_a_candidates = cooldown_enforcement.eligible_candidates
@@ -553,35 +954,160 @@ def build_and_write_cr_runtime_dry_run(
                 high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
             )
         elif eligible_cr_a_candidates != pipeline_result.cr_a_candidates:
-            # Some candidates filtered out — rebuild plan with eligible only.
-            # Regenerate cr_a_text from filtered candidates.
-            from trendradar.cr.pipeline import CRPipelineResult
-            from trendradar.cr.presentation import (
-                CRPresentationRun,
-                render_cr_a_text,
+            dispatch_plan = _plan_for_candidates(
+                pipeline_result, eligible_cr_a_candidates
             )
-            eligible_run = CRPresentationRun(
-                run_label=pipeline_result.run_label,
-                candidates=list(eligible_cr_a_candidates),
-                high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
-            )
-            filtered_cr_a_text = render_cr_a_text(eligible_run)
-            filtered_pipeline = CRPipelineResult(
-                run_label=pipeline_result.run_label,
-                primitives=pipeline_result.primitives,
-                candidates=pipeline_result.candidates,
-                score_results=pipeline_result.score_results,
-                decisions=pipeline_result.decisions,
-                presented_candidates=pipeline_result.presented_candidates,
-                cr_a_candidates=eligible_cr_a_candidates,
-                cr_a_text=filtered_cr_a_text,
-                markdown_audit_text=pipeline_result.markdown_audit_text,
-                html_audit_text=pipeline_result.html_audit_text,
-                high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
-            )
-            dispatch_plan = build_cr_a_dispatch_plan(filtered_pipeline)
 
-    # 6b. Build cooldown context for plan JSON (per-candidate entries).
+    # 6c. Apply quiet-hours live policy after cooldown eligibility.
+    quiet_bypass_applied = False
+    quiet_deferred_candidates: tuple = ()
+    quiet_receipts: list[dict[str, object]] = []
+    dispatch_execution = None
+    execution_state_candidates: tuple = ()
+
+    if quiet_hours.decision == "quiet_hours_config_error":
+        dispatch_plan = CRDispatchPlan(
+            should_dispatch=False,
+            messages=(),
+            reason="quiet_hours_config_error",
+            run_label=dispatch_plan.run_label,
+            candidate_count=dispatch_plan.candidate_count,
+            urgent_count=dispatch_plan.urgent_count,
+            high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+        )
+        override_receipts = [{
+            "message_index": 0,
+            "attempted": False,
+            "accepted": False,
+            "status": "quiet_hours_config_error",
+            "detail": "quiet_hours_config_error",
+            "transport": None,
+            "http_status": None,
+            "sink_ok": None,
+            "exception_type": None,
+            "exception_message": None,
+        }]
+    elif (
+        effective_dispatch_mode == "live"
+        and quiet_hours.enabled
+        and quiet_hours.in_quiet_hours
+        and queue_error_reason is None
+        and cooldown_override_reason is None
+        and dispatch_plan.should_dispatch
+        and eligible_cr_a_candidates
+    ):
+        deferred_queue_load = load_deferred_dispatch_queue(effective_queue_path)
+        if deferred_queue_load.error is not None:
+            queue_error_reason = "skipped_deferred_queue_error"
+            dispatch_plan = CRDispatchPlan(
+                should_dispatch=False,
+                messages=(),
+                reason=queue_error_reason,
+                run_label=dispatch_plan.run_label,
+                candidate_count=dispatch_plan.candidate_count,
+                urgent_count=dispatch_plan.urgent_count,
+                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+            )
+            override_receipts = [{
+                "message_index": 0,
+                "attempted": False,
+                "accepted": False,
+                "status": "skipped_deferred_queue_error",
+                "detail": "deferred_queue_error",
+                "transport": None,
+                "http_status": None,
+                "sink_ok": None,
+                "exception_type": None,
+                "exception_message": None,
+            }]
+        else:
+            bypass_candidates = tuple(
+                pc for pc in eligible_cr_a_candidates
+                if pc.decision_level == DECISION_URGENT
+                and quiet_hours.allow_urgent_bypass
+            )
+            quiet_deferred_candidates = tuple(
+                pc for pc in eligible_cr_a_candidates
+                if pc not in bypass_candidates
+            )
+            if bypass_candidates:
+                dispatch_plan = _plan_for_candidates(
+                    pipeline_result, bypass_candidates
+                )
+                quiet_bypass_applied = True
+                execution_state_candidates = bypass_candidates
+                if dispatch_sink is not None:
+                    dispatch_execution = execute_cr_dispatch_plan(
+                        dispatch_plan, sink=dispatch_sink
+                    )
+                accepted_bypass = (
+                    dispatch_execution is not None
+                    and dispatch_execution.accepted_count > 0
+                    and dispatch_execution.receipts
+                    and dispatch_execution.receipts[0].accepted
+                )
+                if accepted_bypass:
+                    state_update_entries.extend(
+                        _state_entries_for_candidates(
+                            bypass_candidates, seen_at=now_iso
+                        )
+                    )
+                    stale_keys = {pc.cluster_key for pc in bypass_candidates}
+                    base_queue = deferred_queue_load.queue
+                    updated_queue = remove_deferred_entries(
+                        base_queue, stale_keys
+                    )
+                    if updated_queue.entries != base_queue.entries:
+                        deferred_queue_save = save_deferred_dispatch_queue(
+                            updated_queue,
+                            effective_queue_path,
+                        )
+                else:
+                    quiet_deferred_candidates = (
+                        quiet_deferred_candidates + bypass_candidates
+                    )
+            else:
+                dispatch_plan = CRDispatchPlan(
+                    should_dispatch=False,
+                    messages=(),
+                    reason="deferred_quiet_hours",
+                    run_label=dispatch_plan.run_label,
+                    candidate_count=dispatch_plan.candidate_count,
+                    urgent_count=dispatch_plan.urgent_count,
+                    high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+                )
+
+            if quiet_deferred_candidates:
+                deferred_until = (
+                    quiet_hours.deferred_until.isoformat()
+                    if quiet_hours.deferred_until is not None
+                    else now_iso
+                )
+                updated_queue = _queue_with_candidates(
+                    deferred_queue_load.queue,
+                    quiet_deferred_candidates,
+                    accepted_levels=_accepted_levels_from_seen_states(seen_states),
+                    deferred_at=now_iso,
+                    deferred_until=deferred_until,
+                    run_label=run_label,
+                    high_score_suppressed_count=(
+                        pipeline_result.high_score_suppressed_count
+                    ),
+                )
+                if updated_queue.entries != deferred_queue_load.queue.entries:
+                    deferred_queue_save = save_deferred_dispatch_queue(
+                        updated_queue, effective_queue_path
+                    )
+                    quiet_receipts = _deferred_receipts_for_candidates(
+                        quiet_deferred_candidates,
+                        deferred_until=deferred_until,
+                    )
+                    if not bypass_candidates:
+                        override_receipts = quiet_receipts
+                    else:
+                        pre_receipts.extend(quiet_receipts)
+
+    # 6d. Build cooldown context for plan JSON (per-candidate entries).
     cooldown_context: dict[str, object] | None = None
     if cooldown_enforcement is not None and cooldown_enforcement.entries:
         eligible_keys = {pc.cluster_key for pc in eligible_cr_a_candidates}
@@ -613,14 +1139,60 @@ def build_and_write_cr_runtime_dry_run(
             "entries": entries_list,
         }
 
-    # 6c. Write dispatch plan JSON (PR-CR-A2 + PR-CR-A4 cooldown context).
+    # 6e. Build quiet-hours context for plan JSON.
+    quiet_entries: list[dict[str, object]] = []
+    for pc in eligible_cr_a_candidates:
+        is_deferred = pc in quiet_deferred_candidates
+        allowed = (
+            pc.decision_level == DECISION_URGENT
+            and quiet_hours.allow_urgent_bypass
+            and quiet_hours.in_quiet_hours
+        )
+        quiet_entries.append({
+            "candidate_id": pc.candidate_id,
+            "event_key": pc.cluster_key,
+            "level": pc.decision_level,
+            "title": pc.display_title,
+            "allowed_by_urgent_bypass": allowed,
+            "deferred": is_deferred,
+            "deferred_until": (
+                quiet_hours.deferred_until.isoformat()
+                if is_deferred and quiet_hours.deferred_until is not None
+                else None
+            ),
+        })
+    quiet_decision = None
+    quiet_reason = None
+    if quiet_hours.decision == "quiet_hours_config_error":
+        quiet_decision = "quiet_hours_config_error"
+        quiet_reason = "quiet_hours_config_error"
+    elif queue_error_reason is not None:
+        quiet_decision = "skipped_deferred_queue_error"
+        quiet_reason = "deferred_queue_error"
+    elif quiet_receipts:
+        quiet_decision = "deferred_quiet_hours"
+        quiet_reason = "quiet_hours_active"
+    elif quiet_bypass_applied:
+        quiet_decision = "urgent_bypass"
+        quiet_reason = "urgent_bypass_allowed"
+    quiet_hours_context = quiet_hours_evaluation_to_plan_dict(
+        quiet_hours,
+        decision=quiet_decision,
+        reason=quiet_reason,
+        bypass_applied=quiet_bypass_applied,
+        deferred_count=len(quiet_deferred_candidates),
+        entries=quiet_entries,
+    )
+
+    # 6f. Write dispatch plan JSON (PR-CR-A2 + contexts).
     dispatch_plan_json_dict = cr_dispatch_plan_to_json_dict(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         presented_candidates=pipeline_result.presented_candidates,
         cr_a_candidates=eligible_cr_a_candidates,
-        created_at=now.isoformat(),
+        created_at=now_iso,
         cooldown_context=cooldown_context,
+        quiet_hours_context=quiet_hours_context,
     )
     dispatch_plan_json_paths = write_dispatch_plan_json(
         dispatch_plan_json_dict,
@@ -628,11 +1200,24 @@ def build_and_write_cr_runtime_dry_run(
         config=artifact_config,
     )
 
-    # 7. Optionally execute against an injected local sink (no real delivery).
-    # Blocker 3: only execute sink in live mode when not cooldown-overridden.
-    dispatch_execution = None
-    if dispatch_sink is not None and effective_dispatch_mode == "live":
-        if cooldown_override_reason is None:
+    # 7. Optionally execute current-run plan when it has not already been
+    #    executed by urgent quiet-hours bypass handling.
+    if (
+        dispatch_execution is None
+        and dispatch_sink is not None
+        and effective_dispatch_mode == "live"
+    ):
+        if (
+            cooldown_override_reason is None
+            and queue_error_reason is None
+            and quiet_hours.decision != "quiet_hours_config_error"
+            and not (
+                quiet_hours.enabled
+                and quiet_hours.in_quiet_hours
+                and override_receipts is not None
+            )
+        ):
+            execution_state_candidates = eligible_cr_a_candidates
             dispatch_execution = execute_cr_dispatch_plan(
                 dispatch_plan, sink=dispatch_sink
             )
@@ -643,9 +1228,11 @@ def build_and_write_cr_runtime_dry_run(
         dispatch_plan,
         dispatch_mode=effective_dispatch_mode,
         execution=dispatch_execution,
-        created_at=now.isoformat(),
+        created_at=now_iso,
         cooldown_override_reason=cooldown_override_reason,
         cooldown_entries=cooldown_entries_for_receipt,
+        pre_receipts=pre_receipts or None,
+        override_receipts=override_receipts,
     )
     dispatch_receipt_json_paths = write_dispatch_receipts_json(
         dispatch_receipt_json_dict,
@@ -653,40 +1240,47 @@ def build_and_write_cr_runtime_dry_run(
         config=artifact_config,
     )
 
-    # 7c. Update dispatch state on live+accepted (PR-CR-A4).
-    # Blocker 4: update all eligible CR-A candidates, not just first.
+    # 7c. Update dispatch state on live+accepted only.
     dispatch_state_save: CREventStateSaveResult | None = None
     if (
         effective_dispatch_mode == "live"
         and cooldown_override_reason is None
+        and queue_error_reason is None
+        and quiet_hours.decision != "quiet_hours_config_error"
         and dispatch_execution is not None
         and dispatch_execution.accepted_count > 0
         and dispatch_execution.receipts
         and dispatch_execution.receipts[0].accepted
     ):
-        from trendradar.cr.state_snapshot import (
-            CREventStateEntry,
-            merge_cr_event_state_entries,
+        existing_update_keys = {
+            entry.event_key for entry in state_update_entries
+        }
+        execution_candidates_to_update = tuple(
+            pc for pc in execution_state_candidates
+            if pc.cluster_key not in existing_update_keys
         )
-        # Blocker 2: use pc.cluster_key as canonical event key.
-        update_entries: list[CREventStateEntry] = []
-        for pc in eligible_cr_a_candidates:
-            update_entries.append(CREventStateEntry(
-                event_key=pc.cluster_key,
-                decision_level=pc.decision_level,
-                score=pc.total_score,
-                seen_at=now.isoformat(),
-                title=pc.display_title,
-                candidate_id=pc.candidate_id,
-            ))
-        if update_entries:
+        if execution_candidates_to_update:
+            state_update_entries.extend(
+                _state_entries_for_candidates(
+                    execution_candidates_to_update, seen_at=now_iso
+                )
+            )
+        if state_update_entries:
             updated_snapshot = merge_cr_event_state_entries(
                 dispatch_state_load.snapshot,
-                tuple(update_entries),
+                tuple(state_update_entries),
             )
             dispatch_state_save = save_cr_event_state_snapshot(
                 updated_snapshot, effective_state_path
             )
+    elif state_update_entries and effective_dispatch_mode == "live":
+        updated_snapshot = merge_cr_event_state_entries(
+            dispatch_state_load.snapshot,
+            tuple(state_update_entries),
+        )
+        dispatch_state_save = save_cr_event_state_snapshot(
+            updated_snapshot, effective_state_path
+        )
 
     # 8. Return.
     return CRRuntimeDryRunResult(
@@ -703,4 +1297,7 @@ def build_and_write_cr_runtime_dry_run(
         cooldown_next_snapshot_save=cooldown_next_snapshot_save,
         cooldown_enforcement=cooldown_enforcement,
         dispatch_state_save=dispatch_state_save,
+        quiet_hours=quiet_hours,
+        deferred_queue_load=deferred_queue_load,
+        deferred_queue_save=deferred_queue_save,
     )
