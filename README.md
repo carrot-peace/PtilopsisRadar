@@ -3,7 +3,7 @@
 Information Environment Anomaly Monitoring & Public Opinion Radar Tool
 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v6.9.0-blue.svg)](https://github.com/carrot-peace/PtilopsisRadar)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/carrot-peace/PtilopsisRadar)
 
 **English** | **[中文](README-CN.md)**
 

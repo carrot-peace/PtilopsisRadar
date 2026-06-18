@@ -1,7 +1,7 @@
 [project]
 name = "trendradar"
-version = "6.9.0"
-description = "TrendRadar - 热点新闻聚合与分析工具"
+version = "0.1.0"
+description = "PtilopsisRadar - 信息环境异常监测与舆情雷达工具"
 requires-python = ">=3.12"
 dependencies = [
     "requests==2.33.0",
