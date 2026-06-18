@@ -631,5 +631,176 @@ class TestNoSendBoundary(unittest.TestCase):
             self.assertNotIn(token, source, f"forbidden token {token!r} present")
 
 
+# ---------------------------------------------------------------------------
+# Test Group N — Multi-receipt visibility (post-quiet flush + current run)
+# ---------------------------------------------------------------------------
+
+
+def _write_multi_receipt(path: Path) -> None:
+    """Write a receipt file with two deferred-flush receipts + one current."""
+    receipt = {
+        "schema_version": "cr-dispatch-receipts-v1",
+        "run_id": "test-run-multi",
+        "created_at": "2026-06-18T08:01:00+00:00",
+        "dispatch_mode": "live",
+        "plan_decision": "dispatch",
+        "plan_should_dispatch": True,
+        "receipts": [
+            {
+                "message_index": 0,
+                "attempted": True,
+                "accepted": True,
+                "status": "accepted",
+                "detail": "flushed_deferred",
+                "transport": None,
+                "http_status": None,
+                "sink_ok": None,
+                "exception_type": None,
+                "exception_message": None,
+                "source": "deferred_queue",
+                "event_key": "ev-B",
+                "candidate_id": "c-B",
+                "title": "Urgent B",
+            },
+            {
+                "message_index": 1,
+                "attempted": True,
+                "accepted": False,
+                "status": "failed_transport",
+                "detail": "TimeoutError",
+                "transport": "telegram",
+                "http_status": None,
+                "sink_ok": False,
+                "exception_type": "TimeoutError",
+                "exception_message": "timed out",
+                "source": "deferred_queue",
+                "event_key": "ev-A",
+                "candidate_id": "c-A",
+                "title": "Alert A",
+            },
+            {
+                "message_index": 0,
+                "attempted": True,
+                "accepted": True,
+                "status": "accepted",
+                "detail": "telegram_ok",
+                "transport": "telegram",
+                "http_status": 200,
+                "sink_ok": True,
+                "exception_type": None,
+                "exception_message": None,
+                "event_key": "ev-C",
+                "candidate_id": "c-C",
+                "title": "Current C",
+            },
+        ],
+        "candidate_outcomes": [],
+    }
+    path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+class TestMultiReceiptVisibility(unittest.TestCase):
+    def test_multi_receipt_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_multi_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            # Count and order preserved.
+            self.assertEqual(cr["receipts_count"], 3)
+            self.assertEqual(len(cr["receipt_summaries"]), 3)
+            self.assertEqual(
+                [s["event_key"] for s in cr["receipt_summaries"]],
+                ["ev-B", "ev-A", "ev-C"],
+            )
+
+            # Deferred flush receipts isolated.
+            self.assertEqual(len(cr["deferred_flush_summaries"]), 2)
+            self.assertEqual(
+                [s["event_key"] for s in cr["deferred_flush_summaries"]],
+                ["ev-B", "ev-A"],
+            )
+            for s in cr["deferred_flush_summaries"]:
+                self.assertEqual(s["source"], "deferred_queue")
+
+            # Current-run receipt is the last non-deferred entry.
+            self.assertIsNotNone(cr["current_receipt_summary"])
+            self.assertEqual(cr["current_receipt_summary"]["event_key"], "ev-C")
+            self.assertEqual(cr["current_receipt_summary"]["candidate_id"], "c-C")
+            self.assertEqual(cr["current_receipt_summary"]["title"], "Current C")
+            self.assertTrue(cr["current_receipt_summary"]["accepted"])
+
+    def test_receipt_summary_backward_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_multi_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+            summary = cr["receipt_summary"]
+
+            # receipt_summary still identifies receipt 0 (the first flush entry).
+            self.assertEqual(summary["event_key"], "ev-B")
+            self.assertTrue(summary["accepted"])
+            self.assertEqual(summary["status"], "accepted")
+            self.assertEqual(summary["detail"], "flushed_deferred")
+            self.assertEqual(summary, cr["receipt_summaries"][0])
+            # Legacy transport fields still present.
+            for key in (
+                "attempted", "accepted", "status", "detail", "transport",
+                "http_status", "sink_ok", "exception_type", "exception_message",
+            ):
+                self.assertIn(key, summary)
+
+    def test_all_deferred_flush_has_no_current(self):
+        """When every receipt is a deferred flush, current_receipt_summary is None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path, receipts=[
+                {
+                    "message_index": 0,
+                    "attempted": True, "accepted": True,
+                    "status": "accepted", "detail": "flushed_deferred",
+                    "transport": None, "http_status": None, "sink_ok": None,
+                    "exception_type": None, "exception_message": None,
+                    "source": "deferred_queue", "event_key": "ev-B",
+                    "candidate_id": "c-B", "title": "Urgent B",
+                },
+            ])
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertEqual(cr["receipts_count"], 1)
+            self.assertEqual(len(cr["deferred_flush_summaries"]), 1)
+            self.assertIsNone(cr["current_receipt_summary"])
+
+    def test_no_receipts_empty_multi_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path, receipts=[])
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            self.assertEqual(cr["receipts_count"], 0)
+            self.assertEqual(cr["receipt_summaries"], [])
+            self.assertEqual(cr["deferred_flush_summaries"], [])
+            self.assertIsNone(cr["current_receipt_summary"])
+            # Backward-compatible empty summary still present.
+            self.assertFalse(cr["receipt_summary"]["accepted"])
+            self.assertEqual(cr["receipt_summary"]["status"], "unknown")
+
+
 if __name__ == "__main__":
     unittest.main()
