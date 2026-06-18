@@ -194,6 +194,40 @@ cp config/config.yaml config/config.yaml.bak
 uv run python -m trendradar
 ```
 
+### Apple Container Deployment (macOS, Recommended)
+
+Requires macOS 26+ with [Apple container](https://github.com/apple/container) v1.0.0+.
+
+```bash
+# Build image
+container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+
+# Prepare .env
+cp docker/.env.example docker/.env
+# Edit docker/.env to configure environment variables
+
+# Run with cron + web server
+container run -d \
+  --name trendradar \
+  --cpus 2 --memory 1g \
+  --env-file ./docker/.env \
+  --env TZ=Asia/Shanghai \
+  --mount source=$(pwd)/config,target=/app/config,readonly \
+  --volume $(pwd)/output:/app/output \
+  -p 127.0.0.1:8080:8080 \
+  ptilopsis-radar:latest
+```
+
+For persistent operation, a LaunchAgent supervisor is provided:
+
+```bash
+# Load the supervisor (auto-restarts on crash)
+mkdir -p ~/Library/Logs/PtilopsisRadar
+launchctl bootstrap gui/$(id -u) scripts/apple-container/com.carrot-peace.ptilopsis-radar.plist
+```
+
+See [`docs/deployment/apple-container-cutover.md`](docs/deployment/apple-container-cutover.md) for full migration notes and [`docs/deployment/apple-container-rebuild-guide.md`](docs/deployment/apple-container-rebuild-guide.md) for update procedures.
+
 ### Docker Deployment
 
 ```bash
@@ -305,6 +339,16 @@ trendradar/
 mcp_server/              # MCP Server (FastMCP 2.0)
 ├── server.py            #   MCP tool server entry point
 └── tools/               #   Data query, analytics, search MCP tools
+
+scripts/
+└── apple-container/     # Apple container deployment
+    └── trendradar-supervisor.zsh  #   LaunchAgent supervisor script
+
+docker/
+├── Dockerfile           #   Multi-stage build (uv + supercronic)
+├── docker-compose.yml   #   Docker Compose (legacy)
+├── manage.py            #   Container management CLI
+└── entrypoint.sh        #   Container entrypoint
 ```
 
 ---
