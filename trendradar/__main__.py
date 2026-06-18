@@ -29,7 +29,28 @@ from trendradar.ai import AIAnalyzer, AIAnalysisResult
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.core.cdn import fetch_with_fallback
 from trendradar.telegram_bot.access import build_telegram_access_config
-from trendradar.versioning import compare_version_tuple, parse_version_tuple
+try:
+    from trendradar.versioning import compare_version_tuple, parse_version_tuple
+except ModuleNotFoundError:
+    def parse_version_tuple(version_str: str) -> Tuple[int, int, int]:
+        if not isinstance(version_str, str):
+            return 0, 0, 0
+        match = re.match(
+            r"^\s*v?(\d+)\.(\d+)\.(\d+)(?:[-+][A-Za-z0-9.-]+)?\s*$",
+            version_str,
+        )
+        if not match:
+            return 0, 0, 0
+        return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+    def compare_version_tuple(local: str, remote: str) -> int:
+        local_tuple = parse_version_tuple(local)
+        remote_tuple = parse_version_tuple(remote)
+        if local_tuple < remote_tuple:
+            return -1
+        if local_tuple > remote_tuple:
+            return 1
+        return 0
 
 
 LEGACY_NOTIFICATION_CONFIGS = [
@@ -821,6 +842,13 @@ class NewsAnalyzer:
                     rss_items=rss_items,
                 )
 
+        dr_dispatch_hook = getattr(self, "_run_dr_dispatch_hook", None)
+        if mode == "daily" and html_file and callable(dr_dispatch_hook):
+            try:
+                dr_dispatch_hook(ai_result=ai_result, html_file=html_file)
+            except Exception as _dr_exc:
+                print(f"[DR] dispatch hook error (non-fatal): {_dr_exc}")
+
         # CR-A dispatch hook (PR-CR-A1).
         # Gated by PTILOPSIS_CR_DISPATCH_MODE (explicit) or
         # PTILOPSIS_CR_DRY_RUN=1 (compatibility alias → artifact).
@@ -897,6 +925,87 @@ class NewsAnalyzer:
                     print(f"[lifecycle] janitor error: {_lc_exc}")
 
         return stats, html_file, ai_result, rss_items
+
+    def _run_dr_dispatch_hook(
+        self,
+        *,
+        ai_result: Optional[AIAnalysisResult],
+        html_file: str,
+    ) -> None:
+        """Run the explicit DR dispatch hook after daily artifact generation."""
+        from trendradar.dr.dispatch_mode import (
+            DR_DISPATCH_ARTIFACT,
+            DR_DISPATCH_LIVE,
+            DR_DISPATCH_OFF,
+            resolve_dr_dispatch_mode,
+        )
+
+        dispatch_mode = resolve_dr_dispatch_mode(os.environ)
+        if dispatch_mode == DR_DISPATCH_OFF:
+            return
+
+        from trendradar.dr.artifacts import write_dr_dispatch_artifacts
+        from trendradar.dr.dispatch_executor import (
+            DRDispatchExecutionResult,
+            dr_dispatch_receipts_to_json_dict,
+            execute_dr_dispatch_plan,
+        )
+        from trendradar.dr.dispatch_plan import (
+            build_dr_dispatch_plan,
+            dr_dispatch_plan_to_json_dict,
+        )
+        from trendradar.dr.formatter import render_dr_telegram_text
+
+        now = self.ctx.get_time()
+        date_str = self.ctx.format_date()
+        run_label = f"dr-{now:%Y%m%d-%H%M%S}"
+        public_html_path = Path("output/public/daily/full.html")
+        text = render_dr_telegram_text(ai_result, date=date_str, now=now)
+        _attach_raw = os.environ.get("PTILOPSIS_DR_TELEGRAM_ATTACH_HTML")
+        attach_html = True if _attach_raw is None else (
+            _attach_raw.strip().lower() not in {"0", "false", "no", "off"}
+        )
+        plan = build_dr_dispatch_plan(
+            text=text,
+            html_path=public_html_path if public_html_path.exists() else html_file,
+            run_label=run_label,
+            date=date_str,
+            attach_html=attach_html,
+        )
+
+        execution: DRDispatchExecutionResult | None = None
+        if dispatch_mode == DR_DISPATCH_ARTIFACT:
+            print("[DR] dispatch artifact mode: plan/receipt only")
+        elif dispatch_mode == DR_DISPATCH_LIVE:
+            from trendradar.dr.telegram_env import build_dr_telegram_sink_from_env
+
+            sink = None
+            try:
+                sink = build_dr_telegram_sink_from_env(os.environ)
+            except ValueError as exc:
+                print(f"[DR] live Telegram sink not configured: {exc}")
+            execution = execute_dr_dispatch_plan(plan, sink=sink)
+            print(
+                f"[DR] dispatch live result: {execution.reason}, "
+                f"accepted={execution.accepted_count}"
+            )
+
+        created_at = now.isoformat()
+        plan_json = dr_dispatch_plan_to_json_dict(
+            plan, dispatch_mode=dispatch_mode, created_at=created_at
+        )
+        receipt_json = dr_dispatch_receipts_to_json_dict(
+            plan=plan,
+            dispatch_mode=dispatch_mode,
+            execution=execution,
+            created_at=created_at,
+        )
+        paths = write_dr_dispatch_artifacts(
+            plan_json=plan_json,
+            receipt_json=receipt_json,
+            run_label=run_label,
+        )
+        print(f"[DR] dispatch artifacts written: {paths.latest_plan_path}")
 
     def _initialize_and_check_config(self) -> bool:
         """通用初始化和配置检查。返回 True 表示可以继续执行。"""

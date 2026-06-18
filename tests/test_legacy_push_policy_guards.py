@@ -153,7 +153,7 @@ class TestCRTelegramGateSourceGuards(unittest.TestCase):
         offenders: list[str] = []
         for path in _python_sources(PROJECT_ROOT / "trendradar"):
             rel = path.relative_to(PROJECT_ROOT).as_posix()
-            if rel.startswith("trendradar/cr/"):
+            if rel.startswith("trendradar/cr/") or rel.startswith("trendradar/dr/"):
                 continue
             if "PTILOPSIS_CR_TELEGRAM_SEND" in _read(path):
                 offenders.append(rel)
@@ -280,7 +280,7 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
         offenders: list[str] = []
         for path in _python_sources(PROJECT_ROOT / "trendradar"):
             rel = path.relative_to(PROJECT_ROOT).as_posix()
-            if rel.startswith("trendradar/cr/"):
+            if rel.startswith("trendradar/cr/") or rel.startswith("trendradar/dr/"):
                 continue
             source = _read(path)
             for token in ("sendMessage", "sendDocument", "本轮 Telegram 文本简报暂不可用"):
