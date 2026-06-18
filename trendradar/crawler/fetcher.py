@@ -37,7 +37,7 @@ class DataFetcher:
         self,
         proxy_url: Optional[str] = None,
         api_url: Optional[str] = None,
-        max_retries: int = 2,
+        max_retries: int = 4,
     ):
         """
         初始化数据获取器
@@ -89,7 +89,7 @@ class DataFetcher:
     def fetch_data(
         self,
         id_info: Union[str, Tuple[str, str]],
-        max_retries: int = 2,
+        max_retries: int = 4,
         min_retry_wait: int = 3,
         max_retry_wait: int = 5,
     ) -> Tuple[Optional[str], str, str]:
