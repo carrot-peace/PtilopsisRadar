@@ -180,8 +180,62 @@ class TestMissingArtifacts(unittest.TestCase):
             )
 
             self.assertTrue(result.latest_path.exists())
+            self.assertTrue(result.archive_path.exists())
             self.assertEqual(result.cr_dispatch["decision_source"], "missing_artifacts")
             self.assertEqual(result.cr_dispatch["confidence"], "low")
+
+
+# ---------------------------------------------------------------------------
+# Test Group B2 — Plan-only / receipt-only writer
+# ---------------------------------------------------------------------------
+
+
+class TestWriterPartialArtifacts(unittest.TestCase):
+    def test_plan_only_writer(self):
+        """Only plan exists → writer produces authoritative_plan_only."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cr_dir = Path(tmp) / "cr" / "latest"
+            cr_dir.mkdir(parents=True)
+            plan_path = cr_dir / "dispatch_plan.json"
+            _write_plan(plan_path)
+            # receipt does not exist
+
+            trace_dir = Path(tmp) / "trace"
+            config = DeployTraceConfig(root_dir=trace_dir)
+            result = write_deploy_trace(
+                run_label="plan-only",
+                plan_path=plan_path,
+                receipt_path=Path(tmp) / "nonexistent_receipt.json",
+                config=config,
+            )
+
+            self.assertTrue(result.latest_path.exists())
+            self.assertTrue(result.archive_path.exists())
+            self.assertEqual(result.cr_dispatch["decision_source"], "authoritative_plan_only")
+            self.assertEqual(result.cr_dispatch["confidence"], "medium")
+
+    def test_receipt_only_writer(self):
+        """Only receipt exists → writer produces authoritative_receipt_only."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cr_dir = Path(tmp) / "cr" / "latest"
+            cr_dir.mkdir(parents=True)
+            receipt_path = cr_dir / "dispatch_receipts.json"
+            _write_receipt(receipt_path)
+            # plan does not exist
+
+            trace_dir = Path(tmp) / "trace"
+            config = DeployTraceConfig(root_dir=trace_dir)
+            result = write_deploy_trace(
+                run_label="receipt-only",
+                plan_path=Path(tmp) / "nonexistent_plan.json",
+                receipt_path=receipt_path,
+                config=config,
+            )
+
+            self.assertTrue(result.latest_path.exists())
+            self.assertTrue(result.archive_path.exists())
+            self.assertEqual(result.cr_dispatch["decision_source"], "authoritative_receipt_only")
+            self.assertEqual(result.cr_dispatch["confidence"], "medium")
 
 
 # ---------------------------------------------------------------------------
