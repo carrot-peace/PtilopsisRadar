@@ -863,14 +863,23 @@ class NewsAnalyzer:
                     print(f"[CR-A] live Telegram sink not configured: {exc}")
                     _dispatch_sink = None
 
+            _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
             build_and_write_cr_runtime_dry_run(
                 hotlist_stats=stats,
                 rss_stats=rss_items,
-                run_label=f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}",
+                run_label=_run_label,
                 run_context=CRRunContext(mode=mode),
                 dispatch_sink=_dispatch_sink,
                 dispatch_mode=_cr_mode,
             )
+
+            # Write deploy trace observation (read-only, no CR mutation).
+            from trendradar.cr.deploy_trace_writer import write_deploy_trace
+
+            try:
+                write_deploy_trace(run_label=_run_label)
+            except Exception:
+                pass
 
         return stats, html_file, ai_result, rss_items
 
