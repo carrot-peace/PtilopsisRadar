@@ -1,6 +1,7 @@
 # Runtime output
 output/
 logs/
+backups/
 
 # Databases (runtime-generated .db / .sqlite files)
 *.db

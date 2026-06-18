@@ -16,14 +16,14 @@ import requests
 logger = logging.getLogger(__name__)
 
 _GITHUB_RAW_PATTERN = re.compile(
-    r"^https://raw\.githubusercontent\.com/sansan0/TrendRadar/(?:refs/heads/)?master/(.+)$"
+    r"^https://raw\.githubusercontent\.com/carrot-peace/PtilopsisRadar/(?:refs/heads/)?master/(.+)$"
 )
 
 _ALL_SOURCES = [
-    "https://raw.githubusercontent.com/sansan0/TrendRadar/refs/heads/master/",
-    "https://fastly.jsdelivr.net/gh/sansan0/TrendRadar@master/",
-    "https://cdn.jsdelivr.net/gh/sansan0/TrendRadar@master/",
-    "https://gcore.jsdelivr.net/gh/sansan0/TrendRadar@master/",
+    "https://raw.githubusercontent.com/carrot-peace/PtilopsisRadar/refs/heads/master/",
+    "https://fastly.jsdelivr.net/gh/carrot-peace/PtilopsisRadar@master/",
+    "https://cdn.jsdelivr.net/gh/carrot-peace/PtilopsisRadar@master/",
+    "https://gcore.jsdelivr.net/gh/carrot-peace/PtilopsisRadar@master/",
 ]
 
 _SOURCE_LABELS = {
