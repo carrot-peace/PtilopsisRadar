@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from trendradar.cr.cooldown_policy import DEFAULT_CR_COOLDOWN_POLICY
 from trendradar.cr.event_lifecycle import PHASE_ACTIVE, PHASE_EVICTABLE
@@ -364,7 +365,7 @@ class TestPostRunTrigger(unittest.TestCase):
     def test_trigger_loads_lifecycle_module(self) -> None:
         source = self._main_source()
         self.assertIn("cr_a_lifecycle.py", source)
-        self.assertIn("run_lifecycle", source)
+        self.assertIn(".main([", source)
 
     def test_trigger_is_fail_closed(self) -> None:
         source = self._main_source()
@@ -385,6 +386,46 @@ class TestPostRunTrigger(unittest.TestCase):
         spec.loader.exec_module(mod)
         self.assertTrue(hasattr(mod, "run_lifecycle"))
         self.assertTrue(hasattr(mod, "CRLifecycleRunResult"))
+
+    def test_trigger_import_style_runs_main_with_env_enabled(self) -> None:
+        """Mirror __main__.py trigger loading and verify env-gated execution."""
+        import importlib.util as _ilu
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            report = Path(tmp) / "report.json"
+            entry = CREventStateEntry(
+                event_key="ek-trigger", decision_level="alert",
+                seen_at=_iso(_NOW - timedelta(hours=1)),
+            )
+            _write_snapshot(state, _make_snapshot(entry))
+
+            lifecycle_path = os.path.join(ROOT, "scripts", "cr_a_lifecycle.py")
+            spec = _ilu.spec_from_file_location(
+                "cr_a_lifecycle_trigger_test_main",
+                lifecycle_path,
+            )
+            self.assertIsNotNone(spec)
+            assert spec and spec.loader
+            mod = _ilu.module_from_spec(spec)
+            sys.modules[spec.name] = mod
+            spec.loader.exec_module(mod)
+
+            with patch.dict(os.environ, {
+                "PTILOPSIS_CR_LIFECYCLE_ENABLED": "1",
+                "PTILOPSIS_CR_LIFECYCLE_MODE": "preview",
+            }):
+                code = mod.main([
+                    "--state-path", str(state),
+                    "--report-path", str(report),
+                    "--now", _NOW.isoformat(),
+                ])
+
+            self.assertEqual(code, 0)
+            self.assertTrue(report.exists())
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(data["enabled"])
+            self.assertEqual(data["mode"], "preview")
 
     def test_trigger_does_not_modify_state_when_disabled(self) -> None:
         """When lifecycle is not enabled, run_lifecycle returns enabled=False."""

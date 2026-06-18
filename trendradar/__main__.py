@@ -897,12 +897,9 @@ class NewsAnalyzer:
                     )
                     if _lc_spec and _lc_spec.loader:
                         _lc_mod = _ilu.module_from_spec(_lc_spec)
+                        sys.modules[_lc_spec.name] = _lc_mod
                         _lc_spec.loader.exec_module(_lc_mod)
-                        _lc_result = _lc_mod.run_lifecycle(now=self.ctx.get_time())
-                        if _lc_result.enabled:
-                            print(f"[lifecycle] mode={_lc_result.mode} "
-                                  f"kept={_lc_result.kept_count} "
-                                  f"evicted={_lc_result.evicted_count}")
+                        _lc_mod.main(["--now", self.ctx.get_time().isoformat()])
                 except Exception as _lc_exc:
                     print(f"[lifecycle] janitor error: {_lc_exc}")
 
