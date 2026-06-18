@@ -345,6 +345,87 @@ class TestReportWriteFailureDoesNotCorruptState(unittest.TestCase):
             self.assertFalse(result.report_written)
 
 
+class TestPostRunTrigger(unittest.TestCase):
+    """Verify the post-run trigger wiring in __main__.py (P1)."""
+
+    MAIN_PATH = os.path.join(ROOT, "trendradar", "__main__.py")
+
+    def _main_source(self) -> str:
+        return Path(self.MAIN_PATH).read_text(encoding="utf-8")
+
+    def test_trigger_gated_by_lifecycle_enabled(self) -> None:
+        source = self._main_source()
+        self.assertIn(
+            'PTILOPSIS_CR_LIFECYCLE_ENABLED',
+            source,
+            "trigger must check PTILOPSIS_CR_LIFECYCLE_ENABLED",
+        )
+
+    def test_trigger_loads_lifecycle_module(self) -> None:
+        source = self._main_source()
+        self.assertIn("cr_a_lifecycle.py", source)
+        self.assertIn("run_lifecycle", source)
+
+    def test_trigger_is_fail_closed(self) -> None:
+        source = self._main_source()
+        # The trigger must catch exceptions and print, never propagate.
+        self.assertIn("except Exception", source)
+        self.assertIn("[lifecycle] janitor error", source)
+
+    def test_lifecycle_module_loadable_via_importlib(self) -> None:
+        """The trigger uses importlib.util to load the script; verify it works."""
+        import importlib.util as _ilu
+
+        lifecycle_path = os.path.join(ROOT, "scripts", "cr_a_lifecycle.py")
+        spec = _ilu.spec_from_file_location("cr_a_lifecycle_trigger_test", lifecycle_path)
+        self.assertIsNotNone(spec)
+        assert spec and spec.loader
+        mod = _ilu.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        self.assertTrue(hasattr(mod, "run_lifecycle"))
+        self.assertTrue(hasattr(mod, "CRLifecycleRunResult"))
+
+    def test_trigger_does_not_modify_state_when_disabled(self) -> None:
+        """When lifecycle is not enabled, run_lifecycle returns enabled=False."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            report = Path(tmp) / "report.json"
+            _write_snapshot(state, _make_snapshot())
+
+            result = lifecycle.run_lifecycle(
+                state_path=str(state),
+                report_path=str(report),
+                enabled=False,
+                now=_NOW,
+            )
+            self.assertFalse(result.enabled)
+            self.assertFalse(report.exists())
+
+    def test_trigger_writes_report_when_enabled(self) -> None:
+        """When enabled, run_lifecycle produces a lifecycle report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            report = Path(tmp) / "report.json"
+            entry = CREventStateEntry(
+                event_key="ek-1", decision_level="alert",
+                seen_at=_iso(_NOW - timedelta(hours=1)),
+            )
+            _write_snapshot(state, _make_snapshot(entry))
+
+            result = lifecycle.run_lifecycle(
+                state_path=str(state),
+                report_path=str(report),
+                enabled=True,
+                mode="preview",
+                now=_NOW,
+            )
+            self.assertTrue(result.enabled)
+            self.assertTrue(report.exists())
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["schema_version"], "cr-lifecycle-report-v1")
+
+
 class TestForbiddenImports(unittest.TestCase):
     def test_no_runtime_imports(self) -> None:
         source = inspect.getsource(lifecycle)

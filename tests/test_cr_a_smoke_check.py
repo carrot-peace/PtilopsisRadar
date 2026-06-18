@@ -191,7 +191,7 @@ class CRLifecycleReportSmokeCheckTest(unittest.TestCase):
     def test_valid_enforce_report_passes(self) -> None:
         _write(self.lifecycle, _valid_lifecycle_report(
             mode="enforce",
-            would_evict_count=0,
+            would_evict_count=2,
             evicted_count=2,
             kept_count=8,
         ))
@@ -229,7 +229,24 @@ class CRLifecycleReportSmokeCheckTest(unittest.TestCase):
         _write(self.lifecycle, _valid_lifecycle_report(
             mode="enforce",
             input_count=10, kept_count=5, evicted_count=2,
-            would_evict_count=0,
+            would_evict_count=2,
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_enforce_would_evict_mismatch_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            mode="enforce",
+            would_evict_count=3,
+            evicted_count=2,
+            kept_count=8,
+        ))
+        with self.assertRaises(smoke.SmokeCheckError):
+            self._run()
+
+    def test_nonempty_errors_fails(self) -> None:
+        _write(self.lifecycle, _valid_lifecycle_report(
+            errors=["state load error: malformed"],
         ))
         with self.assertRaises(smoke.SmokeCheckError):
             self._run()

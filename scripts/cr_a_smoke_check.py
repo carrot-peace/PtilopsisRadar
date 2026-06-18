@@ -137,6 +137,11 @@ def _check_lifecycle_report(data: object) -> None:
                 f"lifecycle report enforce: input_count ({input_count}) != "
                 f"kept_count ({kept_count}) + evicted_count ({evicted_count})"
             )
+        if would_evict_count != evicted_count:
+            raise SmokeCheckError(
+                f"lifecycle report enforce: would_evict_count ({would_evict_count}) != "
+                f"evicted_count ({evicted_count})"
+            )
 
     # TTL values must be positive.
     ttl_for_level = data.get("ttl_for_level")
@@ -146,6 +151,12 @@ def _check_lifecycle_report(data: object) -> None:
                 raise SmokeCheckError(
                     f"lifecycle report ttl_for_level[{level!r}] must be positive, got {ttl}"
                 )
+
+    errors = data.get("errors")
+    if isinstance(errors, list) and len(errors) > 0:
+        raise SmokeCheckError(
+            f"lifecycle report has {len(errors)} error(s): {'; '.join(str(e) for e in errors[:3])}"
+        )
 
 
 def run_smoke_check(
