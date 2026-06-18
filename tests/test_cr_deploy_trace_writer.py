@@ -59,6 +59,16 @@ def _write_plan(path: Path, **overrides) -> None:
             "policy_version": "cr-cooldown-v1",
             "entries": [],
         },
+        "quiet_hours": {
+            "enabled": True,
+            "timezone": "Asia/Shanghai",
+            "in_quiet_hours": True,
+            "allow_urgent_bypass": False,
+            "bypass_applied": False,
+            "decision": "deferred_quiet_hours",
+            "deferred_count": 1,
+            "entries": [],
+        },
     }
     plan.update(overrides)
     path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
@@ -160,6 +170,35 @@ class TestWriterUsesReader(unittest.TestCase):
             self.assertEqual(data["schema_version"], DEPLOY_TRACE_SCHEMA_VERSION)
             self.assertIn("cr_dispatch", data)
             self.assertEqual(data["cr_dispatch"]["decision_source"], "authoritative_plan_receipt")
+
+    def test_output_contains_quiet_hours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cr_dir = Path(tmp) / "cr" / "latest"
+            cr_dir.mkdir(parents=True)
+            plan_path = cr_dir / "dispatch_plan.json"
+            receipt_path = cr_dir / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path)
+
+            trace_dir = Path(tmp) / "trace"
+            config = DeployTraceConfig(root_dir=trace_dir)
+            result = write_deploy_trace(
+                run_label="run-001",
+                plan_path=plan_path,
+                receipt_path=receipt_path,
+                config=config,
+            )
+
+            self.assertEqual(
+                result.cr_dispatch["quiet_hours"]["decision"],
+                "deferred_quiet_hours",
+            )
+            latest = json.loads(result.latest_path.read_text(encoding="utf-8"))
+            archive = json.loads(result.archive_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                latest["cr_dispatch"]["quiet_hours"],
+                archive["cr_dispatch"]["quiet_hours"],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +417,116 @@ class TestReaderStillWorks(unittest.TestCase):
             result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
             self.assertIn("cr_dispatch", result)
             self.assertEqual(result["cr_dispatch"]["decision_source"], "authoritative_plan_receipt")
+
+
+# ---------------------------------------------------------------------------
+# Test Group H — Multi-receipt visibility survives latest/archive
+# ---------------------------------------------------------------------------
+
+
+def _write_multi_receipt(path: Path) -> None:
+    receipt = {
+        "schema_version": "cr-dispatch-receipts-v1",
+        "run_id": "test-run-multi",
+        "created_at": "2026-06-18T08:01:00+00:00",
+        "dispatch_mode": "live",
+        "plan_decision": "dispatch",
+        "plan_should_dispatch": True,
+        "receipts": [
+            {
+                "message_index": 0, "attempted": True, "accepted": True,
+                "status": "accepted", "detail": "flushed_deferred",
+                "transport": None, "http_status": None, "sink_ok": None,
+                "exception_type": None, "exception_message": None,
+                "source": "deferred_queue", "event_key": "ev-B",
+                "candidate_id": "c-B", "title": "Urgent B",
+            },
+            {
+                "message_index": 1, "attempted": True, "accepted": True,
+                "status": "accepted", "detail": "flushed_deferred",
+                "transport": None, "http_status": None, "sink_ok": None,
+                "exception_type": None, "exception_message": None,
+                "source": "deferred_queue", "event_key": "ev-A",
+                "candidate_id": "c-A", "title": "Alert A",
+            },
+            {
+                "message_index": 0, "attempted": True, "accepted": True,
+                "status": "accepted", "detail": "telegram_ok",
+                "transport": "telegram", "http_status": 200, "sink_ok": True,
+                "exception_type": None, "exception_message": None,
+                "event_key": "ev-C", "candidate_id": "c-C", "title": "Current C",
+            },
+        ],
+        "candidate_outcomes": [],
+    }
+    path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+
+class TestMultiReceiptInTrace(unittest.TestCase):
+    def test_latest_and_archive_contain_multi_receipt_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cr_dir = Path(tmp) / "cr" / "latest"
+            cr_dir.mkdir(parents=True)
+            plan_path = cr_dir / "dispatch_plan.json"
+            receipt_path = cr_dir / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_multi_receipt(receipt_path)
+
+            trace_dir = Path(tmp) / "trace"
+            result = write_deploy_trace(
+                run_label="multi-run",
+                plan_path=plan_path,
+                receipt_path=receipt_path,
+                config=DeployTraceConfig(root_dir=trace_dir),
+            )
+
+            latest = json.loads(result.latest_path.read_text(encoding="utf-8"))
+            archive = json.loads(result.archive_path.read_text(encoding="utf-8"))
+            latest_cr = latest["cr_dispatch"]
+            archive_cr = archive["cr_dispatch"]
+
+            for cr in (latest_cr, archive_cr):
+                self.assertEqual(cr["receipts_count"], 3)
+                self.assertEqual(len(cr["receipt_summaries"]), 3)
+                self.assertEqual(len(cr["deferred_flush_summaries"]), 2)
+                self.assertEqual(cr["current_receipt_summary"]["event_key"], "ev-C")
+
+            # latest and archive multi-receipt fields match.
+            self.assertEqual(
+                latest_cr["receipt_summaries"], archive_cr["receipt_summaries"]
+            )
+            self.assertEqual(
+                latest_cr["deferred_flush_summaries"],
+                archive_cr["deferred_flush_summaries"],
+            )
+            self.assertEqual(
+                latest_cr["current_receipt_summary"],
+                archive_cr["current_receipt_summary"],
+            )
+            self.assertEqual(latest_cr["receipts_count"], archive_cr["receipts_count"])
+
+    def test_quiet_hours_still_present_with_multi_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cr_dir = Path(tmp) / "cr" / "latest"
+            cr_dir.mkdir(parents=True)
+            plan_path = cr_dir / "dispatch_plan.json"
+            receipt_path = cr_dir / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_multi_receipt(receipt_path)
+
+            trace_dir = Path(tmp) / "trace"
+            result = write_deploy_trace(
+                run_label="multi-run-qh",
+                plan_path=plan_path,
+                receipt_path=receipt_path,
+                config=DeployTraceConfig(root_dir=trace_dir),
+            )
+
+            self.assertIsNotNone(result.cr_dispatch["quiet_hours"])
+            self.assertEqual(
+                result.cr_dispatch["quiet_hours"]["decision"],
+                "deferred_quiet_hours",
+            )
 
 
 if __name__ == "__main__":
