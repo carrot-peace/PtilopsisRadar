@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from ..services.data_service import DataService
 from ..utils.validators import validate_platforms
 from ..utils.errors import MCPError, CrawlTaskError
+from trendradar.versioning import parse_version_tuple
 
 
 class SystemManagementTools:
@@ -410,14 +411,8 @@ class SystemManagementTools:
         import requests
 
         def parse_version(version_str: str):
-            """将版本号字符串解析为元组"""
-            try:
-                parts = version_str.strip().split(".")
-                if len(parts) != 3:
-                    raise ValueError("版本号格式不正确")
-                return int(parts[0]), int(parts[1]), int(parts[2])
-            except (ValueError, AttributeError, TypeError):
-                return 0, 0, 0
+            """将版本号字符串解析为元组，支持 x.y.z-suffix 展示版本"""
+            return parse_version_tuple(version_str)
 
         def check_single_version(
             name: str,
@@ -493,11 +488,11 @@ class SystemManagementTools:
             advanced_config = config_data.get("advanced", {})
             trendradar_url = advanced_config.get(
                 "version_check_url",
-                "https://raw.githubusercontent.com/sansan0/TrendRadar/refs/heads/master/version"
+                "https://raw.githubusercontent.com/carrot-peace/PtilopsisRadar/refs/heads/master/version"
             )
             mcp_url = advanced_config.get(
                 "mcp_version_check_url",
-                "https://raw.githubusercontent.com/sansan0/TrendRadar/refs/heads/master/version_mcp"
+                "https://raw.githubusercontent.com/carrot-peace/PtilopsisRadar/refs/heads/master/version_mcp"
             )
 
             # 配置代理

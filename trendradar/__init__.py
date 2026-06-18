@@ -7,7 +7,7 @@ Ptilopsis Radar - 热点新闻聚合与分析工具
   trendradar                  # 安装后执行
 """
 
-__version__ = "6.9.0"
+__version__ = "0.1.0"
 __all__ = ["AppContext", "__version__"]
 
 

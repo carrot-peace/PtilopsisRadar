@@ -29,6 +29,7 @@ from trendradar.ai import AIAnalyzer, AIAnalysisResult
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.core.cdn import fetch_with_fallback
 from trendradar.telegram_bot.access import build_telegram_access_config
+from trendradar.versioning import compare_version_tuple, parse_version_tuple
 
 
 LEGACY_NOTIFICATION_CONFIGS = [
@@ -82,24 +83,16 @@ def _legacy_notification_config_labels(config: Dict) -> List[str]:
 
 
 def _parse_version(version_str: str) -> Tuple[int, int, int]:
-    """解析版本号字符串为元组"""
-    try:
-        parts = version_str.strip().split(".")
-        if len(parts) >= 3:
-            return int(parts[0]), int(parts[1]), int(parts[2])
-        return 0, 0, 0
-    except (ValueError, AttributeError, TypeError):
-        return 0, 0, 0
+    """解析版本号字符串为元组，支持 x.y.z-suffix 展示版本。"""
+    return parse_version_tuple(version_str)
 
 
 def _compare_version(local: str, remote: str) -> str:
     """比较版本号，返回状态文字"""
-    local_tuple = _parse_version(local)
-    remote_tuple = _parse_version(remote)
-
-    if local_tuple < remote_tuple:
+    cmp = compare_version_tuple(local, remote)
+    if cmp < 0:
         return "⚠️ 需要更新"
-    elif local_tuple > remote_tuple:
+    elif cmp > 0:
         return "🔮 超前版本"
     else:
         return "✅ 已是最新"
