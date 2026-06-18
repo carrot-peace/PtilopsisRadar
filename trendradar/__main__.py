@@ -267,7 +267,7 @@ class NewsAnalyzer:
         self.data_fetcher = DataFetcher(
             self.proxy_url,
             api_url=self.ctx.config.get("PLATFORMS_API_URL") or None,
-            max_retries=self.ctx.config.get("MAX_RETRIES", 2),
+            max_retries=self.ctx.config.get("MAX_RETRIES", 4),
         )
 
         # RSS/平台元数据（用于报告头部展示）

@@ -651,7 +651,7 @@ advanced:
   # 热榜爬虫技术参数
   crawler:
     request_interval: 2000            # 请求间隔（毫秒）
-    max_retries: 4                    # 单平台请求最大重试次数（默认 2）
+    max_retries: 4                    # 单平台请求最大重试次数
     use_proxy: false                  # 是否启用代理（true=启用, false=不使用）
     default_proxy: "http://127.0.0.1:10801"
 
