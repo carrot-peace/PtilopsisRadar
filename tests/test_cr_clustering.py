@@ -976,6 +976,13 @@ class TestExtractEntities(unittest.TestCase):
         self.assertNotIn("2026", ents)
         self.assertNotIn("1999", ents)
 
+    def test_percent_lower_bound_not_extracted(self):
+        # The >= 2 floor is a non-obvious business rule; guard the boundary.
+        ents = extract_entities("Up 1% and 0% growth, but 2% elsewhere", self.d)
+        self.assertNotIn("1%", ents)
+        self.assertNotIn("0%", ents)
+        self.assertIn("2%", ents)
+
     def test_model_product_tokens(self):
         ents = extract_entities("GLM-5.2 vs F-35 at G7, HBM4E shipping", self.d)
         self.assertIn("glm-5.2", ents)
@@ -1043,6 +1050,14 @@ class TestRule4Merge(unittest.TestCase):
         return _rss_item(title=title, url=url, feed_id="reuters", source_name="Reuters")
 
     def test_merges_company_and_model(self):
+        # Assert the entity set explicitly so a dictionary/extraction change
+        # surfaces as a clear failure rather than a silent len(cands) == 2.
+        d, stop = _TEST_RESOURCES.dictionary, _TEST_RESOURCES.stoplist
+        shared = extract_entities("SK海力士HBM4E量产", d) & extract_entities(
+            "SK Hynix starts HBM4E mass production", d)
+        self.assertEqual(shared, {"hynix", "hbm4e"})
+        self.assertEqual({e for e in shared if is_high_specificity(e, stop)}, {"hynix", "hbm4e"})
+
         rec = _primitive_record(source_items=[
             self._hl("SK海力士HBM4E量产", "https://hl.example.com/1"),
             self._rss("SK Hynix starts HBM4E mass production", "https://rss.example.com/1"),
