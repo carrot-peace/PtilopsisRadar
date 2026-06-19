@@ -17,7 +17,11 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from trendradar.cr.cross_evidence_ingest import select_cross_evidence_rss
+from trendradar.cr.cross_evidence_ingest import (
+    build_cross_evidence_cluster_config_from_env,
+    merge_rss_stats,
+    select_cross_evidence_rss,
+)
 from trendradar.cr.entity_match import EntityResources
 from trendradar.cr.adapter import adapt_rss_stats
 from trendradar.cr.models import (
@@ -80,6 +84,16 @@ class TestAdmission(unittest.TestCase):
         old = _rss("SK Hynix HBM4E recap", published_at="2026-06-16T00:00:00+08:00")  # ~60h old
         self.assertEqual(_admitted_titles([old], window_hours=36.0), [])
 
+    def test_naive_timestamp_is_interpreted_as_utc(self):
+        item = _rss(
+            "SK Hynix HBM4E recap",
+            published_at="2026-06-17T23:00:00",
+        )
+        self.assertEqual(
+            _admitted_titles([item], window_hours=36.0),
+            ["SK Hynix HBM4E recap"],
+        )
+
     def test_unparseable_published_at_kept(self):
         # Lenient: raw_rss_items is already per-feed age-filtered upstream.
         item = _rss("SK Hynix HBM4E note", published_at="not-a-date")
@@ -103,8 +117,11 @@ class TestAdmission(unittest.TestCase):
         self.assertEqual(len(out), 2)
 
     def test_output_shape_consumable_by_adapter(self):
+        raw = _rss("SK Hynix starts HBM4E mass production", feed_name="Reuters")
+        raw["summary"] = "Production has started"
+        raw["author"] = "Reporter"
         groups = select_cross_evidence_rss(
-            [_rss("SK Hynix starts HBM4E mass production", feed_name="Reuters")],
+            [raw],
             _HOTLIST_TITLES, resources=_RES, now=_NOW,
         )
         prims = adapt_rss_stats(groups, context=CRRunContext(mode="daily"))
@@ -113,6 +130,56 @@ class TestAdmission(unittest.TestCase):
         self.assertEqual(item.source_type, "rss")
         self.assertEqual(item.source_name, "Reuters")   # feed_name -> source_name
         self.assertEqual(item.feed_id, "reuters")
+        self.assertEqual(item.summary, "Production has started")
+        self.assertEqual(item.author, "Reporter")
+        self.assertTrue(item.cross_evidence_admitted)
+
+    def test_merge_preserves_keyword_rss_and_deduplicates_admitted(self):
+        keyword_item = {
+            "title": "中文关键词 RSS",
+            "feed_id": "feed-a",
+            "url": "https://rss.example.com/existing",
+        }
+        admitted_duplicate = {
+            **keyword_item,
+            "cross_evidence_admitted": True,
+        }
+        admitted_new = {
+            "title": "English corroboration",
+            "feed_id": "feed-b",
+            "url": "https://rss.example.com/new",
+            "cross_evidence_admitted": True,
+        }
+        keyword = [{"word": "关键词", "titles": [keyword_item]}]
+        admitted = [{"word": None, "titles": [admitted_duplicate, admitted_new]}]
+
+        merged = merge_rss_stats(keyword, admitted)
+
+        self.assertEqual([g["word"] for g in merged], ["关键词", None])
+        self.assertEqual(merged[0]["titles"], [keyword_item])
+        self.assertEqual(merged[1]["titles"], [admitted_new])
+        self.assertEqual(keyword[0]["titles"], [keyword_item])
+
+
+class TestCrossEvidenceConfig(unittest.TestCase):
+    def test_all_runtime_knobs_are_resolved(self):
+        cfg = build_cross_evidence_cluster_config_from_env({
+            "PTILOPSIS_CR_CROSS_EVIDENCE_RSS_ENABLED": "false",
+            "PTILOPSIS_CR_CROSS_EVIDENCE_WINDOW_HOURS": "12.5",
+            "PTILOPSIS_CR_CROSS_EVIDENCE_MAX_PER_TOPIC": "7",
+            "PTILOPSIS_CR_DROP_UNMERGED_RSS": "true",
+        })
+        self.assertFalse(cfg.cross_evidence_rss_enabled)
+        self.assertEqual(cfg.cross_evidence_window_hours, 12.5)
+        self.assertEqual(cfg.cross_evidence_max_per_topic, 7)
+        self.assertTrue(cfg.drop_unmerged_rss)
+
+    def test_disabling_admission_restores_legacy_drop_default(self):
+        cfg = build_cross_evidence_cluster_config_from_env({
+            "PTILOPSIS_CR_CROSS_EVIDENCE_RSS_ENABLED": "0",
+        })
+        self.assertFalse(cfg.cross_evidence_rss_enabled)
+        self.assertFalse(cfg.drop_unmerged_rss)
 
 
 class TestFunnelEndToEnd(unittest.TestCase):
@@ -142,7 +209,10 @@ class TestFunnelEndToEnd(unittest.TestCase):
         groups = select_cross_evidence_rss(raw, _HOTLIST_TITLES, resources=_RES, now=_NOW)
         rss_prims = adapt_rss_stats(groups, context=CRRunContext(mode="daily"))
 
-        cfg = CRPipelineConfig(cluster=CRClusterConfig(entity_resources=_RES))
+        cfg = CRPipelineConfig(cluster=CRClusterConfig(
+            entity_resources=_RES,
+            drop_unmerged_rss=True,
+        ))
         result = build_cr_pipeline_from_primitives(
             list(hotlist) + list(rss_prims), run_label="t", config=cfg,
         )
@@ -153,6 +223,28 @@ class TestFunnelEndToEnd(unittest.TestCase):
         self.assertEqual(len(mixed), 1)
         self.assertTrue(mixed[0].has_hotlist and mixed[0].has_rss)
         self.assertNotIn("rss", types)  # decoupling: admitted-but-unmerged Hormuz RSS dropped
+
+    def test_keyword_rss_only_candidate_is_not_dropped(self):
+        groups = [{
+            "word": "关键词",
+            "titles": [{
+                "title": "Legacy keyword RSS",
+                "source_name": "Feed",
+                "feed_id": "feed",
+                "url": "https://rss.example.com/legacy",
+                "count": 1,
+                "ranks": [],
+            }],
+        }]
+        rss_prims = adapt_rss_stats(groups, context=CRRunContext(mode="daily"))
+        cfg = CRPipelineConfig(cluster=CRClusterConfig(drop_unmerged_rss=True))
+
+        result = build_cr_pipeline_from_primitives(
+            list(rss_prims), run_label="t", config=cfg,
+        )
+
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].primary_source_type, "rss")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import webbrowser
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -890,16 +891,25 @@ class NewsAnalyzer:
                     _dispatch_sink = None
 
             # CR 跨证据:用原始全量 RSS 经"实体重叠准入"喂给 CR(替代中文关键词门
-            # 筛剩的 rss_items)。失败/禁用时回退到 rss_items,绝不阻断主流程。
+            # 筛剩的 rss_items)。准入结果与关键词 RSS 合并;失败/禁用时回退,
+            # 绝不阻断主流程。
             _cr_rss_stats = rss_items
+            from trendradar.cr.models import CRClusterConfig
+            from trendradar.cr.pipeline import CRPipelineConfig
+
+            _pipeline_cluster_cfg = CRClusterConfig()
             try:
                 from trendradar.cr.cross_evidence_ingest import (
+                    build_cross_evidence_cluster_config_from_env,
+                    merge_rss_stats,
                     select_cross_evidence_rss,
                 )
                 from trendradar.cr.entity_match import load_entity_resources
-                from trendradar.cr.models import CRClusterConfig
 
-                _ce_cfg = CRClusterConfig()
+                _ce_cfg = build_cross_evidence_cluster_config_from_env(os.environ)
+                # Admission failures and disabled/no-input paths must retain
+                # legacy RSS-only candidates.
+                _pipeline_cluster_cfg = replace(_ce_cfg, drop_unmerged_rss=False)
                 _raw_rss = getattr(self, "_cr_raw_rss_items", None)
                 if _ce_cfg.cross_evidence_rss_enabled and _raw_rss:
                     _hotlist_titles = [
@@ -907,7 +917,7 @@ class NewsAnalyzer:
                         for g in (stats or [])
                         for t in g.get("titles", [])
                     ]
-                    _cr_rss_stats = select_cross_evidence_rss(
+                    _admitted_rss_stats = select_cross_evidence_rss(
                         _raw_rss,
                         _hotlist_titles,
                         resources=load_entity_resources(),
@@ -915,7 +925,11 @@ class NewsAnalyzer:
                         window_hours=_ce_cfg.cross_evidence_window_hours,
                         max_per_topic=_ce_cfg.cross_evidence_max_per_topic,
                     )
-                    _admitted = sum(len(g.get("titles", [])) for g in _cr_rss_stats)
+                    _cr_rss_stats = merge_rss_stats(rss_items, _admitted_rss_stats)
+                    _pipeline_cluster_cfg = _ce_cfg
+                    _admitted = sum(
+                        len(g.get("titles", [])) for g in _admitted_rss_stats
+                    )
                     print(f"[CR-A] 跨证据 RSS 准入: {_admitted} 条(来自 {len(_raw_rss)} 条原始 RSS)")
             except Exception as exc:  # noqa: BLE001 - 准入失败回退,不阻断
                 print(f"[CR-A] 跨证据 RSS 准入失败,回退关键词 RSS: {exc}", file=sys.stderr)
@@ -927,6 +941,7 @@ class NewsAnalyzer:
                 rss_stats=_cr_rss_stats,
                 run_label=_run_label,
                 run_context=CRRunContext(mode=mode),
+                pipeline_config=CRPipelineConfig(cluster=_pipeline_cluster_cfg),
                 dispatch_sink=_dispatch_sink,
                 dispatch_mode=_cr_mode,
                 quiet_hours_env=os.environ,

@@ -142,6 +142,7 @@ class CRSourceItem:
     published_at: Optional[str] = None
     summary: Optional[str] = None
     author: Optional[str] = None
+    cross_evidence_admitted: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -269,4 +270,4 @@ class CRClusterConfig:
     cross_evidence_rss_enabled: bool = True
     cross_evidence_window_hours: float = 36.0
     cross_evidence_max_per_topic: Optional[int] = None
-    drop_unmerged_rss: bool = True
+    drop_unmerged_rss: bool = False

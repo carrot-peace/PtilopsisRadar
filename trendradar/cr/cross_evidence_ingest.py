@@ -22,10 +22,17 @@ Design reference: plan staged-fluttering-lynx (§1-§5).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from collections.abc import Mapping
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set
 
 from trendradar.cr.entity_match import EntityResources, extract_entities
+from trendradar.cr.models import CRClusterConfig
+
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_FALSY = frozenset({"0", "false", "no", "off"})
 
 
 def _parse_published_at(value: Optional[str]) -> Optional[datetime]:
@@ -49,13 +56,125 @@ def _within_window(
     dt = _parse_published_at(published_at)
     if dt is None:
         return True
-    cutoff = now - timedelta(hours=window_hours)
-    # Compare in a tz-consistent way; fall back to naive if either lacks tzinfo.
-    if dt.tzinfo is not None and now.tzinfo is None:
-        dt = dt.replace(tzinfo=None)
-    elif dt.tzinfo is None and now.tzinfo is not None:
-        dt = dt.replace(tzinfo=now.tzinfo)
-    return dt >= cutoff
+    # Match the existing RSS freshness convention: timezone-naive feed
+    # timestamps are UTC.  Convert instants instead of relabelling them.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cutoff = now.astimezone(timezone.utc) - timedelta(hours=window_hours)
+    return dt.astimezone(timezone.utc) >= cutoff
+
+
+def _parse_bool_env(raw: str, key: str) -> bool:
+    value = raw.strip().lower()
+    if value in _TRUTHY:
+        return True
+    if value in _FALSY:
+        return False
+    raise ValueError(f"{key} must be a boolean-like value")
+
+
+def build_cross_evidence_cluster_config_from_env(
+    env: Mapping[str, str],
+    *,
+    base: CRClusterConfig | None = None,
+) -> CRClusterConfig:
+    """Resolve cross-evidence runtime knobs from an explicit environment."""
+    config = base if base is not None else CRClusterConfig()
+
+    enabled_key = "PTILOPSIS_CR_CROSS_EVIDENCE_RSS_ENABLED"
+    enabled_raw = env.get(enabled_key)
+    enabled = (
+        _parse_bool_env(enabled_raw, enabled_key)
+        if enabled_raw is not None
+        else config.cross_evidence_rss_enabled
+    )
+
+    window_key = "PTILOPSIS_CR_CROSS_EVIDENCE_WINDOW_HOURS"
+    window_raw = env.get(window_key)
+    window_hours = config.cross_evidence_window_hours
+    if window_raw is not None:
+        try:
+            window_hours = float(window_raw.strip())
+        except (TypeError, ValueError):
+            raise ValueError(f"{window_key} must be a positive number")
+        if window_hours <= 0:
+            raise ValueError(f"{window_key} must be a positive number")
+
+    cap_key = "PTILOPSIS_CR_CROSS_EVIDENCE_MAX_PER_TOPIC"
+    cap_raw = env.get(cap_key)
+    max_per_topic = config.cross_evidence_max_per_topic
+    if cap_raw is not None:
+        normalized = cap_raw.strip().lower()
+        if normalized in {"", "none", "off"}:
+            max_per_topic = None
+        else:
+            try:
+                max_per_topic = int(normalized)
+            except (TypeError, ValueError):
+                raise ValueError(f"{cap_key} must be a positive integer or none")
+            if max_per_topic <= 0:
+                raise ValueError(f"{cap_key} must be a positive integer or none")
+
+    drop_key = "PTILOPSIS_CR_DROP_UNMERGED_RSS"
+    drop_raw = env.get(drop_key)
+    if drop_raw is not None:
+        drop_unmerged_rss = _parse_bool_env(drop_raw, drop_key)
+    elif base is not None:
+        drop_unmerged_rss = config.drop_unmerged_rss
+    else:
+        # The production cross-evidence path is corroboration-only by default.
+        # Disabling admission also restores the legacy RSS-only behavior.
+        drop_unmerged_rss = enabled
+
+    return replace(
+        config,
+        cross_evidence_rss_enabled=enabled,
+        cross_evidence_window_hours=window_hours,
+        cross_evidence_max_per_topic=max_per_topic,
+        drop_unmerged_rss=drop_unmerged_rss,
+    )
+
+
+def merge_rss_stats(
+    keyword_rss_stats: Optional[List[dict]],
+    admitted_rss_stats: Optional[List[dict]],
+) -> List[dict]:
+    """Append unique admitted RSS items while preserving keyword groups."""
+    merged = [
+        {**group, "titles": list(group.get("titles", []))}
+        for group in (keyword_rss_stats or [])
+    ]
+    seen = {
+        _rss_item_identity(item)
+        for group in merged
+        for item in group.get("titles", [])
+    }
+    admitted_unique: List[dict] = []
+    for group in admitted_rss_stats or []:
+        for item in group.get("titles", []):
+            identity = _rss_item_identity(item)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            admitted_unique.append(item)
+
+    if admitted_unique:
+        merged.append({"word": None, "titles": admitted_unique})
+    return merged
+
+
+def _rss_item_identity(item: dict) -> tuple:
+    url = item.get("url")
+    if url:
+        return ("url", url)
+    return (
+        "item",
+        item.get("feed_id"),
+        item.get("title", ""),
+        item.get("published_at"),
+    )
 
 
 def select_cross_evidence_rss(
@@ -142,6 +261,9 @@ def _to_title_item(item: dict) -> dict:
         "source_name": item.get("feed_name", ""),
         "url": item.get("url"),
         "published_at": item.get("published_at"),
+        "summary": item.get("summary"),
+        "author": item.get("author"),
+        "cross_evidence_admitted": True,
         "ranks": [],
         "count": 1,
         "is_new": None,

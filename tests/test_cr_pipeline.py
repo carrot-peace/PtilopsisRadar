@@ -611,6 +611,21 @@ class TestConfigPropagation(unittest.TestCase):
         )
         self.assertIsInstance(result, CRPipelineResult)
 
+    def test_default_config_preserves_rss_only_candidates(self):
+        primitive = CRPrimitiveRecord(
+            source_items=[CRSourceItem(
+                source_type="rss",
+                title="Standalone RSS",
+                url="https://rss.example.com/standalone",
+            )],
+            record_source="rss_stats",
+        )
+        result = build_cr_pipeline_from_primitives(
+            [primitive], run_label="test", config=None,
+        )
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].primary_source_type, "rss")
+
     def test_empty_render_config_uses_defaults(self):
         """Empty CRPipelineRenderConfig uses lower-layer defaults."""
         cfg = CRPipelineConfig(render=CRPipelineRenderConfig())
