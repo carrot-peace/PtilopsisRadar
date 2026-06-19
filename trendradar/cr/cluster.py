@@ -23,6 +23,11 @@ from trendradar.cr.models import (
     CRPrimitiveRecord,
     CRSourceItem,
 )
+from trendradar.cr.entity_match import (
+    extract_entities,
+    is_high_specificity,
+    load_entity_resources,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +169,13 @@ def _cluster_source_items(
       2. Exact URL match (when both non-empty) → merge.
       3. Strong title token overlap (≥ min_shared_tokens AND
          similarity ≥ min_similarity) → merge.
+      4. (Rule 4, cross-language) hotlist↔rss pair sharing
+         ≥ entity_min_shared_total entities of which
+         ≥ entity_min_high_specificity are high-specificity → merge.
 
     Anti-merge: same keyword_group alone does NOT merge unrelated titles.
+    Rules 1-3 are unchanged; Rule 4 is strictly additive and gated to
+    cross-source-type (hotlist + rss) pairs.
     """
     items = list(source_items)
     n = len(items)
@@ -175,6 +185,14 @@ def _cluster_source_items(
     # Pre-compute normalized data.
     norm_titles = [normalize_topic_text(it.title) for it in items]
     title_tokens = [extract_topic_tokens(it.title) for it in items]
+
+    # Pre-compute entities for Rule 4 (only when enabled).
+    entities: List[Set[str]] = []
+    stoplist: Set[str] = set()
+    if config.use_entity_match:
+        resources = config.entity_resources or load_entity_resources()
+        stoplist = resources.stoplist
+        entities = [extract_entities(it.title, resources.dictionary) for it in items]
 
     uf = _UnionFind()
 
@@ -204,6 +222,18 @@ def _cluster_source_items(
                     sim = intersection_size / min_size if min_size > 0 else 0.0
                     if sim >= config.min_similarity:
                         uf.union(i, j)
+                        continue
+
+            # Rule 4: cross-language entity overlap (hotlist ↔ rss only).
+            if config.use_entity_match and entities:
+                if {items[i].source_type, items[j].source_type} == {"hotlist", "rss"}:
+                    shared = entities[i] & entities[j]
+                    if len(shared) >= config.entity_min_shared_total:
+                        high_spec = sum(
+                            1 for e in shared if is_high_specificity(e, stoplist)
+                        )
+                        if high_spec >= config.entity_min_high_specificity:
+                            uf.union(i, j)
 
     # Group by root.
     clusters: Dict[int, List[CRSourceItem]] = {}
@@ -298,17 +328,28 @@ def _select_representative_url(cluster: List[CRSourceItem], display_title: str) 
     return all_urls[0] if all_urls else None
 
 
-def _build_cluster_key(cluster: List[CRSourceItem]) -> str:
+def _build_cluster_key(cluster: List[CRSourceItem], hotlist_first: bool = False) -> str:
     """Build a deterministic cluster key from normalized titles and URLs.
 
     The key is stable regardless of input order or which item is selected
     as display title.  Falls back to source metadata when titles and URLs
     are all empty, so distinct clusters never collide on "empty".
+
+    When *hotlist_first* and the cluster contains any hotlist item, the
+    signature is computed from the hotlist subset only.  This anchors a
+    merged (mixed) cluster's identity to its stable hotlist core, so the key
+    does not drift as RSS items churn in/out of the window.  Hotlist-only and
+    RSS-only clusters are unaffected (the subset equals the whole cluster).
     """
+    if hotlist_first and any(it.source_type == "hotlist" for it in cluster):
+        signature_items = [it for it in cluster if it.source_type == "hotlist"]
+    else:
+        signature_items = cluster
+
     sig_titles = sorted(
-        {normalize_topic_text(it.title) for it in cluster if it.title}
+        {normalize_topic_text(it.title) for it in signature_items if it.title}
     )
-    sig_urls = sorted({it.url for it in cluster if it.url})
+    sig_urls = sorted({it.url for it in signature_items if it.url})
     parts = sig_titles + sig_urls
     if parts:
         return "||".join(parts)
@@ -317,7 +358,7 @@ def _build_cluster_key(cluster: List[CRSourceItem]) -> str:
     fallback = sorted(
         (it.source_type, it.source_id or "", it.feed_id or "",
          it.source_name or "", it.keyword_group or "")
-        for it in cluster
+        for it in signature_items
     )
     return "||".join(":".join(seg for seg in row) for row in fallback)
 
@@ -386,8 +427,9 @@ def build_candidate_from_cluster(
             if best_current_rank is None or it.current_rank < best_current_rank:
                 best_current_rank = it.current_rank
 
-    # Deterministic ID.
-    cluster_key = _build_cluster_key(cluster)
+    # Deterministic ID.  hotlist-first canonical key is gated on use_entity_match
+    # so that disabling Rule 4 restores byte-identical legacy keys.
+    cluster_key = _build_cluster_key(cluster, hotlist_first=config.use_entity_match)
     candidate_id = _compute_candidate_id(cluster_key, salt=salt)
 
     # Sort source_items by deterministic key so order is stable.
