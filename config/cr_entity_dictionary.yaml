@@ -1,0 +1,100 @@
+# ═══════════════════════════════════════════════════════════════
+#        Ptilopsis Radar 跨语言实体词典（CR Rule 4 跨源聚类）
+#                          Version: 1.0.0
+# ═══════════════════════════════════════════════════════════════
+#
+# 用途：中文热榜标题与英文 RSS 标题的"拉丁/数字实体重叠"匹配（cluster.py Rule 4）。
+#
+# 重要：
+#   - 这是 CR 聚类层的数据文件，与 config.yaml 无关；缺失/解析失败时聚类按"无词典"降级，不报错。
+#   - dictionary：中文 -> 英文实体（v1 仅 string）。value 必须是与抽取器输出对齐的【单 token】、
+#     小写。例如 "european union" / "sk hynix" 不会命中（抽取会切成多 token），取判别 token "eu"/"hynix"。
+#   - dictionary 的 key 使用【子串匹配】（zh in title），不做 CJK 词边界判定。选 key 时务必避免它
+#     作为更长词的子串误命中标题：如 "苹果" 会命中 "苹果醋"、"欧盟" 会命中无关含 "盟" 的词。
+#     宁可选更具体的 key（"特斯拉" 而非 "特"）。V3b 的 ≥2 高区分度门控可抑制单次误注入，但仍应规避。
+#   - stoplist：高频低区分度实体（小写）。这些实体不计入"高区分度"判定，单凭它们不能触发合并。
+#   - 维护：从生产"抽到热门拉丁实体却没匹配上"的日志反推补条目，人工 review 走 PR（带外、不入热路径）。
+# ═══════════════════════════════════════════════════════════════
+
+# 中文 -> 英文实体（单 token，小写）
+dictionary:
+  # 人物
+  特朗普: trump
+  万斯: vance
+  沃什: warsh
+  马克龙: macron
+  马斯克: musk
+  梅西: messi
+  C罗: ronaldo
+  姆巴佩: mbappe
+  哈兰德: haaland
+  内马尔: neymar
+  贝林厄姆: bellingham
+  凯恩: kane
+  # 国家 / 地区
+  伊朗: iran
+  以色列: israel
+  瑞士: switzerland
+  英格兰: england
+  克罗地亚: croatia
+  黎巴嫩: lebanon
+  中国: china
+  俄罗斯: russia
+  乌克兰: ukraine
+  巴拿马: panama
+  加纳: ghana
+  哥伦比亚: colombia
+  乌兹别克斯坦: uzbekistan
+  凡尔赛: versailles
+  阿尔及利亚: algeria
+  阿根廷: argentina
+  英国: britain
+  刚果: congo
+  葡萄牙: portugal
+  加拿大: canada
+  卡塔尔: qatar
+  日本: japan
+  法国: france
+  墨西哥: mexico
+  印度: india
+  韩国: korea
+  德国: germany
+  新加坡: singapore
+  芬兰: finland
+  土耳其: turkey
+  挪威: norway
+  霍尔木兹: hormuz
+  # 公司 / 机构
+  苹果: apple
+  英特尔: intel
+  亚马逊: amazon
+  微软: microsoft
+  海力士: hynix
+  英伟达: nvidia
+  特斯拉: tesla
+  台积电: tsmc
+  三星: samsung
+  谷歌: google
+  欧盟: eu
+  北约: nato
+  哈马斯: hamas
+
+# 高频低区分度实体（小写）—— 不计入高区分度，单凭它们不能触发 Rule 4 合并。
+# 逐字采用部署机验证报告 A 节（保真 V3b 76% 精度）。
+stoplist:
+  - china
+  - trump
+  - iran
+  - fed
+  - warsh
+  - worldcup
+  - hormuz
+  - korea
+  - messi
+  - ronaldo
+  - mexico
+  - portugal
+  - england
+  - croatia
+  - switzerland
+  - america

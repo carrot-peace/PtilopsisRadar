@@ -11,7 +11,12 @@ Design reference: docs/Ptilopsis_Radar_Push_System_Design.md v0.4.1 §8.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional
+from typing import TYPE_CHECKING, List, Literal, Optional
+
+if TYPE_CHECKING:
+    # Type-only import: keeps the data-model layer free of a runtime dependency
+    # on the entity-matching loader / YAML logic.
+    from trendradar.cr.entity_match import EntityResources
 
 
 # ---------------------------------------------------------------------------
@@ -244,3 +249,16 @@ class CRClusterConfig:
     min_similarity: float = 0.55
     use_url_match: bool = True
     use_exact_title_match: bool = True
+
+    # --- Rule 4: cross-language latin/numeric entity overlap (V3b) ---
+    # When enabled, a Chinese hotlist item and an English RSS item that share
+    # >= entity_min_shared_total entities (of which >= entity_min_high_specificity
+    # are high-specificity) are merged.  Also switches _build_cluster_key to a
+    # hotlist-first canonical key so merged (mixed) clusters do not drift as RSS
+    # items churn in/out of the window.
+    use_entity_match: bool = True
+    entity_min_shared_total: int = 2
+    entity_min_high_specificity: int = 2
+    # None -> load the cached default resources from config/cr_entity_dictionary.yaml.
+    # Tests may pass an in-memory EntityResources to avoid file/cache coupling.
+    entity_resources: "EntityResources | None" = None
