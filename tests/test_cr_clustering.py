@@ -33,6 +33,14 @@ from trendradar.cr.cluster import (
     normalize_topic_text,
     title_similarity,
 )
+from trendradar.cr.entity_match import (
+    EntityResources,
+    clear_entity_resources_cache,
+    extract_entities,
+    is_high_specificity,
+    load_entity_resources,
+)
+from trendradar.cr.scoring import score_cr_candidate, score_cross_layer_raw
 
 
 # ---------------------------------------------------------------------------
@@ -923,6 +931,317 @@ class TestBuildCrCandidates(unittest.TestCase):
         candidates = build_cr_candidates(records)
         self.assertEqual(len(candidates[0].source_items), 1)
         self.assertIs(candidates[0].source_items[0], item)
+
+
+# ---------------------------------------------------------------------------
+# I. Rule 4: cross-language latin/numeric entity overlap (V3b)
+# ---------------------------------------------------------------------------
+
+
+# In-memory resources so tests do not depend on config/cr_entity_dictionary.yaml.
+_TEST_RESOURCES = EntityResources(
+    dictionary={
+        "凯恩": "kane",
+        "英格兰": "england",
+        "克罗地亚": "croatia",
+        "海力士": "hynix",
+        "特朗普": "trump",
+        "伊朗": "iran",
+        "中国": "china",
+    },
+    stoplist={"england", "croatia", "trump", "iran", "china"},
+)
+
+
+def _entity_config(**kw) -> CRClusterConfig:
+    kw.setdefault("entity_resources", _TEST_RESOURCES)
+    return CRClusterConfig(**kw)
+
+
+class TestExtractEntities(unittest.TestCase):
+    """extract_entities: raw-title extraction of latin/numeric entities."""
+
+    def setUp(self):
+        self.d = _TEST_RESOURCES.dictionary
+
+    def test_score_amount_percent_bignum(self):
+        ents = extract_entities("Up 49% to 8300 on a $2 deal, 4-2 result", self.d)
+        self.assertIn("4-2", ents)
+        self.assertIn("$2", ents)
+        self.assertIn("49%", ents)
+        self.assertIn("8300", ents)
+
+    def test_year_excluded(self):
+        ents = extract_entities("Outlook for 2026 and 1999 recap", self.d)
+        self.assertNotIn("2026", ents)
+        self.assertNotIn("1999", ents)
+
+    def test_model_product_tokens(self):
+        ents = extract_entities("GLM-5.2 vs F-35 at G7, HBM4E shipping", self.d)
+        self.assertIn("glm-5.2", ents)
+        self.assertIn("f-35", ents)
+        self.assertIn("g7", ents)
+        self.assertIn("hbm4e", ents)
+        # Model token must NOT also leak its alphabetic prefix as a separate entity.
+        self.assertNotIn("glm", ents)
+
+    def test_capitalized_words(self):
+        ents = extract_entities("SpaceX and Nvidia at Versailles", self.d)
+        self.assertIn("spacex", ents)
+        self.assertIn("nvidia", ents)
+        self.assertIn("versailles", ents)
+
+    def test_dictionary_mapping_from_chinese(self):
+        ents = extract_entities("特朗普谈伊朗与中国", self.d)
+        self.assertEqual(ents, {"trump", "iran", "china"})
+
+    def test_latin_embedded_in_cjk(self):
+        ents = extract_entities("SpaceX上市后股价飙升", self.d)
+        self.assertIn("spacex", ents)
+
+    def test_extraction_stopwords_filtered(self):
+        ents = extract_entities("Live Updates: Breaking Video, Says New on Friday in June", self.d)
+        for noise in ("live", "breaking", "video", "says", "new", "friday", "june"):
+            self.assertNotIn(noise, ents)
+
+    def test_raw_title_not_mangled(self):
+        # Punctuation-bearing entities survive (would be destroyed by normalization).
+        self.assertIn("1-1", extract_entities("Draw 1-1 in the final", self.d))
+        self.assertIn("glm-5.2", extract_entities("GLM-5.2 released", self.d))
+        self.assertIn("$2", extract_entities("A $2 trillion club", self.d))
+
+    def test_empty_title(self):
+        self.assertEqual(extract_entities("", self.d), set())
+
+
+class TestIsHighSpecificity(unittest.TestCase):
+    """is_high_specificity: numeric/model always; proper nouns minus stoplist."""
+
+    def setUp(self):
+        self.stop = _TEST_RESOURCES.stoplist
+
+    def test_numeric_and_model_always_high(self):
+        for e in ("4-2", "8300", "$2", "49%", "glm-5.2", "g7"):
+            self.assertTrue(is_high_specificity(e, self.stop), e)
+
+    def test_stoplisted_proper_noun_low(self):
+        for e in ("england", "trump", "iran", "china"):
+            self.assertFalse(is_high_specificity(e, self.stop), e)
+
+    def test_non_stoplisted_proper_noun_high(self):
+        for e in ("kane", "spacex", "hynix", "vance"):
+            self.assertTrue(is_high_specificity(e, self.stop), e)
+
+
+class TestRule4Merge(unittest.TestCase):
+    """Rule 4 merges cross-source pairs with >= 2 shared high-specificity entities."""
+
+    def _hl(self, title, url):
+        return _hotlist_item(title=title, url=url, source_id="weibo", source_name="weibo")
+
+    def _rss(self, title, url):
+        return _rss_item(title=title, url=url, feed_id="reuters", source_name="Reuters")
+
+    def test_merges_company_and_model(self):
+        rec = _primitive_record(source_items=[
+            self._hl("SK海力士HBM4E量产", "https://hl.example.com/1"),
+            self._rss("SK Hynix starts HBM4E mass production", "https://rss.example.com/1"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config())
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0].primary_source_type, "mixed")
+        self.assertTrue(cands[0].has_hotlist and cands[0].has_rss)
+
+    def test_merges_name_and_score(self):
+        rec = _primitive_record(source_items=[
+            self._hl("凯恩双响 英格兰4-2克罗地亚", "https://hl.example.com/2"),
+            self._rss("Kane scores twice as England beat Croatia 4-2", "https://rss.example.com/2"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config())
+        # shared {kane, england, croatia, 4-2}; high-spec {kane, 4-2} = 2 -> merge
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0].primary_source_type, "mixed")
+
+    def test_no_merge_only_stoplisted_shared(self):
+        rec = _primitive_record(source_items=[
+            self._hl("英格兰对阵克罗地亚", "https://hl.example.com/3"),
+            self._rss("England face Croatia in a friendly", "https://rss.example.com/3"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config())
+        # shared {england, croatia} but 0 high-spec -> no merge
+        self.assertEqual(len(cands), 2)
+
+    def test_no_merge_generic_trump_iran(self):
+        rec = _primitive_record(source_items=[
+            self._hl("特朗普谈伊朗", "https://hl.example.com/4"),
+            self._rss("Trump comments on Iran tensions", "https://rss.example.com/4"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config())
+        # shared {trump, iran} both stoplisted -> 0 high-spec -> no merge (report FP killed)
+        self.assertEqual(len(cands), 2)
+
+    def test_below_threshold_no_merge(self):
+        rec = _primitive_record(source_items=[
+            self._hl("海力士发布会", "https://hl.example.com/5"),
+            self._rss("SK Hynix annual event", "https://rss.example.com/5"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config())
+        # only {hynix} shared = 1 < 2 -> no merge
+        self.assertEqual(len(cands), 2)
+
+
+class TestRule4Gating(unittest.TestCase):
+    """Rule 4 only fires across source types; characterizes transitive bridging."""
+
+    def test_same_source_type_not_merged_by_rule4(self):
+        # Disable Rule 3 (min_shared_tokens huge) to isolate Rule 4 behaviour.
+        cfg = _entity_config(min_shared_tokens=100, min_similarity=0.99)
+        rec = _primitive_record(source_items=[
+            _hotlist_item(title="SpaceX 8300 点评", url="https://a.com/1", source_id="weibo"),
+            _hotlist_item(title="8300 SpaceX 分析", url="https://b.com/1", source_id="douyin"),
+        ])
+        cands = build_cr_candidates([rec], config=cfg)
+        # Both hotlist; share {spacex, 8300} but Rule 4 is gated to hotlist+rss -> no merge.
+        self.assertEqual(len(cands), 2)
+
+    def test_cross_source_same_entities_merges(self):
+        # Same entities, but now one side is RSS -> Rule 4 applies.
+        cfg = _entity_config(min_shared_tokens=100, min_similarity=0.99)
+        rec = _primitive_record(source_items=[
+            _hotlist_item(title="SpaceX 8300 点评", url="https://a.com/1", source_id="weibo"),
+            _rss_item(title="8300 SpaceX analysis", url="https://b.com/1", feed_id="reuters"),
+        ])
+        cands = build_cr_candidates([rec], config=cfg)
+        self.assertEqual(len(cands), 1)
+
+    def test_transitive_bridging_characterized(self):
+        # hotlist A -- rss X -- hotlist B: A and B are NOT directly Rule-4-eligible
+        # (same source type) and Rule 3 is disabled, yet Union-Find bridges them via X.
+        # v1 accepts this; documented and observed via #106.
+        cfg = _entity_config(min_shared_tokens=100, min_similarity=0.99)
+        rec = _primitive_record(source_items=[
+            _hotlist_item(title="SpaceX 8300 点评", url="https://a.com/1", source_id="weibo"),
+            _rss_item(title="SpaceX hits 8300 milestone", url="https://x.com/1", feed_id="reuters"),
+            _hotlist_item(title="8300 SpaceX 大涨", url="https://b.com/1", source_id="douyin"),
+        ])
+        cands = build_cr_candidates([rec], config=cfg)
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(len(cands[0].source_items), 3)
+
+
+class TestCanonicalClusterKey(unittest.TestCase):
+    """hotlist-first cluster_key: stable under RSS churn, legacy-identical when off."""
+
+    def _mixed(self, rss_title, rss_url):
+        return _primitive_record(source_items=[
+            _hotlist_item(title="SK海力士HBM4E量产", url="https://hl.example.com/k",
+                          source_id="weibo"),
+            _rss_item(title=rss_title, url=rss_url, feed_id="reuters"),
+        ])
+
+    def test_key_stable_across_rss_churn(self):
+        a = build_cr_candidates([self._mixed("SK Hynix HBM4E mass production starts",
+                                             "https://rss.example.com/a")], config=_entity_config())
+        b = build_cr_candidates([self._mixed("SK Hynix HBM4E shipments to Nvidia begin",
+                                             "https://rss.example.com/b")], config=_entity_config())
+        self.assertEqual(len(a), 1)
+        self.assertEqual(len(b), 1)
+        # Different RSS item each run, same hotlist core -> identical key.
+        self.assertEqual(a[0].cluster_key, b[0].cluster_key)
+        self.assertEqual(a[0].candidate_id, b[0].candidate_id)
+
+    def test_hotlist_only_key_identical_on_off(self):
+        rec = _primitive_record(source_items=[_hotlist_item(title="纯热榜事件", url="https://h.com/1")])
+        on = build_cr_candidates([rec], config=_entity_config(use_entity_match=True))
+        off = build_cr_candidates([rec], config=_entity_config(use_entity_match=False))
+        self.assertEqual(on[0].cluster_key, off[0].cluster_key)
+
+    def test_rss_only_key_identical_on_off(self):
+        rec = _primitive_record(source_items=[_rss_item(title="RSS only event", url="https://r.com/1")])
+        on = build_cr_candidates([rec], config=_entity_config(use_entity_match=True))
+        off = build_cr_candidates([rec], config=_entity_config(use_entity_match=False))
+        self.assertEqual(on[0].cluster_key, off[0].cluster_key)
+
+
+class TestUseEntityMatchOff(unittest.TestCase):
+    """use_entity_match=False fully restores legacy behaviour."""
+
+    def test_no_rule4_merge_when_off(self):
+        rec = _primitive_record(source_items=[
+            _hotlist_item(title="SK海力士HBM4E量产", url="https://hl.example.com/1", source_id="weibo"),
+            _rss_item(title="SK Hynix starts HBM4E mass production", url="https://rss.example.com/1",
+                      feed_id="reuters"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config(use_entity_match=False))
+        self.assertEqual(len(cands), 2)
+
+
+class TestRule4ScoringActivation(unittest.TestCase):
+    """A merged mixed candidate auto-activates the (previously dormant) cross-evidence path."""
+
+    def test_mixed_candidate_activates_cooccurrence_and_strong(self):
+        rec = _primitive_record(source_items=[
+            _hotlist_item(title="SK海力士HBM4E量产", url="https://hl.example.com/1",
+                          source_id="weibo", current_rank=3, normalized_rank=3),
+            _rss_item(title="SK Hynix starts HBM4E mass production", url="https://rss.example.com/1",
+                      feed_id="reuters"),
+        ])
+        cands = build_cr_candidates([rec], config=_entity_config())
+        self.assertEqual(len(cands), 1)
+        cand = cands[0]
+        self.assertEqual(cand.primary_source_type, "mixed")
+
+        cl = score_cross_layer_raw(cand)
+        self.assertIn("hotlist_rss_cooccurrence=7", cl.reasons)
+
+        result = score_cr_candidate(cand)
+        em = result.debug["evidence_multiplier"]
+        self.assertEqual(em["reason"], "strong_cross_evidence")
+        self.assertAlmostEqual(em["multiplier"], 1.10)
+
+
+class TestEntityResourceLoader(unittest.TestCase):
+    """Loader degrades gracefully on missing / malformed / null files."""
+
+    def setUp(self):
+        clear_entity_resources_cache()
+        self.addCleanup(clear_entity_resources_cache)
+
+    def test_missing_file_returns_empty(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            res = load_entity_resources(config_dir=d)
+            self.assertEqual(res.dictionary, {})
+            self.assertEqual(res.stoplist, set())
+
+    def test_malformed_yaml_returns_empty(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "cr_entity_dictionary.yaml"), "w", encoding="utf-8") as f:
+                f.write("::: not : valid : yaml :::\n  - [unclosed\n")
+            res = load_entity_resources(config_dir=d)
+            self.assertEqual(res.dictionary, {})
+
+    def test_null_fields_no_crash(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "cr_entity_dictionary.yaml"), "w", encoding="utf-8") as f:
+                f.write("dictionary: null\nstoplist: null\n")
+            res = load_entity_resources(config_dir=d)
+            self.assertEqual(res.dictionary, {})
+            self.assertEqual(res.stoplist, set())
+
+    def test_list_value_skipped_in_v1(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "cr_entity_dictionary.yaml"), "w", encoding="utf-8") as f:
+                f.write("dictionary:\n  特朗普: trump\n  欧盟: [eu, european union]\nstoplist:\n  - trump\n")
+            res = load_entity_resources(config_dir=d)
+            self.assertEqual(res.dictionary, {"特朗普": "trump"})  # list value skipped
+            self.assertEqual(res.stoplist, {"trump"})
 
 
 if __name__ == "__main__":
