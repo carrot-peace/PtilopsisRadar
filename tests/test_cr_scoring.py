@@ -27,6 +27,7 @@ from trendradar.cr.scoring import (
     CRScoringProfile,
     CRScoreResult,
     DEFAULT_CR_SCORING_PROFILE,
+    _compute_evidence_multiplier,
     _distinct_source_count,
     _source_identity,
     clamp_score,
@@ -98,7 +99,7 @@ def _make_candidate(
 class TestProfileDefaults(unittest.TestCase):
 
     def test_profile_version(self):
-        self.assertEqual(DEFAULT_CR_SCORING_PROFILE.profile_version, "cr-score-v0.1")
+        self.assertEqual(DEFAULT_CR_SCORING_PROFILE.profile_version, "cr-score-v1.1")
 
     def test_thresholds(self):
         p = DEFAULT_CR_SCORING_PROFILE
@@ -117,6 +118,17 @@ class TestProfileDefaults(unittest.TestCase):
 
     def test_background_support_disabled(self):
         self.assertFalse(DEFAULT_CR_SCORING_PROFILE.background_support_enabled)
+
+    def test_evidence_multiplier_enabled_by_default(self):
+        self.assertTrue(DEFAULT_CR_SCORING_PROFILE.evidence_multiplier_enabled)
+
+    def test_evidence_multiplier_params(self):
+        p = DEFAULT_CR_SCORING_PROFILE
+        self.assertAlmostEqual(p.evidence_multiplier_single, 0.88)
+        self.assertAlmostEqual(p.evidence_multiplier_moderate, 1.00)
+        self.assertAlmostEqual(p.evidence_multiplier_strong, 1.10)
+        self.assertAlmostEqual(p.cross_evidence_bonus_factor, 0.25)
+        self.assertAlmostEqual(p.cross_evidence_bonus_cap, 5.0)
 
     def test_frozen(self):
         with self.assertRaises(AttributeError):
@@ -932,12 +944,17 @@ class TestCombineCrScores(unittest.TestCase):
         self.assertAlmostEqual(result.cross_evidence.capped_score, 15.0)
 
     def test_total_cap_100(self):
-        """Total score is capped at 100."""
+        """Total score is capped at 100.
+
+        Uses a legacy profile (evidence_multiplier_enabled=False) so the
+        formula is heat + cross_evidence, matching the original v0.1 behaviour.
+        """
+        profile = CRScoringProfile(evidence_multiplier_enabled=False)
         cand = _make_candidate(candidate_id="x", cluster_key="k")
         gr = make_component_score("growth_raw", 60.0, 60.0)
         ch = make_component_score("current_heat_raw", 50.0, 50.0)
         cl = make_component_score("cross_layer_raw", 15.0, 15.0)
-        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        result = combine_cr_scores(cand, profile=profile, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
         # heat = min(60+50, 80) = 80, cross = 15, total = min(95, 100) = 95
         self.assertAlmostEqual(result.total_score, 95.0)
 
@@ -1085,7 +1102,7 @@ class TestScoreCrCandidate(unittest.TestCase):
         """Result profile_version matches profile."""
         cand = _make_candidate(source_items=[_make_item()])
         result = score_cr_candidate(cand)
-        self.assertEqual(result.profile_version, "cr-score-v0.1")
+        self.assertEqual(result.profile_version, "cr-score-v1.1")
 
 
 # ===========================================================================
@@ -1139,6 +1156,329 @@ class TestNoDecisionFields(unittest.TestCase):
         for word in ["alert", "urgent", "suppress", "watch", "quiet"]:
             # Only check as standalone values, not substrings in reason strings
             pass  # The field check above is sufficient
+
+
+# ===========================================================================
+# J. B2-lite evidence multiplier
+# ===========================================================================
+
+
+class TestB2LiteEvidenceMultiplier(unittest.TestCase):
+    """B2-lite: cross evidence as multiplier + small bonus (v1.1)."""
+
+    def test_default_enabled(self):
+        """Default profile has evidence_multiplier_enabled=True."""
+        self.assertTrue(DEFAULT_CR_SCORING_PROFILE.evidence_multiplier_enabled)
+
+    def test_debug_records_enabled(self):
+        """debug contains evidence_multiplier block with enabled=True."""
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[_make_item(source_id="weibo", source_name="weibo")],
+            source_names=["weibo"], source_ids=["weibo"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 30.0, 60.0)
+        ch = make_component_score("current_heat_raw", 20.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 2.0, 15.0)
+        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        em = result.debug["evidence_multiplier"]
+        self.assertTrue(em["enabled"])
+        self.assertIn("multiplier", em)
+        self.assertIn("reason", em)
+        self.assertIn("legacy_total_score", em)
+
+    def test_debug_records_disabled(self):
+        """debug contains evidence_multiplier block with enabled=False."""
+        profile = CRScoringProfile(evidence_multiplier_enabled=False)
+        cand = _make_candidate(candidate_id="x", cluster_key="k")
+        gr = make_component_score("growth_raw", 10.0, 60.0)
+        ch = make_component_score("current_heat_raw", 10.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 5.0, 15.0)
+        result = combine_cr_scores(cand, profile=profile, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        em = result.debug["evidence_multiplier"]
+        self.assertFalse(em["enabled"])
+        self.assertEqual(em["reason"], "disabled")
+
+    def test_can_disable_to_legacy(self):
+        """With evidence_multiplier_enabled=False, total = heat + cross_evidence."""
+        profile = CRScoringProfile(evidence_multiplier_enabled=False)
+        cand = _make_candidate(candidate_id="x", cluster_key="k")
+        gr = make_component_score("growth_raw", 30.0, 60.0)
+        ch = make_component_score("current_heat_raw", 20.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 10.0, 15.0)
+        result = combine_cr_scores(cand, profile=profile, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        # heat = 50, cross = 10, total = 60
+        self.assertAlmostEqual(result.total_score, 60.0)
+
+    def test_single_source_decayed(self):
+        """Single-source, no RSS → multiplier=0.88, score < legacy."""
+        profile_legacy = CRScoringProfile(evidence_multiplier_enabled=False)
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[_make_item(source_id="weibo", source_name="weibo")],
+            source_names=["weibo"], source_ids=["weibo"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 40.0, 60.0)
+        ch = make_component_score("current_heat_raw", 30.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 1.0, 15.0)
+
+        legacy = combine_cr_scores(cand, profile=profile_legacy, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        b2lite = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+
+        # heat=70, cross=1, legacy=71
+        self.assertAlmostEqual(legacy.total_score, 71.0)
+        # multiplier=0.88, bonus=min(0.25,5)=0.25, total=70*0.88+0.25=61.85
+        self.assertAlmostEqual(b2lite.total_score, 61.85)
+        self.assertLess(b2lite.total_score, legacy.total_score)
+
+    def test_two_source_moderate(self):
+        """2-source, no RSS → multiplier=1.00, total=heat+bonus."""
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[
+                _make_item(source_id="a", source_name="a", title="A"),
+                _make_item(source_id="b", source_name="b", title="B"),
+            ],
+            source_names=["a", "b"], source_ids=["a", "b"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 40.0, 60.0)
+        ch = make_component_score("current_heat_raw", 30.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 4.0, 15.0)
+        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        # heat=70, cross=4, bonus=min(4*0.25,5)=1.0, total=70*1.0+1.0=71.0
+        self.assertAlmostEqual(result.total_score, 71.0)
+        em = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(em["multiplier"], 1.00)
+        self.assertAlmostEqual(em["small_cross_bonus"], 1.0)
+
+    def test_strong_cross_evidence_rewarded(self):
+        """3-source → multiplier=1.10."""
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[
+                _make_item(source_id="a", source_name="a", title="A"),
+                _make_item(source_id="b", source_name="b", title="B"),
+                _make_item(source_id="c", source_name="c", title="C"),
+            ],
+            source_names=["a", "b", "c"], source_ids=["a", "b", "c"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 40.0, 60.0)
+        ch = make_component_score("current_heat_raw", 30.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 4.0, 15.0)
+        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        # heat=70, cross=4, bonus=min(1.0,5)=1.0, total=70*1.10+1.0=78.0
+        self.assertAlmostEqual(result.total_score, 78.0)
+        em = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(em["multiplier"], 1.10)
+
+    def test_hotlist_rss_cooccurrence_strong(self):
+        """has_hotlist+has_rss → multiplier=1.10 even with 1 distinct source."""
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[
+                _make_item(source_id="weibo", source_name="weibo", title="A"),
+                _make_item(source_type="rss", feed_id="hn", source_name="hn",
+                           title="B", url="https://hn.example.com/1"),
+            ],
+            source_names=["weibo", "hn"], source_ids=["weibo"], feed_ids=["hn"],
+            has_hotlist=True, has_rss=True, primary_source_type="mixed",
+        )
+        gr = make_component_score("growth_raw", 30.0, 60.0)
+        ch = make_component_score("current_heat_raw", 20.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 7.0, 15.0)
+        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        # heat=50, cross=7, bonus=min(1.75,5)=1.75, total=50*1.10+1.75=56.75
+        self.assertAlmostEqual(result.total_score, 56.75)
+        em = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(em["multiplier"], 1.10)
+        self.assertEqual(em["reason"], "strong_cross_evidence")
+
+    def test_cross_bonus_capped_at_5(self):
+        """cross_evidence_score * factor capped at 5.0."""
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[
+                _make_item(source_id="a", source_name="a", title="A"),
+                _make_item(source_id="b", source_name="b", title="B"),
+                _make_item(source_id="c", source_name="c", title="C"),
+            ],
+            source_names=["a", "b", "c"], source_ids=["a", "b", "c"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 40.0, 60.0)
+        ch = make_component_score("current_heat_raw", 30.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 15.0, 15.0)
+        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        em = result.debug["evidence_multiplier"]
+        # cross=15, bonus=min(15*0.25, 5)=min(3.75, 5)=3.75
+        self.assertAlmostEqual(em["small_cross_bonus"], 3.75)
+
+    def test_cross_bonus_cap_hit(self):
+        """With bonus_factor=1.0 and bonus_cap=5.0, bonus caps at 5."""
+        profile = CRScoringProfile(
+            cross_evidence_bonus_factor=1.0,
+            cross_evidence_bonus_cap=5.0,
+        )
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[
+                _make_item(source_id="a", source_name="a", title="A"),
+                _make_item(source_id="b", source_name="b", title="B"),
+                _make_item(source_id="c", source_name="c", title="C"),
+            ],
+            source_names=["a", "b", "c"], source_ids=["a", "b", "c"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 40.0, 60.0)
+        ch = make_component_score("current_heat_raw", 30.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 15.0, 15.0)
+        result = combine_cr_scores(cand, profile=profile, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        em = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(em["small_cross_bonus"], 5.0)
+
+    def test_total_cap_respected(self):
+        """Final total never exceeds total_cap."""
+        profile = CRScoringProfile(
+            evidence_multiplier_strong=1.5,
+        )
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[
+                _make_item(source_id="a", source_name="a", title="A"),
+                _make_item(source_id="b", source_name="b", title="B"),
+                _make_item(source_id="c", source_name="c", title="C"),
+            ],
+            source_names=["a", "b", "c"], source_ids=["a", "b", "c"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 60.0, 60.0)
+        ch = make_component_score("current_heat_raw", 50.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 15.0, 15.0)
+        result = combine_cr_scores(cand, profile=profile, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        self.assertLessEqual(result.total_score, 100.0)
+
+    def test_legacy_total_recorded_in_debug(self):
+        """When enabled, debug records legacy_total_score for comparison."""
+        cand = _make_candidate(
+            candidate_id="x", cluster_key="k",
+            source_items=[_make_item(source_id="weibo", source_name="weibo")],
+            source_names=["weibo"], source_ids=["weibo"],
+            has_hotlist=True, primary_source_type="hotlist",
+        )
+        gr = make_component_score("growth_raw", 40.0, 60.0)
+        ch = make_component_score("current_heat_raw", 30.0, 50.0)
+        cl = make_component_score("cross_layer_raw", 10.0, 15.0)
+        result = combine_cr_scores(cand, growth_raw=gr, current_heat_raw=ch, cross_layer_raw=cl)
+        em = result.debug["evidence_multiplier"]
+        # legacy = heat(70) + cross(10) = 80
+        self.assertAlmostEqual(em["legacy_total_score"], 80.0)
+        # adjusted = 70*0.88 + min(10*0.25, 5) = 61.6 + 2.5 = 64.1
+        self.assertAlmostEqual(em["adjusted_total_score"], 64.1)
+
+
+class TestB2LiteScenarios(unittest.TestCase):
+    """B2-lite boundary scenario tests (from replay)."""
+
+    def test_single_source_boundary_alert(self):
+        """Single-source top10 new burst: B2-lite keeps it near alert boundary."""
+        item = _make_item(
+            source_id="weibo", source_name="weibo", title="S1",
+            is_new=True, is_new_semantics="new_titles_detection",
+            first_crawl_of_day=False, current_rank=8,
+            has_reliable_rank_timeline=True, previous_observation_exists=False,
+            visible_observation_count=1, count=1,
+            has_time_signals=True, time_signals_synthetic=False,
+        )
+        cand = _make_candidate(
+            candidate_id="s1", cluster_key="s1||k",
+            source_items=[item],
+            source_names=["weibo"], source_ids=["weibo"],
+            has_hotlist=True, primary_source_type="hotlist",
+            best_current_rank=8,
+        )
+        result = score_cr_candidate(cand)
+        # B2-lite: heat=67.9, cross=1, bonus=0.25, total=67.9*0.88+0.25=60.0
+        self.assertAlmostEqual(result.total_score, 60.0, places=0)
+
+    def test_multi_source_rss_urgent(self):
+        """Multi-source+RSS top2: B2-lite keeps it urgent."""
+        item1 = _make_item(
+            source_id="weibo", source_name="weibo", title="S4",
+            is_new=True, is_new_semantics="new_titles_detection",
+            first_crawl_of_day=False, current_rank=2,
+            has_reliable_rank_timeline=True, previous_observation_exists=True,
+            previous_observation_visible=True, previous_visible_rank=15,
+            rank_delta=13, visible_observation_count=3, count=5,
+            has_time_signals=True, time_signals_synthetic=False,
+        )
+        item2 = _make_item(
+            source_type="rss", feed_id="hn", source_name="HN",
+            title="S4 RSS", url="https://hn.example.com/1",
+        )
+        item3 = _make_item(source_id="douyin", source_name="douyin", title="S4", current_rank=5)
+        cand = _make_candidate(
+            candidate_id="s4", cluster_key="s4||k",
+            source_items=[item1, item2, item3],
+            source_names=["weibo", "hn", "douyin"],
+            source_ids=["weibo", "douyin"], feed_ids=["hn"],
+            has_hotlist=True, has_rss=True, primary_source_type="mixed",
+            best_current_rank=2,
+        )
+        result = score_cr_candidate(cand)
+        self.assertGreaterEqual(result.total_score, 80.0)
+        em = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(em["multiplier"], 1.10)
+
+    def test_single_source_high_heat_downgraded_from_urgent(self):
+        """Single-source top3 new burst: urgent → alert (not watch)."""
+        item = _make_item(
+            source_id="weibo", source_name="weibo", title="S15",
+            is_new=True, is_new_semantics="new_titles_detection",
+            first_crawl_of_day=False, current_rank=3,
+            has_reliable_rank_timeline=True, previous_observation_exists=False,
+            visible_observation_count=1, count=3,
+            has_time_signals=True, time_signals_synthetic=False,
+        )
+        cand = _make_candidate(
+            candidate_id="s15", cluster_key="s15||k",
+            source_items=[item],
+            source_names=["weibo"], source_ids=["weibo"],
+            has_hotlist=True, primary_source_type="hotlist",
+            best_current_rank=3,
+        )
+        result = score_cr_candidate(cand)
+        # heat=80, cross=1, bonus=0.25, total=80*0.88+0.25=70.65
+        self.assertGreaterEqual(result.total_score, 60.0)
+        self.assertLess(result.total_score, 80.0)
+
+    def test_four_source_rss_stays_alert(self):
+        """4-source+RSS top4: stays alert, not promoted to urgent by double-count."""
+        items = [_make_item(source_id=sid, source_name=sid, title="S7",
+                            current_rank=4, is_new=True,
+                            is_new_semantics="new_titles_detection",
+                            first_crawl_of_day=False)
+                 for sid in ["weibo", "douyin", "baidu", "zhihu"]]
+        items.append(_make_item(source_type="rss", feed_id="36kr", source_name="36kr",
+                                title="S7 RSS", url="https://36kr.com/1"))
+        cand = _make_candidate(
+            candidate_id="s7", cluster_key="s7||k",
+            source_items=items,
+            source_names=["weibo", "douyin", "baidu", "zhihu", "36kr"],
+            source_ids=["weibo", "douyin", "baidu", "zhihu"],
+            feed_ids=["36kr"],
+            has_hotlist=True, has_rss=True, primary_source_type="mixed",
+            best_current_rank=4,
+        )
+        result = score_cr_candidate(cand)
+        # heat=58, cross=15, bonus=min(3.75,5)=3.75, total=58*1.10+3.75=67.55
+        self.assertGreaterEqual(result.total_score, 60.0)
+        self.assertLess(result.total_score, 80.0)
+        em = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(em["multiplier"], 1.10)
 
 
 # ===========================================================================

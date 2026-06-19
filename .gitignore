@@ -2,6 +2,7 @@
 output/
 logs/
 backups/
+tmp/
 
 # Databases (runtime-generated .db / .sqlite files)
 *.db
