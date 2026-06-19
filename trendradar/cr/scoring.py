@@ -53,6 +53,31 @@ def _distinct_source_count(candidate: CRCandidate) -> int:
     return len(identities)
 
 
+def _compute_evidence_multiplier(
+    candidate: CRCandidate,
+    profile: CRScoringProfile,
+) -> tuple[float, str]:
+    """Compute the B2-lite evidence multiplier for a candidate.
+
+    Returns (multiplier, reason).  The multiplier modulates ``heat_score``
+    so that cross-source / cross-platform evidence raises the final score
+    while single-source-only events are gently dampened.
+
+    Rules:
+      - hotlist+RSS co-occurrence OR >= 3 distinct sources → strong (1.10)
+      - >= 2 distinct sources → moderate (1.00)
+      - otherwise → single (0.88)
+    """
+    distinct_sources = _distinct_source_count(candidate)
+    has_hotlist_rss = bool(candidate.has_hotlist and candidate.has_rss)
+
+    if has_hotlist_rss or distinct_sources >= 3:
+        return profile.evidence_multiplier_strong, "strong_cross_evidence"
+    if distinct_sources >= 2:
+        return profile.evidence_multiplier_moderate, "moderate_cross_evidence"
+    return profile.evidence_multiplier_single, "single_source_no_cross_evidence"
+
+
 # ---------------------------------------------------------------------------
 # Scoring Profile
 # ---------------------------------------------------------------------------
@@ -66,7 +91,7 @@ class CRScoringProfile:
     the project runtime config (config.yaml).
     """
 
-    profile_version: str = "cr-score-v0.1"
+    profile_version: str = "cr-score-v1.1"
 
     alert_threshold: float = 60.0
     urgent_threshold: float = 80.0
@@ -82,6 +107,14 @@ class CRScoringProfile:
     background_support_raw_cap: float = 10.0
 
     background_support_enabled: bool = False
+
+    # --- B2-lite evidence multiplier (v1.1) ---
+    evidence_multiplier_enabled: bool = True
+    evidence_multiplier_single: float = 0.88
+    evidence_multiplier_moderate: float = 1.00
+    evidence_multiplier_strong: float = 1.10
+    cross_evidence_bonus_factor: float = 0.25
+    cross_evidence_bonus_cap: float = 5.0
 
 
 DEFAULT_CR_SCORING_PROFILE = CRScoringProfile()
@@ -733,9 +766,26 @@ def combine_cr_scores(
     cross_ev_raw = cross_layer_raw_cs.capped_score + bg_cs.capped_score
     cross_ev_cs = make_component_score("cross_evidence", cross_ev_raw, profile.cross_evidence_cap)
 
-    # Total.
-    total_raw = heat_cs.capped_score + cross_ev_cs.capped_score
-    total_score = clamp_score(total_raw, profile.total_cap)
+    # Total — B2-lite or legacy.
+    heat_score = heat_cs.capped_score
+    cross_evidence_score = cross_ev_cs.capped_score
+
+    if profile.evidence_multiplier_enabled:
+        # B2-lite: heat × multiplier + small cross-evidence bonus.
+        multiplier, multiplier_reason = _compute_evidence_multiplier(candidate, profile)
+        small_cross_bonus = min(
+            cross_evidence_score * profile.cross_evidence_bonus_factor,
+            profile.cross_evidence_bonus_cap,
+        )
+        total_raw = heat_score * multiplier + small_cross_bonus
+        total_score = clamp_score(total_raw, profile.total_cap)
+    else:
+        # Legacy: heat + cross_evidence (additive).
+        multiplier = 1.0
+        multiplier_reason = "disabled"
+        small_cross_bonus = 0.0
+        total_raw = heat_score + cross_evidence_score
+        total_score = clamp_score(total_raw, profile.total_cap)
 
     # Merge trigger_reasons: component reasons + explicit, deduplicated, deterministic order.
     all_reasons: list[str] = []
@@ -752,11 +802,29 @@ def combine_cr_scores(
                 seen.add(r)
                 all_reasons.append(r)
 
+    # Debug: evidence multiplier observability.
+    evidence_multiplier_debug: dict[str, object] = {
+        "enabled": profile.evidence_multiplier_enabled,
+        "multiplier": multiplier,
+        "reason": multiplier_reason,
+        "heat_score": heat_score,
+        "cross_evidence_score": cross_evidence_score,
+        "small_cross_bonus": small_cross_bonus,
+        "cross_evidence_bonus_factor": profile.cross_evidence_bonus_factor,
+        "cross_evidence_bonus_cap": profile.cross_evidence_bonus_cap,
+        "adjusted_total_score": total_score,
+    }
+    if profile.evidence_multiplier_enabled:
+        evidence_multiplier_debug["legacy_total_score"] = clamp_score(
+            heat_score + cross_evidence_score, profile.total_cap,
+        )
+
     merged_debug: dict[str, object] = {
         "profile_version": profile.profile_version,
         "heat_raw": heat_raw,
         "cross_evidence_raw": cross_ev_raw,
         "total_raw": total_raw,
+        "evidence_multiplier": evidence_multiplier_debug,
     }
     if debug:
         merged_debug.update(debug)
