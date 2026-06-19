@@ -156,6 +156,17 @@ def build_cr_pipeline_from_primitives(
         primitives_tuple, config=config.cluster
     )
 
+    # 2b. Corroboration mode: drop RSS-only candidates that never merged into a
+    # hotlist event.  Cross-evidence RSS only matters as corroboration, so
+    # unmerged RSS (admitted loosely, see cross_evidence_ingest) is evaporated
+    # here rather than surfaced.  Flipping drop_unmerged_rss=False is the seam
+    # for a future independent English stream.
+    drop_unmerged_rss = (
+        config.cluster.drop_unmerged_rss if config.cluster is not None else True
+    )
+    if drop_unmerged_rss:
+        candidates = [c for c in candidates if c.primary_source_type != "rss"]
+
     # 3. Score.
     score_results = [
         score_cr_candidate(c, profile=config.scoring) for c in candidates

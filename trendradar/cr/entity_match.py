@@ -109,6 +109,9 @@ def _load_entity_resources_uncached(path: Path) -> EntityResources:
     if isinstance(raw_stop, list):
         stoplist = {s.strip().lower() for s in raw_stop if isinstance(s, str) and s.strip()}
 
+    # Log counts on success too: a 0/0 load (e.g. wrong cwd) would otherwise make
+    # cross-language matching silently ineffective.
+    print(f"[实体词典] 加载成功: {path}（dictionary {len(dictionary)} 条, stoplist {len(stoplist)} 条）")
     return EntityResources(dictionary=dictionary, stoplist=stoplist)
 
 
