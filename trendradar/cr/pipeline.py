@@ -156,6 +156,23 @@ def build_cr_pipeline_from_primitives(
         primitives_tuple, config=config.cluster
     )
 
+    # 2b. Corroboration mode: drop cross-evidence-admitted RSS candidates that
+    # never merged into a hotlist event.  Legacy keyword RSS has no admission
+    # marker and retains its pre-funnel behavior.
+    drop_unmerged_rss = (
+        config.cluster.drop_unmerged_rss if config.cluster is not None else False
+    )
+    if drop_unmerged_rss:
+        candidates = [
+            c
+            for c in candidates
+            if not (
+                c.primary_source_type == "rss"
+                and c.source_items
+                and all(item.cross_evidence_admitted for item in c.source_items)
+            )
+        ]
+
     # 3. Score.
     score_results = [
         score_cr_candidate(c, profile=config.scoring) for c in candidates

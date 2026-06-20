@@ -450,6 +450,7 @@ def _adapt_rss_title_item(
         published_at=title_item.get("published_at") or None,
         summary=title_item.get("summary") or None,
         author=title_item.get("author") or None,
+        cross_evidence_admitted=bool(title_item.get("cross_evidence_admitted")),
     )
 
 

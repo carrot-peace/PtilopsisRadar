@@ -169,13 +169,16 @@ def _cluster_source_items(
       2. Exact URL match (when both non-empty) → merge.
       3. Strong title token overlap (≥ min_shared_tokens AND
          similarity ≥ min_similarity) → merge.
-      4. (Rule 4, cross-language) hotlist↔rss pair sharing
-         ≥ entity_min_shared_total entities of which
-         ≥ entity_min_high_specificity are high-specificity → merge.
+      4. (Rule 4, cross-language) each RSS item attaches to its SINGLE best
+         hotlist item — the one sharing ≥ entity_min_shared_total entities of
+         which ≥ entity_min_high_specificity are high-specificity, maximizing
+         high-spec overlap (tie-break: better hotlist rank, then lower index).
 
     Anti-merge: same keyword_group alone does NOT merge unrelated titles.
-    Rules 1-3 are unchanged; Rule 4 is strictly additive and gated to
-    cross-source-type (hotlist + rss) pairs.
+    Rules 1-3 (run pairwise over all items) are unchanged.  Rule 4 runs as a
+    post-pass and is constrained so an RSS item joins at most ONE hotlist
+    cluster: this prevents a broad "roundup" RSS from bridging two distinct
+    hotlist events (A — RSS — B) through Union-Find connected components.
     """
     items = list(source_items)
     n = len(items)
@@ -224,16 +227,43 @@ def _cluster_source_items(
                         uf.union(i, j)
                         continue
 
-            # Rule 4: cross-language entity overlap (hotlist ↔ rss only).
-            if config.use_entity_match and entities:
-                if {items[i].source_type, items[j].source_type} == {"hotlist", "rss"}:
-                    shared = entities[i] & entities[j]
-                    if len(shared) >= config.entity_min_shared_total:
-                        high_spec = sum(
-                            1 for e in shared if is_high_specificity(e, stoplist)
-                        )
-                        if high_spec >= config.entity_min_high_specificity:
-                            uf.union(i, j)
+    # Rule 4 (post-pass): attach each RSS item to its single best hotlist item.
+    # Running after Rules 1-3 and unioning each RSS at most once keeps an RSS
+    # from bridging two distinct hotlist events via connected components.
+    if config.use_entity_match and entities:
+        hotlist_idx = [i for i in range(n) if items[i].source_type == "hotlist"]
+
+        def _rank_key(h: int) -> int:
+            # Lower (better) rank sorts first; missing rank sorts last.
+            r = items[h].current_rank
+            if r is None:
+                r = items[h].normalized_rank
+            return r if r is not None else 10**9
+
+        for r in range(n):
+            if items[r].source_type != "rss":
+                continue
+            # Already attached to a hotlist cluster via Rules 1-3 → do not let
+            # Rule 4 union it elsewhere (that would bridge two hotlist cores).
+            root_r = uf.find(r)
+            if any(uf.find(h) == root_r for h in hotlist_idx):
+                continue
+
+            best_h = None
+            best_key: tuple | None = None
+            for h in hotlist_idx:
+                shared = entities[r] & entities[h]
+                if len(shared) < config.entity_min_shared_total:
+                    continue
+                high_spec = sum(1 for e in shared if is_high_specificity(e, stoplist))
+                if high_spec < config.entity_min_high_specificity:
+                    continue
+                # Best = most high-spec overlap, then best rank, then lowest index.
+                key = (-high_spec, _rank_key(h), h)
+                if best_key is None or key < best_key:
+                    best_key, best_h = key, h
+            if best_h is not None:
+                uf.union(r, best_h)
 
     # Group by root.
     clusters: Dict[int, List[CRSourceItem]] = {}
