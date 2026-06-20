@@ -257,6 +257,15 @@ def select_cr_a_candidates(
     return sorted_eligible[: config.max_candidates]
 
 
+def count_cr_a_eligible(presented: list[CRPresentedCandidate]) -> int:
+    """Count push-eligible alert/urgent candidates (pre-cap)."""
+    return sum(
+        1 for pc in presented
+        if pc.decision.push_eligible
+        and pc.decision_level in (DECISION_ALERT, DECISION_URGENT)
+    )
+
+
 # ---------------------------------------------------------------------------
 # CR-A text rendering helpers
 # ---------------------------------------------------------------------------
@@ -336,6 +345,9 @@ def _format_trigger_summary(reasons: list[str], max_items: int = 3) -> str:
         item = _format_trigger_item(r)
         if item is not None:
             parsed.append(item)
+
+    if not parsed:
+        return "score threshold"
 
     parsed.sort(key=lambda x: x[1], reverse=True)
     parts = [text for text, _ in parsed[:max_items]]
@@ -422,11 +434,7 @@ def render_cr_a_text_from_parts(
     presented = bind_cr_presented_candidates(
         candidates, score_results, decisions
     )
-    eligible_total = sum(
-        1 for pc in presented
-        if pc.decision.push_eligible
-        and pc.decision_level in (DECISION_ALERT, DECISION_URGENT)
-    )
+    eligible_total = count_cr_a_eligible(presented)
     selected = select_cr_a_candidates(presented, config=config)
     run = CRPresentationRun(
         run_label=run_label,
