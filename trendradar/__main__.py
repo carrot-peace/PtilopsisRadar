@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import webbrowser
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -296,6 +297,10 @@ class NewsAnalyzer:
         self._rss_source_failed = 0
         self._rss_total_count = 0
         self._rss_matched_count = 0
+        # Full RSS for the run, made available to the CR cross-evidence
+        # admission path (set in _execute_mode_strategy, read in
+        # _run_analysis_pipeline).  See trendradar/cr/cross_evidence_ingest.
+        self._cr_raw_rss_items = None
         self._hotlist_total_count = 0
 
         # 初始化存储管理器（使用 AppContext）
@@ -885,12 +890,58 @@ class NewsAnalyzer:
                     print(f"[CR-A] live Telegram sink not configured: {exc}", file=sys.stderr)
                     _dispatch_sink = None
 
+            # CR 跨证据:用原始全量 RSS 经"实体重叠准入"喂给 CR(替代中文关键词门
+            # 筛剩的 rss_items)。准入结果与关键词 RSS 合并;失败/禁用时回退,
+            # 绝不阻断主流程。
+            _cr_rss_stats = rss_items
+            from trendradar.cr.models import CRClusterConfig
+            from trendradar.cr.pipeline import CRPipelineConfig
+
+            _pipeline_cluster_cfg = CRClusterConfig()
+            try:
+                from trendradar.cr.cross_evidence_ingest import (
+                    build_cross_evidence_cluster_config_from_env,
+                    merge_rss_stats,
+                    select_cross_evidence_rss,
+                )
+                from trendradar.cr.entity_match import load_entity_resources
+
+                _ce_cfg = build_cross_evidence_cluster_config_from_env(os.environ)
+                # Admission failures and disabled/no-input paths must retain
+                # legacy RSS-only candidates.
+                _pipeline_cluster_cfg = replace(_ce_cfg, drop_unmerged_rss=False)
+                _raw_rss = getattr(self, "_cr_raw_rss_items", None)
+                if _ce_cfg.cross_evidence_rss_enabled and _raw_rss:
+                    _hotlist_titles = [
+                        t.get("title", "")
+                        for g in (stats or [])
+                        for t in g.get("titles", [])
+                    ]
+                    _admitted_rss_stats = select_cross_evidence_rss(
+                        _raw_rss,
+                        _hotlist_titles,
+                        resources=load_entity_resources(),
+                        now=self.ctx.get_time(),
+                        window_hours=_ce_cfg.cross_evidence_window_hours,
+                        max_per_topic=_ce_cfg.cross_evidence_max_per_topic,
+                    )
+                    _cr_rss_stats = merge_rss_stats(rss_items, _admitted_rss_stats)
+                    _pipeline_cluster_cfg = _ce_cfg
+                    _admitted = sum(
+                        len(g.get("titles", [])) for g in _admitted_rss_stats
+                    )
+                    print(f"[CR-A] 跨证据 RSS 准入: {_admitted} 条(来自 {len(_raw_rss)} 条原始 RSS)")
+            except Exception as exc:  # noqa: BLE001 - 准入失败回退,不阻断
+                print(f"[CR-A] 跨证据 RSS 准入失败,回退关键词 RSS: {exc}", file=sys.stderr)
+                _cr_rss_stats = rss_items
+
             _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
             build_and_write_cr_runtime_dry_run(
                 hotlist_stats=stats,
-                rss_stats=rss_items,
+                rss_stats=_cr_rss_stats,
                 run_label=_run_label,
                 run_context=CRRunContext(mode=mode),
+                pipeline_config=CRPipelineConfig(cluster=_pipeline_cluster_cfg),
                 dispatch_sink=_dispatch_sink,
                 dispatch_mode=_cr_mode,
                 quiet_hours_env=os.environ,
@@ -1459,6 +1510,9 @@ class NewsAnalyzer:
         - 每次运行都生成 HTML 报告（时间戳快照 + latest/{mode}.html + index.html）
         - 正常运行时不触发 Legacy Push
         """
+        # 暴露原始全量 RSS 给 CR 跨证据准入(_run_analysis_pipeline 读取)。
+        self._cr_raw_rss_items = raw_rss_items
+
         # 调度系统
         scheduler = self.ctx.create_scheduler()
         schedule = scheduler.resolve()

@@ -42,6 +42,12 @@ from trendradar.cr.entity_match import (
 )
 from trendradar.cr.scoring import score_cr_candidate, score_cross_layer_raw
 
+try:
+    import yaml as _yaml  # noqa: F401
+    _HAS_YAML = True
+except ImportError:
+    _HAS_YAML = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1129,19 +1135,31 @@ class TestRule4Gating(unittest.TestCase):
         cands = build_cr_candidates([rec], config=cfg)
         self.assertEqual(len(cands), 1)
 
-    def test_transitive_bridging_characterized(self):
-        # hotlist A -- rss X -- hotlist B: A and B are NOT directly Rule-4-eligible
-        # (same source type) and Rule 3 is disabled, yet Union-Find bridges them via X.
-        # v1 accepts this; documented and observed via #106.
+    def test_transitive_bridging_prevented(self):
+        # A "roundup" RSS X matches BOTH hotlist A and hotlist B by entities.
+        # Single-best-attach must NOT bridge A and B into one mega-cluster:
+        # X joins exactly one hotlist cluster, the other stays distinct.
         cfg = _entity_config(min_shared_tokens=100, min_similarity=0.99)
-        rec = _primitive_record(source_items=[
-            _hotlist_item(title="SpaceX 8300 点评", url="https://a.com/1", source_id="weibo"),
-            _rss_item(title="SpaceX hits 8300 milestone", url="https://x.com/1", feed_id="reuters"),
-            _hotlist_item(title="8300 SpaceX 大涨", url="https://b.com/1", source_id="douyin"),
-        ])
-        cands = build_cr_candidates([rec], config=cfg)
-        self.assertEqual(len(cands), 1)
-        self.assertEqual(len(cands[0].source_items), 3)
+        a = _hotlist_item(title="SpaceX 8300 点评", url="https://a.com/1", source_id="weibo")
+        b = _hotlist_item(title="8300 SpaceX 大涨", url="https://b.com/1", source_id="douyin")
+        x = _rss_item(title="SpaceX hits 8300 milestone", url="https://x.com/1", feed_id="reuters")
+        cands = build_cr_candidates([_primitive_record(source_items=[a, x, b])], config=cfg)
+        # A and B are NOT bridged: two distinct candidates.
+        self.assertEqual(len(cands), 2)
+        # X attached to exactly one of them → cluster sizes are {2, 1}.
+        self.assertEqual(sorted(len(c.source_items) for c in cands), [1, 2])
+
+    def test_roundup_rss_distinct_events_not_bridged(self):
+        # Roundup RSS shares a DIFFERENT high-spec pair with each of two
+        # genuinely distinct events; must attach to one, never bridge them.
+        cfg = _entity_config(min_shared_tokens=100, min_similarity=0.99)
+        a = _hotlist_item(title="SpaceX 8300 点评", url="https://a.com/1", source_id="weibo")
+        b = _hotlist_item(title="SK海力士HBM4E量产", url="https://b.com/1", source_id="douyin")
+        x = _rss_item(title="Markets recap: SpaceX 8300 and SK Hynix HBM4E",
+                      url="https://x.com/1", feed_id="reuters")
+        cands = build_cr_candidates([_primitive_record(source_items=[a, x, b])], config=cfg)
+        self.assertEqual(len(cands), 2)
+        self.assertEqual(sorted(len(c.source_items) for c in cands), [1, 2])
 
 
 class TestCanonicalClusterKey(unittest.TestCase):
@@ -1229,6 +1247,7 @@ class TestEntityResourceLoader(unittest.TestCase):
             self.assertEqual(res.dictionary, {})
             self.assertEqual(res.stoplist, set())
 
+    @unittest.skipUnless(_HAS_YAML, "PyYAML required to exercise the parse path")
     def test_malformed_yaml_returns_empty(self):
         import os
         import tempfile
@@ -1238,6 +1257,7 @@ class TestEntityResourceLoader(unittest.TestCase):
             res = load_entity_resources(config_dir=d)
             self.assertEqual(res.dictionary, {})
 
+    @unittest.skipUnless(_HAS_YAML, "PyYAML required to exercise the parse path")
     def test_null_fields_no_crash(self):
         import os
         import tempfile
@@ -1248,6 +1268,7 @@ class TestEntityResourceLoader(unittest.TestCase):
             self.assertEqual(res.dictionary, {})
             self.assertEqual(res.stoplist, set())
 
+    @unittest.skipUnless(_HAS_YAML, "PyYAML required to exercise the parse path")
     def test_list_value_skipped_in_v1(self):
         import os
         import tempfile

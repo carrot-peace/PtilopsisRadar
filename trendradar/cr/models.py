@@ -142,6 +142,7 @@ class CRSourceItem:
     published_at: Optional[str] = None
     summary: Optional[str] = None
     author: Optional[str] = None
+    cross_evidence_admitted: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -262,3 +263,11 @@ class CRClusterConfig:
     # None -> load the cached default resources from config/cr_entity_dictionary.yaml.
     # Tests may pass an in-memory EntityResources to avoid file/cache coupling.
     entity_resources: "EntityResources | None" = None
+
+    # --- Cross-evidence RSS ingestion (admission funnel; see cross_evidence_ingest) ---
+    # cross_evidence_rss_enabled / window / max_per_topic govern RSS admission in the
+    # runtime layer; drop_unmerged_rss governs the post-clustering filter in pipeline.py.
+    cross_evidence_rss_enabled: bool = True
+    cross_evidence_window_hours: float = 36.0
+    cross_evidence_max_per_topic: Optional[int] = None
+    drop_unmerged_rss: bool = False
