@@ -24,6 +24,8 @@ from trendradar.cr.cluster import build_cr_candidates
 from trendradar.cr.decision import (
     CRDecision,
     CRDecisionPolicy,
+    DECISION_ALERT,
+    DECISION_URGENT,
     count_high_score_suppressed,
     decide_cr_candidates,
 )
@@ -42,6 +44,7 @@ from trendradar.cr.presentation import (
     CRPresentationRun,
     CRTextPresentationConfig,
     bind_cr_presented_candidates,
+    count_cr_a_eligible,
     render_cr_a_text,
     select_cr_a_candidates,
     sort_cr_presented_candidates,
@@ -194,10 +197,14 @@ def build_cr_pipeline_from_primitives(
         presented_sorted, config=render_cfg.text
     )
 
+    # Count eligible before cap for truncation hint in the dispatch header.
+    cr_a_eligible_count = count_cr_a_eligible(presented_sorted)
+
     # 7. Render CR-A text.
     run = CRPresentationRun(
         run_label=run_label,
         candidates=list(cr_a),
+        total_eligible_count=cr_a_eligible_count,
     )
     cr_a_text = render_cr_a_text(run, config=render_cfg.text)
 
