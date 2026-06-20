@@ -537,6 +537,21 @@ class TestRenderCRAText(unittest.TestCase):
         text = render_cr_a_text(run)
         self.assertIn("score threshold", text)
 
+    def test_trigger_summary_fallback_all_filtered(self):
+        """Non-empty reasons but all filtered (zero score / unknown key) → 'score threshold'."""
+        pc = self._make_pc(
+            trigger_reasons=[
+                "source_coverage_heat=0(n=0)",
+                "item_count_heat=0(n=0)",
+                "source_diversity=1(hotlist)",
+            ],
+            push_eligible=True,
+        )
+        run = CRPresentationRun(run_label="T", candidates=[pc])
+        text = render_cr_a_text(run)
+        self.assertIn("score threshold", text)
+        self.assertNotIn("src", text)
+
     def test_link_included_when_enabled_and_url(self):
         """Link line included when enabled and URL exists."""
         pc = self._make_pc(
