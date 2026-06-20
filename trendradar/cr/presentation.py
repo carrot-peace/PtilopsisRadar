@@ -11,7 +11,9 @@ Design reference: PR9f.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
 from trendradar.cr.cluster import normalize_topic_text
@@ -74,11 +76,17 @@ class CRPresentationRun:
     ``candidates`` contains already-selected candidates for this presentation
     output (i.e. the result of :func:`select_cr_a_candidates` or equivalent).
     The renderer renders exactly these candidates without further filtering.
+
+    ``total_eligible_count`` is the number of push-eligible alert/urgent
+    candidates before the max_candidates cap was applied.  When it exceeds
+    ``len(candidates)`` the difference signals that candidates were truncated.
+    Defaults to 0, which the renderer treats as "use len(candidates)".
     """
 
     run_label: str
     candidates: list[CRPresentedCandidate]
     high_score_suppressed_count: int = 0
+    total_eligible_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +99,7 @@ class CRTextPresentationConfig:
     """Configuration for CR-A text rendering."""
 
     max_candidates: int = 3
+    max_trigger_items: int = 3
     include_scores: bool = False
     include_links: bool = True
     title: str = "Ptilopsis Radar｜CR-A"
@@ -249,6 +258,92 @@ def select_cr_a_candidates(
 
 
 # ---------------------------------------------------------------------------
+# CR-A text rendering helpers
+# ---------------------------------------------------------------------------
+
+_RUN_LABEL_RE = re.compile(r'.*?(\d{8})-(\d{6})$')
+_TRIGGER_REASON_RE = re.compile(r'^(\w+)=([0-9.]+)(?:\((.+)\))?$')
+_SOURCE_COUNT_RE = re.compile(r'^source_coverage_heat=[0-9.]+\(n=(\d+)\)$')
+
+
+def _format_run_datetime(run_label: str) -> str:
+    """Parse run_label into a human-readable datetime string.
+
+    Handles the standard format ``{mode}-{YYYYMMDD}-{HHMMss}``.
+    Falls back to the raw run_label if the pattern does not match.
+    """
+    m = _RUN_LABEL_RE.match(run_label)
+    if not m:
+        return run_label
+    try:
+        dt = datetime.strptime(f"{m.group(1)}{m.group(2)}", "%Y%m%d%H%M%S")
+        return f"{dt:%Y-%m-%d %H:%M} UTC+8"
+    except ValueError:
+        return run_label
+
+
+def _format_trigger_item(reason: str) -> tuple[str, float] | None:
+    """Parse one raw trigger reason into (display_text, score).
+
+    Returns None for unknown keys, unrenderable formats, or zero scores.
+    """
+    m = _TRIGGER_REASON_RE.match(reason)
+    if not m:
+        return None
+    key, score_str, meta = m.group(1), m.group(2), m.group(3)
+    score = float(score_str)
+    if score == 0.0:
+        return None
+
+    if key == "rank_movement":
+        return f"rank↑{score:.1f}", score
+    if key == "new_burst":
+        return f"burst+{score:.1f}", score
+    if key == "recency_momentum":
+        return f"momentum+{score:.1f}", score
+    if key == "weak_persistence":
+        return f"persist+{score:.1f}", score
+    if key == "best_rank_heat" and meta:
+        rank_m = re.search(r'rank=(\d+)', meta)
+        if rank_m:
+            return f"#{rank_m.group(1)}", score
+    if key == "hotlist_rss_cooccurrence":
+        return "cross", score
+    return None
+
+
+def _extract_source_count(reasons: list[str]) -> int:
+    """Extract distinct source count from the source_coverage_heat reason."""
+    for r in reasons:
+        m = _SOURCE_COUNT_RE.match(r)
+        if m:
+            return int(m.group(1))
+    return 1
+
+
+def _format_trigger_summary(reasons: list[str], max_items: int = 3) -> str:
+    """Format trigger reasons into a short semicolon-separated summary.
+
+    Selects the top ``max_items`` reasons by score, appends the distinct
+    source count as ``src N``.  Returns ``"score threshold"`` when no
+    displayable reasons exist and reasons is empty.
+    """
+    if not reasons:
+        return "score threshold"
+
+    parsed: list[tuple[str, float]] = []
+    for r in reasons:
+        item = _format_trigger_item(r)
+        if item is not None:
+            parsed.append(item)
+
+    parsed.sort(key=lambda x: x[1], reverse=True)
+    parts = [text for text, _ in parsed[:max_items]]
+    parts.append(f"src {_extract_source_count(reasons)}")
+    return "; ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # CR-A text rendering
 # ---------------------------------------------------------------------------
 
@@ -277,8 +372,9 @@ def render_cr_a_text(
 
     # Header.
     lines.append(config.title)
-    lines.append(f"Run: {run.run_label}")
-    lines.append(f"Candidates: {len(candidates)}")
+    lines.append(_format_run_datetime(run.run_label))
+    eligible_count = run.total_eligible_count if run.total_eligible_count > 0 else len(candidates)
+    lines.append(f"Candidates: {eligible_count}")
     lines.append("")
 
     if not candidates:
@@ -288,13 +384,8 @@ def render_cr_a_text(
     # Candidates.
     for idx, pc in enumerate(candidates, start=1):
         lines.append(f"{idx}. {pc.display_title}")
-        lines.append(f"Decision: {pc.decision_level}")
-
-        # Triggers.
-        if pc.trigger_reasons:
-            lines.append(f"Triggers: {'; '.join(pc.trigger_reasons)}")
-        else:
-            lines.append("Triggers: score threshold")
+        lines.append(pc.decision_level)
+        lines.append(_format_trigger_summary(pc.trigger_reasons, config.max_trigger_items))
 
         # Score (optional).
         if config.include_scores:
@@ -331,9 +422,15 @@ def render_cr_a_text_from_parts(
     presented = bind_cr_presented_candidates(
         candidates, score_results, decisions
     )
+    eligible_total = sum(
+        1 for pc in presented
+        if pc.decision.push_eligible
+        and pc.decision_level in (DECISION_ALERT, DECISION_URGENT)
+    )
     selected = select_cr_a_candidates(presented, config=config)
     run = CRPresentationRun(
         run_label=run_label,
         candidates=selected,
+        total_eligible_count=eligible_total,
     )
     return render_cr_a_text(run, config=config)

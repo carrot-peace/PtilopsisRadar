@@ -449,12 +449,20 @@ class TestRenderCRAText(unittest.TestCase):
         text = render_cr_a_text(run)
         self.assertTrue(text.startswith("Ptilopsis Radar｜CR-A"))
 
-    def test_run_label(self):
-        """Run label is correct."""
+    def test_datetime_line_parsed(self):
+        """Standard run_label is formatted as YYYY-MM-DD HH:MM UTC+8."""
         pc = self._make_pc(push_eligible=True)
-        run = CRPresentationRun(run_label="2026-06-09 23:30", candidates=[pc])
+        run = CRPresentationRun(run_label="current-20260609-233000", candidates=[pc])
         text = render_cr_a_text(run)
-        self.assertIn("Run: 2026-06-09 23:30", text)
+        self.assertIn("2026-06-09 23:30 UTC+8", text)
+        self.assertNotIn("Run:", text)
+
+    def test_datetime_line_fallback(self):
+        """Non-standard run_label is passed through unchanged."""
+        pc = self._make_pc(push_eligible=True)
+        run = CRPresentationRun(run_label="custom-label", candidates=[pc])
+        text = render_cr_a_text(run)
+        self.assertIn("custom-label", text)
 
     def test_candidates_count(self):
         """Candidates count is correct."""
@@ -473,28 +481,61 @@ class TestRenderCRAText(unittest.TestCase):
         self.assertIn("2. Beta", text)
 
     def test_decision_line(self):
-        """Decision line is correct."""
+        """Decision level shown without 'Decision:' prefix."""
         pc = self._make_pc(level=DECISION_URGENT, push_eligible=True)
         run = CRPresentationRun(run_label="T", candidates=[pc])
         text = render_cr_a_text(run)
-        self.assertIn("Decision: urgent", text)
+        self.assertIn("\nurgent\n", text)
+        self.assertNotIn("Decision:", text)
 
-    def test_triggers_joined_with_semicolon(self):
-        """Triggers line joins with semicolons."""
+    def test_trigger_summary_top3_by_score(self):
+        """Trigger line shows top-3 by score in semicolon format."""
         pc = self._make_pc(
-            trigger_reasons=["high heat", "rapid growth"],
+            trigger_reasons=[
+                "rank_movement=21.0",
+                "new_burst=13.0",
+                "recency_momentum=8.0",
+                "best_rank_heat=30(rank=1)",
+                "source_coverage_heat=2(n=1)",
+                "item_count_heat=1(n=1)",
+                "source_diversity=1(hotlist)",
+                "source_count_support=0(n=1)",
+            ],
             push_eligible=True,
         )
         run = CRPresentationRun(run_label="T", candidates=[pc])
         text = render_cr_a_text(run)
-        self.assertIn("Triggers: high heat; rapid growth", text)
+        # best_rank_heat=30 > rank_movement=21 > new_burst=13 → top-3
+        self.assertIn("#1; rank↑21.0; burst+13.0; src 1", text)
 
-    def test_fallback_trigger_score_threshold(self):
-        """Fallback trigger: score threshold."""
+    def test_trigger_summary_zero_score_filtered(self):
+        """Zero-score reasons are not shown."""
+        pc = self._make_pc(
+            trigger_reasons=["source_count_support=0(n=1)", "rank_movement=15.0",
+                             "source_coverage_heat=2(n=1)"],
+            push_eligible=True,
+        )
+        run = CRPresentationRun(run_label="T", candidates=[pc])
+        text = render_cr_a_text(run)
+        self.assertIn("rank↑15.0", text)
+        self.assertNotIn("support", text)
+
+    def test_trigger_summary_src_count(self):
+        """src N extracted from source_coverage_heat."""
+        pc = self._make_pc(
+            trigger_reasons=["rank_movement=10.0", "source_coverage_heat=8(n=3)"],
+            push_eligible=True,
+        )
+        run = CRPresentationRun(run_label="T", candidates=[pc])
+        text = render_cr_a_text(run)
+        self.assertIn("src 3", text)
+
+    def test_trigger_summary_fallback_empty(self):
+        """Empty trigger_reasons → 'score threshold'."""
         pc = self._make_pc(trigger_reasons=[], push_eligible=True)
         run = CRPresentationRun(run_label="T", candidates=[pc])
         text = render_cr_a_text(run)
-        self.assertIn("Triggers: score threshold", text)
+        self.assertIn("score threshold", text)
 
     def test_link_included_when_enabled_and_url(self):
         """Link line included when enabled and URL exists."""
@@ -538,6 +579,20 @@ class TestRenderCRAText(unittest.TestCase):
         run = CRPresentationRun(run_label="T", candidates=[pc])
         text = render_cr_a_text(run, config=config)
         self.assertIn("Score: 83.5", text)
+
+    def test_candidates_shows_eligible_total(self):
+        """Candidates line shows total_eligible_count when set."""
+        pc = self._make_pc(push_eligible=True)
+        run = CRPresentationRun(run_label="T", candidates=[pc], total_eligible_count=5)
+        text = render_cr_a_text(run)
+        self.assertIn("Candidates: 5", text)
+
+    def test_candidates_falls_back_to_shown_count(self):
+        """Candidates line falls back to len(candidates) when total_eligible_count=0."""
+        pc = self._make_pc(push_eligible=True)
+        run = CRPresentationRun(run_label="T", candidates=[pc])
+        text = render_cr_a_text(run)
+        self.assertIn("Candidates: 1", text)
 
     def test_no_summary_line(self):
         """No Summary line fabricated."""
