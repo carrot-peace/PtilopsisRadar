@@ -70,6 +70,11 @@ from trendradar.cr.deferred_queue import (
     stable_deferred_entry_id,
     upsert_deferred_entry,
 )
+from trendradar.cr.event_identity import (
+    CREventIdentityInput,
+    build_cr_event_identity_from_input,
+    stable_event_key_for_candidate,
+)
 from trendradar.cr.html import CRHTMLRenderConfig
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -355,7 +360,7 @@ def _single_candidate_message(
 def _candidate_payload(pc: object) -> dict[str, object]:
     return {
         "candidate_id": getattr(pc, "candidate_id", None),
-        "event_key": getattr(pc, "cluster_key", None),
+        "event_key": stable_event_key_for_candidate(pc),
         "title": getattr(pc, "display_title", None),
         "level": getattr(pc, "decision_level", None),
         "score": getattr(pc, "total_score", None),
@@ -373,7 +378,7 @@ def _deferred_entry_for_candidate(
     run_label: str,
     high_score_suppressed_count: int,
 ) -> CRDeferredDispatchEntry:
-    event_key = getattr(pc, "cluster_key")
+    event_key = stable_event_key_for_candidate(pc)
     message = _single_candidate_message(
         pc,
         run_label=run_label,
@@ -447,7 +452,7 @@ def _deferred_receipts_for_candidates(
             "exception_type": None,
             "exception_message": None,
             "deferred_until": deferred_until,
-            "event_key": getattr(pc, "cluster_key", None),
+            "event_key": stable_event_key_for_candidate(pc),
             "candidate_id": getattr(pc, "candidate_id", None),
         })
     return receipts
@@ -548,7 +553,7 @@ def _state_entries_for_candidates(
 ) -> list[CREventStateEntry]:
     return [
         CREventStateEntry(
-            event_key=pc.cluster_key,
+            event_key=stable_event_key_for_candidate(pc),
             decision_level=pc.decision_level,
             score=pc.total_score,
             seen_at=seen_at,
@@ -567,7 +572,9 @@ def _state_entries_for_queue(
 ) -> list[CREventStateEntry]:
     return [
         CREventStateEntry(
-            event_key=entry.event_key,
+            event_key=build_cr_event_identity_from_input(
+                CREventIdentityInput(title=entry.title)
+            ).event_key,
             decision_level=entry.level,
             score=entry.score,
             seen_at=seen_at,
@@ -1052,7 +1059,7 @@ def build_and_write_cr_runtime_dry_run(
                             bypass_candidates, seen_at=now_iso
                         )
                     )
-                    stale_keys = {pc.cluster_key for pc in bypass_candidates}
+                    stale_keys = {stable_event_key_for_candidate(pc) for pc in bypass_candidates}
                     base_queue = deferred_queue_load.queue
                     updated_queue = remove_deferred_entries(
                         base_queue, stale_keys
@@ -1110,7 +1117,7 @@ def build_and_write_cr_runtime_dry_run(
     # 6d. Build cooldown context for plan JSON (per-candidate entries).
     cooldown_context: dict[str, object] | None = None
     if cooldown_enforcement is not None and cooldown_enforcement.entries:
-        eligible_keys = {pc.cluster_key for pc in eligible_cr_a_candidates}
+        eligible_keys = {stable_event_key_for_candidate(pc) for pc in eligible_cr_a_candidates}
         entries_list: list[dict[str, object]] = []
         for e in cooldown_enforcement.entries:
             last_dispatched_at = None
@@ -1150,7 +1157,7 @@ def build_and_write_cr_runtime_dry_run(
         )
         quiet_entries.append({
             "candidate_id": pc.candidate_id,
-            "event_key": pc.cluster_key,
+            "event_key": stable_event_key_for_candidate(pc),
             "level": pc.decision_level,
             "title": pc.display_title,
             "allowed_by_urgent_bypass": allowed,
@@ -1257,7 +1264,7 @@ def build_and_write_cr_runtime_dry_run(
         }
         execution_candidates_to_update = tuple(
             pc for pc in execution_state_candidates
-            if pc.cluster_key not in existing_update_keys
+            if stable_event_key_for_candidate(pc) not in existing_update_keys
         )
         if execution_candidates_to_update:
             state_update_entries.extend(
