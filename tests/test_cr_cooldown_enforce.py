@@ -585,6 +585,52 @@ class TestCanonicalEventKey(unittest.TestCase):
         key_second = build_cr_event_identity_from_candidate(pc_second).event_key
         self.assertEqual(key_first, key_second)
 
+    def test_queue_flush_writes_stable_state_key(self):
+        """Queue flush must write the stable key even if the queued entry
+        carries a legacy cluster_key-format event_key.
+
+        Regression: _state_entries_for_queue used entry.event_key directly;
+        a legacy entry would write back the old key, which stable candidate
+        lookups would never find.
+        """
+        from trendradar.cr.deferred_queue import CRDeferredDispatchEntry
+        from trendradar.cr.event_identity import (
+            CREventIdentityInput,
+            build_cr_event_identity_from_input,
+        )
+        from trendradar.cr.runtime_dry_run import _state_entries_for_queue
+
+        title = "津巴布韦锂企联合申请推迟精矿出口禁令"
+        legacy_key = f"{title}||https://wallstreetcn.com/articles/3775092"
+
+        entry = CRDeferredDispatchEntry(
+            entry_id="legacy-entry-id",
+            event_key=legacy_key,
+            candidate_id="c-zw",
+            title=title,
+            level="alert",
+            score=60.0,
+            deferred_at="2026-06-20T00:00:00+00:00",
+            deferred_until="2026-06-20T08:00:00+00:00",
+            reason="quiet_hours",
+            message_text="msg",
+            candidate_payload={},
+            last_seen_at="2026-06-20T00:00:00+00:00",
+        )
+
+        result = _state_entries_for_queue(
+            (entry,),
+            accepted_keys={legacy_key},
+            seen_at="2026-06-20T09:00:00+00:00",
+        )
+
+        stable_key = build_cr_event_identity_from_input(
+            CREventIdentityInput(title=title)
+        ).event_key
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].event_key, stable_key)
+        self.assertNotEqual(result[0].event_key, legacy_key)
+
 
 # ---------------------------------------------------------------------------
 # Test Group L — Blocker 3: artifact/shadow never execute sink
