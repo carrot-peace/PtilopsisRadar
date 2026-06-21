@@ -274,3 +274,16 @@ def build_cr_event_identity_from_candidate(candidate: object) -> CREventIdentity
             cluster_key=cluster_key,
         )
     )
+
+
+def stable_event_key_for_candidate(pc: object) -> str:
+    """Return the stable, title-derived event_key for a presented candidate.
+
+    Accepts either a ``CRPresentedCandidate`` (reads ``pc.candidate``) or a
+    raw ``CRCandidate``-shaped object directly.  Centralises the derivation
+    so that cooldown enforcement and runtime state writes always use the
+    same path.
+    """
+    return build_cr_event_identity_from_candidate(
+        getattr(pc, "candidate", pc)
+    ).event_key

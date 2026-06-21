@@ -34,7 +34,7 @@ from trendradar.cr.cooldown_policy import (
     decide_cr_cooldown,
 )
 from trendradar.cr.decision import DECISION_ALERT, DECISION_URGENT, CRDecisionLevel
-from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+from trendradar.cr.event_identity import stable_event_key_for_candidate
 from trendradar.cr.repeat_preview import (
     CRRepeatPreview,
     CRSeenEventState,
@@ -311,7 +311,7 @@ def enforce_cr_cooldown_for_candidates(
     if state_error is not None:
         entries = tuple(
             CRCooldownEnforcementEntry(
-                event_key=build_cr_event_identity_from_candidate(pc.candidate).event_key,
+                event_key=stable_event_key_for_candidate(pc),
                 candidate_id=pc.candidate_id,
                 current_level=pc.decision_level or "unknown",
                 previous_level=None,
@@ -335,7 +335,7 @@ def enforce_cr_cooldown_for_candidates(
     eligible: list = []
 
     for pc in cr_a_candidates:
-        event_key = build_cr_event_identity_from_candidate(pc.candidate).event_key
+        event_key = stable_event_key_for_candidate(pc)
         seen = seen_states.get(event_key) if seen_states else None
 
         result = enforce_cr_cooldown(
