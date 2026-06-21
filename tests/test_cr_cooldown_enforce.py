@@ -444,7 +444,8 @@ class TestMalformedStateFailClosed(unittest.TestCase):
         """enforce_cr_cooldown_for_candidates with state_error → fail closed."""
         from unittest.mock import MagicMock
         pc = MagicMock()
-        pc.cluster_key = "ev1"
+        pc.candidate.display_title = "Event One"
+        pc.candidate.cluster_key = None
         pc.candidate_id = "c1"
         pc.decision_level = "alert"
 
@@ -462,7 +463,8 @@ class TestMalformedStateFailClosed(unittest.TestCase):
         """State error produces entries with not_evaluated action."""
         from unittest.mock import MagicMock
         pc = MagicMock()
-        pc.cluster_key = "ev1"
+        pc.candidate.display_title = "Event One"
+        pc.candidate.cluster_key = None
         pc.candidate_id = "c1"
         pc.decision_level = "alert"
 
@@ -480,7 +482,8 @@ class TestMalformedStateFailClosed(unittest.TestCase):
         """Even with no prior state, state_error blocks."""
         from unittest.mock import MagicMock
         pc = MagicMock()
-        pc.cluster_key = "ev-new"
+        pc.candidate.display_title = "Event New"
+        pc.candidate.cluster_key = None
         pc.candidate_id = "c-new"
         pc.decision_level = "urgent"
 
@@ -500,8 +503,8 @@ class TestMalformedStateFailClosed(unittest.TestCase):
 
 
 class TestCanonicalEventKey(unittest.TestCase):
-    def test_state_write_uses_cluster_key(self):
-        """State entries must use pc.cluster_key as event_key."""
+    def test_state_write_uses_stable_event_key(self):
+        """State entries use a stable event_key; read/write key must match."""
         from trendradar.cr.state_snapshot import (
             CREventStateEntry,
             merge_cr_event_state_entries,
@@ -509,9 +512,8 @@ class TestCanonicalEventKey(unittest.TestCase):
             empty_cr_event_state_snapshot,
         )
         now = datetime.now(timezone.utc)
-        # Simulate what runtime does: write with cluster_key.
         entry = CREventStateEntry(
-            event_key="ev-A",  # cluster_key
+            event_key="ev-A",
             decision_level="alert",
             score=70.0,
             seen_at=now.isoformat(),
@@ -537,7 +539,6 @@ class TestCanonicalEventKey(unittest.TestCase):
                 seen_at=now.isoformat(),
             ),
         }
-        # Lookup by cluster_key "ev-A".
         result = enforce_cr_cooldown(
             event_key="ev-A",
             candidate_id="c-A",
@@ -549,6 +550,86 @@ class TestCanonicalEventKey(unittest.TestCase):
         )
         # Should be blocked (same-level repeat inside cooldown).
         self.assertFalse(result.should_dispatch)
+
+    def test_same_title_different_url_yields_same_event_key(self):
+        """Same title + different source URLs must produce identical event_key.
+
+        Regression for the duplicate-push bug: a story picked up by a second
+        platform changes cluster_key but must not change the cooldown identity.
+        """
+        from unittest.mock import MagicMock
+        from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+
+        title = "津巴布韦锂企联合申请推迟精矿出口禁令"
+
+        pc_first = MagicMock()
+        pc_first.display_title = title
+        pc_first.cluster_key = f"{title}||https://wallstreetcn.com/articles/3775092"
+        pc_first.candidate_id = None
+        pc_first.source_names = ()
+        pc_first.representative_url = None
+        pc_first.source_items = []
+
+        pc_second = MagicMock()
+        pc_second.display_title = title
+        pc_second.cluster_key = (
+            f"{title}||https://wallstreetcn.com/articles/3775092"
+            "||https://www.thepaper.cn/newsDetail_forward_33416777"
+        )
+        pc_second.candidate_id = None
+        pc_second.source_names = ()
+        pc_second.representative_url = None
+        pc_second.source_items = []
+
+        key_first = build_cr_event_identity_from_candidate(pc_first).event_key
+        key_second = build_cr_event_identity_from_candidate(pc_second).event_key
+        self.assertEqual(key_first, key_second)
+
+    def test_queue_flush_writes_stable_state_key(self):
+        """Queue flush must write the stable key even if the queued entry
+        carries a legacy cluster_key-format event_key.
+
+        Regression: _state_entries_for_queue used entry.event_key directly;
+        a legacy entry would write back the old key, which stable candidate
+        lookups would never find.
+        """
+        from trendradar.cr.deferred_queue import CRDeferredDispatchEntry
+        from trendradar.cr.event_identity import (
+            CREventIdentityInput,
+            build_cr_event_identity_from_input,
+        )
+        from trendradar.cr.runtime_dry_run import _state_entries_for_queue
+
+        title = "津巴布韦锂企联合申请推迟精矿出口禁令"
+        legacy_key = f"{title}||https://wallstreetcn.com/articles/3775092"
+
+        entry = CRDeferredDispatchEntry(
+            entry_id="legacy-entry-id",
+            event_key=legacy_key,
+            candidate_id="c-zw",
+            title=title,
+            level="alert",
+            score=60.0,
+            deferred_at="2026-06-20T00:00:00+00:00",
+            deferred_until="2026-06-20T08:00:00+00:00",
+            reason="quiet_hours",
+            message_text="msg",
+            candidate_payload={},
+            last_seen_at="2026-06-20T00:00:00+00:00",
+        )
+
+        result = _state_entries_for_queue(
+            (entry,),
+            accepted_keys={legacy_key},
+            seen_at="2026-06-20T09:00:00+00:00",
+        )
+
+        stable_key = build_cr_event_identity_from_input(
+            CREventIdentityInput(title=title)
+        ).event_key
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].event_key, stable_key)
+        self.assertNotEqual(result[0].event_key, legacy_key)
 
 
 # ---------------------------------------------------------------------------
@@ -606,11 +687,12 @@ class TestUpdateAllCandidates(unittest.TestCase):
                 # Verify state was saved.
                 load_result = load_cr_event_state_snapshot(state_path)
                 self.assertTrue(load_result.loaded)
-                # All cr_a_candidates should be in state.
+                # All cr_a_candidates should be in state, keyed by stable event_key.
                 from trendradar.cr.state_snapshot import cr_event_state_snapshot_to_seen_states
+                from trendradar.cr.event_identity import stable_event_key_for_candidate
                 seen = cr_event_state_snapshot_to_seen_states(load_result.snapshot)
                 for pc in result.pipeline.cr_a_candidates:
-                    self.assertIn(pc.cluster_key, seen)
+                    self.assertIn(stable_event_key_for_candidate(pc), seen)
 
 
 # ---------------------------------------------------------------------------
@@ -621,33 +703,41 @@ class TestUpdateAllCandidates(unittest.TestCase):
 class TestBatchEscalationFiltering(unittest.TestCase):
     def test_escalation_does_not_release_unrelated_repeat(self):
         """escalation bypass per-candidate: only escalated candidate passes."""
+        from unittest.mock import MagicMock
+        from trendradar.cr.event_identity import stable_event_key_for_candidate
+
+        # Candidate A: escalation alert→urgent (should be allowed).
+        # Candidate B: same-level alert repeat (should be blocked).
+        pc_a = MagicMock()
+        pc_a.candidate.display_title = "Topic A"
+        pc_a.candidate.cluster_key = None
+        pc_a.candidate_id = "c-A"
+        pc_a.decision_level = "urgent"
+
+        pc_b = MagicMock()
+        pc_b.candidate.display_title = "Topic B"
+        pc_b.candidate.cluster_key = None
+        pc_b.candidate_id = "c-B"
+        pc_b.decision_level = "alert"
+
+        key_a = stable_event_key_for_candidate(pc_a)
+        key_b = stable_event_key_for_candidate(pc_b)
+
         now = datetime.now(timezone.utc)
         seen_states = {
-            "ev-A": CRSeenEventState(
-                event_key="ev-A",
+            key_a: CRSeenEventState(
+                event_key=key_a,
                 decision_level="alert",
                 score=70.0,
                 seen_at=now.isoformat(),
             ),
-            "ev-B": CRSeenEventState(
-                event_key="ev-B",
+            key_b: CRSeenEventState(
+                event_key=key_b,
                 decision_level="alert",
                 score=70.0,
                 seen_at=now.isoformat(),
             ),
         }
-        # Candidate A: escalation alert→urgent (should be allowed).
-        # Candidate B: same-level alert repeat (should be blocked).
-        from unittest.mock import MagicMock
-        pc_a = MagicMock()
-        pc_a.cluster_key = "ev-A"
-        pc_a.candidate_id = "c-A"
-        pc_a.decision_level = "urgent"
-
-        pc_b = MagicMock()
-        pc_b.cluster_key = "ev-B"
-        pc_b.candidate_id = "c-B"
-        pc_b.decision_level = "alert"
 
         result = enforce_cr_cooldown_for_candidates(
             cr_a_candidates=(pc_a, pc_b),
@@ -657,9 +747,9 @@ class TestBatchEscalationFiltering(unittest.TestCase):
             now=now,
         )
         # A should be eligible (escalation), B should not.
-        eligible_keys = {pc.cluster_key for pc in result.eligible_candidates}
-        self.assertIn("ev-A", eligible_keys)
-        self.assertNotIn("ev-B", eligible_keys)
+        eligible_ids = {pc.candidate_id for pc in result.eligible_candidates}
+        self.assertIn("c-A", eligible_ids)
+        self.assertNotIn("c-B", eligible_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -676,27 +766,34 @@ class TestMixedCandidateTextFiltering(unittest.TestCase):
             cr_dispatch_plan_to_json_dict,
         )
         from trendradar.cr.cooldown_enforce import enforce_cr_cooldown_for_candidates
+        from trendradar.cr.event_identity import stable_event_key_for_candidate
 
-        now = datetime.now(timezone.utc)
-        seen_states = {
-            "ev-A": CRSeenEventState(
-                event_key="ev-A", decision_level="alert",
-                score=70.0, seen_at=now.isoformat(),
-            ),
-            "ev-B": CRSeenEventState(
-                event_key="ev-B", decision_level="alert",
-                score=70.0, seen_at=now.isoformat(),
-            ),
-        }
         pc_a = MagicMock()
-        pc_a.cluster_key = "ev-A"
+        pc_a.candidate.display_title = "Topic A"
+        pc_a.candidate.cluster_key = None
         pc_a.candidate_id = "c-A"
         pc_a.decision_level = "urgent"
 
         pc_b = MagicMock()
-        pc_b.cluster_key = "ev-B"
+        pc_b.candidate.display_title = "Topic B"
+        pc_b.candidate.cluster_key = None
         pc_b.candidate_id = "c-B"
         pc_b.decision_level = "alert"
+
+        key_a = stable_event_key_for_candidate(pc_a)
+        key_b = stable_event_key_for_candidate(pc_b)
+
+        now = datetime.now(timezone.utc)
+        seen_states = {
+            key_a: CRSeenEventState(
+                event_key=key_a, decision_level="alert",
+                score=70.0, seen_at=now.isoformat(),
+            ),
+            key_b: CRSeenEventState(
+                event_key=key_b, decision_level="alert",
+                score=70.0, seen_at=now.isoformat(),
+            ),
+        }
 
         enforcement = enforce_cr_cooldown_for_candidates(
             cr_a_candidates=(pc_a, pc_b),
@@ -705,7 +802,10 @@ class TestMixedCandidateTextFiltering(unittest.TestCase):
             policy=CRCooldownPolicy(same_level_cooldown_minutes=360),
             now=now,
         )
-        eligible_keys = {pc.cluster_key for pc in enforcement.eligible_candidates}
+        eligible_keys = {
+            stable_event_key_for_candidate(pc)
+            for pc in enforcement.eligible_candidates
+        }
         entries_list = []
         for e in enforcement.entries:
             is_eligible = e.event_key in eligible_keys
