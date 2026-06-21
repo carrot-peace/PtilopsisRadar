@@ -689,11 +689,10 @@ class TestUpdateAllCandidates(unittest.TestCase):
                 self.assertTrue(load_result.loaded)
                 # All cr_a_candidates should be in state, keyed by stable event_key.
                 from trendradar.cr.state_snapshot import cr_event_state_snapshot_to_seen_states
-                from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+                from trendradar.cr.event_identity import stable_event_key_for_candidate
                 seen = cr_event_state_snapshot_to_seen_states(load_result.snapshot)
                 for pc in result.pipeline.cr_a_candidates:
-                    stable_key = build_cr_event_identity_from_candidate(pc.candidate).event_key
-                    self.assertIn(stable_key, seen)
+                    self.assertIn(stable_event_key_for_candidate(pc), seen)
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +704,7 @@ class TestBatchEscalationFiltering(unittest.TestCase):
     def test_escalation_does_not_release_unrelated_repeat(self):
         """escalation bypass per-candidate: only escalated candidate passes."""
         from unittest.mock import MagicMock
-        from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+        from trendradar.cr.event_identity import stable_event_key_for_candidate
 
         # Candidate A: escalation alert→urgent (should be allowed).
         # Candidate B: same-level alert repeat (should be blocked).
@@ -721,8 +720,8 @@ class TestBatchEscalationFiltering(unittest.TestCase):
         pc_b.candidate_id = "c-B"
         pc_b.decision_level = "alert"
 
-        key_a = build_cr_event_identity_from_candidate(pc_a.candidate).event_key
-        key_b = build_cr_event_identity_from_candidate(pc_b.candidate).event_key
+        key_a = stable_event_key_for_candidate(pc_a)
+        key_b = stable_event_key_for_candidate(pc_b)
 
         now = datetime.now(timezone.utc)
         seen_states = {
@@ -767,7 +766,7 @@ class TestMixedCandidateTextFiltering(unittest.TestCase):
             cr_dispatch_plan_to_json_dict,
         )
         from trendradar.cr.cooldown_enforce import enforce_cr_cooldown_for_candidates
-        from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+        from trendradar.cr.event_identity import stable_event_key_for_candidate
 
         pc_a = MagicMock()
         pc_a.candidate.display_title = "Topic A"
@@ -781,8 +780,8 @@ class TestMixedCandidateTextFiltering(unittest.TestCase):
         pc_b.candidate_id = "c-B"
         pc_b.decision_level = "alert"
 
-        key_a = build_cr_event_identity_from_candidate(pc_a.candidate).event_key
-        key_b = build_cr_event_identity_from_candidate(pc_b.candidate).event_key
+        key_a = stable_event_key_for_candidate(pc_a)
+        key_b = stable_event_key_for_candidate(pc_b)
 
         now = datetime.now(timezone.utc)
         seen_states = {
@@ -804,7 +803,7 @@ class TestMixedCandidateTextFiltering(unittest.TestCase):
             now=now,
         )
         eligible_keys = {
-            build_cr_event_identity_from_candidate(pc.candidate).event_key
+            stable_event_key_for_candidate(pc)
             for pc in enforcement.eligible_candidates
         }
         entries_list = []
