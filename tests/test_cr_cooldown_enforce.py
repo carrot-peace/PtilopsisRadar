@@ -551,6 +551,40 @@ class TestCanonicalEventKey(unittest.TestCase):
         # Should be blocked (same-level repeat inside cooldown).
         self.assertFalse(result.should_dispatch)
 
+    def test_same_title_different_url_yields_same_event_key(self):
+        """Same title + different source URLs must produce identical event_key.
+
+        Regression for the duplicate-push bug: a story picked up by a second
+        platform changes cluster_key but must not change the cooldown identity.
+        """
+        from unittest.mock import MagicMock
+        from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+
+        title = "津巴布韦锂企联合申请推迟精矿出口禁令"
+
+        pc_first = MagicMock()
+        pc_first.display_title = title
+        pc_first.cluster_key = f"{title}||https://wallstreetcn.com/articles/3775092"
+        pc_first.candidate_id = None
+        pc_first.source_names = ()
+        pc_first.representative_url = None
+        pc_first.source_items = []
+
+        pc_second = MagicMock()
+        pc_second.display_title = title
+        pc_second.cluster_key = (
+            f"{title}||https://wallstreetcn.com/articles/3775092"
+            "||https://www.thepaper.cn/newsDetail_forward_33416777"
+        )
+        pc_second.candidate_id = None
+        pc_second.source_names = ()
+        pc_second.representative_url = None
+        pc_second.source_items = []
+
+        key_first = build_cr_event_identity_from_candidate(pc_first).event_key
+        key_second = build_cr_event_identity_from_candidate(pc_second).event_key
+        self.assertEqual(key_first, key_second)
+
 
 # ---------------------------------------------------------------------------
 # Test Group L — Blocker 3: artifact/shadow never execute sink

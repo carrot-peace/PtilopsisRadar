@@ -70,7 +70,11 @@ from trendradar.cr.deferred_queue import (
     stable_deferred_entry_id,
     upsert_deferred_entry,
 )
-from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
+from trendradar.cr.event_identity import (
+    CREventIdentityInput,
+    build_cr_event_identity_from_candidate,
+    build_cr_event_identity_from_input,
+)
 from trendradar.cr.html import CRHTMLRenderConfig
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
@@ -575,7 +579,9 @@ def _state_entries_for_queue(
 ) -> list[CREventStateEntry]:
     return [
         CREventStateEntry(
-            event_key=entry.event_key,
+            event_key=build_cr_event_identity_from_input(
+                CREventIdentityInput(title=entry.title)
+            ).event_key,
             decision_level=entry.level,
             score=entry.score,
             seen_at=seen_at,
