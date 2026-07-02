@@ -45,6 +45,14 @@ git log --oneline -3
 
 记录变更范围。如果 `docker/Dockerfile` 有改动，特别标注。
 
+### A1.5. 记录旧镜像 digest（回滚用）
+
+```fish
+container image list | grep ptilopsis-radar
+```
+
+将 DIGEST 列的值记录在输出中。
+
 ### A2. 构建新镜像
 
 ```fish
@@ -85,7 +93,7 @@ container delete trendradar
 container run -d \
   --name trendradar \
   --cpus 2 \
-  --memory 1g \
+  --memory 768m \
   --env-file ./docker/.env \
   --env TZ=Asia/Shanghai \
   --mount source=/Users/ptilopsis/PtilopsisRadar/config,target=/app/config,readonly \
@@ -182,6 +190,7 @@ container exec trendradar python -m trendradar
 cd ~/PtilopsisRadar
 
 # 停止旧容器
+bash -c 'launchctl bootout gui/$(id -u)/com.carrot-peace.ptilopsis-radar'
 container stop trendradar
 container delete trendradar
 
@@ -189,13 +198,15 @@ container delete trendradar
 container run -d \
   --name trendradar \
   --cpus 2 \
-  --memory 1g \
+  --memory 768m \
   --env-file ./docker/.env \
   --env TZ=Asia/Shanghai \
   --mount source=/Users/ptilopsis/PtilopsisRadar/config,target=/app/config,readonly \
   --volume /Users/ptilopsis/PtilopsisRadar/output:/app/output \
   -p 127.0.0.1:8080:8080 \
   ptilopsis-radar:latest
+
+bash -c 'launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.carrot-peace.ptilopsis-radar.plist'
 
 # 验证（同 A6）
 ```
@@ -230,14 +241,16 @@ container list --all
 ```fish
 container run -d \
   --name trendradar \
-  --cpus <新值> \
-  --memory <新值> \
+  --cpus <新 cpus 值> \
+  --memory <新 memory 值> \
   --env-file ./docker/.env \
   --env TZ=Asia/Shanghai \
   --mount source=/Users/ptilopsis/PtilopsisRadar/config,target=/app/config,readonly \
   --volume /Users/ptilopsis/PtilopsisRadar/output:/app/output \
   -p 127.0.0.1:8080:8080 \
   ptilopsis-radar:latest
+
+bash -c 'launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.carrot-peace.ptilopsis-radar.plist'
 ```
 
 ---

@@ -41,3 +41,10 @@ coverage.xml
 
 # Alma snapshot tool
 .alma-snapshots/
+
+# Claude Code local config
+.claude/
+
+# Diagnostics and migration logs
+diagnostics/
+migration-logs/
