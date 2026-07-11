@@ -171,6 +171,22 @@ class TestAlertConfigLoader(unittest.TestCase):
         cfg = self.loader._load_alert_config({"alert": {"cooldown_minutes": -5}})
         self.assertEqual(cfg["COOLDOWN_MINUTES"], 0)
 
+    def test_rss_max_retries_defaults_to_two(self):
+        cfg = self.loader._load_rss_config({})
+        self.assertEqual(cfg["MAX_RETRIES"], 2)
+
+    def test_rss_max_retries_loads_override(self):
+        cfg = self.loader._load_rss_config({"advanced": {"rss": {"max_retries": 4}}})
+        self.assertEqual(cfg["MAX_RETRIES"], 4)
+
+    def test_rss_max_retries_invalid_value_falls_back_to_two(self):
+        for value in ("bad", -1, None):
+            with self.subTest(value=value):
+                cfg = self.loader._load_rss_config(
+                    {"advanced": {"rss": {"max_retries": value}}}
+                )
+                self.assertEqual(cfg["MAX_RETRIES"], 2)
+
 
 class TestMainPipelineSource(unittest.TestCase):
     def test_ai_analysis_runs_when_only_rss_has_content(self):

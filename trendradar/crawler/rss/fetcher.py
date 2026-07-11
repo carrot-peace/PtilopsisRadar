@@ -86,6 +86,7 @@ class RSSFetcher:
         timezone: str = DEFAULT_TIMEZONE,
         freshness_enabled: bool = True,
         default_max_age_days: int = 3,
+        max_retries: int = 2,
     ):
         """
         初始化抓取器
@@ -99,10 +100,12 @@ class RSSFetcher:
             timezone: 时区配置（如 'Asia/Shanghai'）
             freshness_enabled: 是否启用新鲜度过滤
             default_max_age_days: 默认最大文章年龄（天）
+            max_retries: 瞬态请求失败后的最大重试次数
         """
         self.feeds = [f for f in feeds if f.enabled]
         self.request_interval = request_interval
         self.timeout = timeout
+        self.max_retries = max(0, int(max_retries))
         self.use_proxy = use_proxy
         self.proxy_url = proxy_url
         self.timezone = timezone
@@ -278,6 +281,55 @@ class RSSFetcher:
         filtered_count = len(items) - len(filtered)
         return filtered, filtered_count
 
+    @staticmethod
+    def _is_retryable_http_error(exc: requests.HTTPError) -> bool:
+        """Return whether an HTTP failure is likely transient."""
+        response = exc.response
+        if response is None:
+            return False
+        return response.status_code == 429 or 500 <= response.status_code < 600
+
+    @staticmethod
+    def _retry_delay_seconds(retry_number: int) -> float:
+        """Short exponential backoff with bounded jitter."""
+        return float(2 ** (retry_number - 1)) + random.uniform(0.0, 0.25)
+
+    def _fetch_feed_once(self, feed: RSSFeedConfig) -> List[RSSItem]:
+        """Fetch and parse one feed once, allowing callers to classify errors."""
+        response = self.session.get(feed.url, timeout=self.timeout)
+        response.raise_for_status()
+
+        if feed.source_type == "anthropic_html":
+            items = self._parse_anthropic_html(response.text, feed)
+        else:
+            parsed_items = self.parser.parse(response.text, feed.url)
+
+            # 转换为 RSSItem（使用配置的时区）
+            now = get_configured_time(self.timezone)
+            crawl_time = now.strftime("%H:%M")
+            items = []
+
+            for parsed in parsed_items:
+                item = RSSItem(
+                    title=parsed.title,
+                    feed_id=feed.id,
+                    feed_name=feed.name,
+                    url=parsed.url,
+                    guid=parsed.guid or "",
+                    published_at=parsed.published_at or "",
+                    summary=parsed.summary or "",
+                    author=parsed.author or "",
+                    crawl_time=crawl_time,
+                    first_time=crawl_time,
+                    last_time=crawl_time,
+                    count=1,
+                )
+                items.append(item)
+
+        if feed.max_items > 0:
+            items = items[:feed.max_items]
+        return items
+
     def fetch_feed(self, feed: RSSFeedConfig) -> Tuple[List[RSSItem], Optional[str]]:
         """
         抓取单个 RSS 源
@@ -288,68 +340,48 @@ class RSSFetcher:
         Returns:
             (条目列表, 错误信息) 元组
         """
-        try:
-            response = self.session.get(feed.url, timeout=self.timeout)
-            response.raise_for_status()
+        for attempt in range(self.max_retries + 1):
+            try:
+                items = self._fetch_feed_once(feed)
 
-            if feed.source_type == "anthropic_html":
-                items = self._parse_anthropic_html(response.text, feed)
-            else:
-                parsed_items = self.parser.parse(response.text, feed.url)
+                # 注意：新鲜度过滤已移至推送阶段（_convert_rss_items_to_list）
+                # 这样所有文章都会存入数据库，但旧文章不会推送
+                print(f"[RSS] {feed.name}: 获取 {len(items)} 条")
+                return items, None
 
-                # 限制条目数量（0=不限制）
-                if feed.max_items > 0:
-                    parsed_items = parsed_items[:feed.max_items]
+            except requests.Timeout:
+                error = f"请求超时 ({self.timeout}s)"
+                retryable = True
+            except requests.ConnectionError as exc:
+                error = f"连接失败: {exc}"
+                retryable = True
+            except requests.HTTPError as exc:
+                error = f"请求失败: {exc}"
+                retryable = self._is_retryable_http_error(exc)
+            except requests.RequestException as exc:
+                error = f"请求失败: {exc}"
+                retryable = False
+            except ValueError as exc:
+                error = f"解析失败: {exc}"
+                retryable = False
+            except Exception as exc:
+                error = f"未知错误: {exc}"
+                retryable = False
 
-                # 转换为 RSSItem（使用配置的时区）
-                now = get_configured_time(self.timezone)
-                crawl_time = now.strftime("%H:%M")
-                items = []
+            if retryable and attempt < self.max_retries:
+                retry_number = attempt + 1
+                delay = self._retry_delay_seconds(retry_number)
+                print(
+                    f"[RSS] {feed.name}: {error}，"
+                    f"{delay:.2f}s 后重试 ({retry_number}/{self.max_retries})"
+                )
+                time.sleep(delay)
+                continue
 
-                for parsed in parsed_items:
-                    item = RSSItem(
-                        title=parsed.title,
-                        feed_id=feed.id,
-                        feed_name=feed.name,
-                        url=parsed.url,
-                        guid=parsed.guid or "",
-                        published_at=parsed.published_at or "",
-                        summary=parsed.summary or "",
-                        author=parsed.author or "",
-                        crawl_time=crawl_time,
-                        first_time=crawl_time,
-                        last_time=crawl_time,
-                        count=1,
-                    )
-                    items.append(item)
-
-            if feed.max_items > 0:
-                items = items[:feed.max_items]
-
-            # 注意：新鲜度过滤已移至推送阶段（_convert_rss_items_to_list）
-            # 这样所有文章都会存入数据库，但旧文章不会推送
-            print(f"[RSS] {feed.name}: 获取 {len(items)} 条")
-            return items, None
-
-        except requests.Timeout:
-            error = f"请求超时 ({self.timeout}s)"
             print(f"[RSS] {feed.name}: {error}")
             return [], error
 
-        except requests.RequestException as e:
-            error = f"请求失败: {e}"
-            print(f"[RSS] {feed.name}: {error}")
-            return [], error
-
-        except ValueError as e:
-            error = f"解析失败: {e}"
-            print(f"[RSS] {feed.name}: {error}")
-            return [], error
-
-        except Exception as e:
-            error = f"未知错误: {e}"
-            print(f"[RSS] {feed.name}: {error}")
-            return [], error
+        raise AssertionError("RSS retry loop exhausted unexpectedly")
 
     def fetch_all(self) -> RSSData:
         """
@@ -457,6 +489,7 @@ class RSSFetcher:
             feeds=feeds,
             request_interval=config.get("request_interval", 2000),
             timeout=config.get("timeout", 15),
+            max_retries=config.get("max_retries", 2),
             use_proxy=config.get("use_proxy", False),
             proxy_url=config.get("proxy_url", ""),
             timezone=config.get("timezone", DEFAULT_TIMEZONE),
