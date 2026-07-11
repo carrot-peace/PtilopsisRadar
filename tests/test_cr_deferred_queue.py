@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from trendradar.cr.artifacts import CRArtifactConfig
+from trendradar.cr.decision import CRDecisionPolicy
 from trendradar.cr.deferred_queue import (
     CRDeferredDispatchEntry,
     empty_deferred_dispatch_queue,
@@ -18,6 +19,7 @@ from trendradar.cr.deferred_queue import (
     upsert_deferred_entry,
 )
 from trendradar.cr.dispatch_executor import CRDispatchReceipt, CRMemoryDispatchSink
+from trendradar.cr.pipeline import CRPipelineConfig
 from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
 from trendradar.cr.state_store import load_cr_event_state_snapshot
 
@@ -220,6 +222,63 @@ class TestDeferredQueueRuntime(unittest.TestCase):
             state = load_cr_event_state_snapshot(state_path)
             self.assertTrue(state.loaded)
             self.assertGreaterEqual(len(state.snapshot.entries), 3)
+
+    def test_same_event_flush_alert_and_current_urgent_persists_urgent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            state_path = Path(tmp) / "state.json"
+            artifact_root = Path(tmp) / "art"
+            sink = CRMemoryDispatchSink()
+            common = {
+                "hotlist_stats": _hotlist_stats("Escalating Event"),
+                "artifact_config": CRArtifactConfig(root_dir=artifact_root),
+                "dispatch_mode": "live",
+                "dispatch_sink": sink,
+                "dispatch_state_path": state_path,
+                "deferred_queue_path": queue_path,
+                "quiet_hours_env": _quiet_env(),
+            }
+
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="defer-alert",
+                now=_dt("2026-06-17T23:30:00+08:00"),
+                urgent_threshold=999.0,
+            )
+            queue_before_flush = load_deferred_dispatch_queue(queue_path).queue
+            self.assertEqual(len(queue_before_flush.entries), 1)
+            event_key = queue_before_flush.entries[0].event_key
+
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="flush-and-escalate",
+                now=_dt("2026-06-18T08:01:00+08:00"),
+                pipeline_config=CRPipelineConfig(
+                    decision=CRDecisionPolicy(urgent_threshold=1.0)
+                ),
+                urgent_threshold=1.0,
+            )
+
+            state = load_cr_event_state_snapshot(state_path)
+            by_key = {entry.event_key: entry for entry in state.snapshot.entries}
+            self.assertEqual(by_key[event_key].decision_level, "urgent")
+            submitted_after_escalation = len(sink.submitted_messages)
+            self.assertEqual(submitted_after_escalation, 2)
+
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="repeat-urgent",
+                now=_dt("2026-06-18T08:02:00+08:00"),
+                pipeline_config=CRPipelineConfig(
+                    decision=CRDecisionPolicy(urgent_threshold=1.0)
+                ),
+                urgent_threshold=1.0,
+            )
+
+            self.assertEqual(
+                len(sink.submitted_messages),
+                submitted_after_escalation,
+            )
 
     def test_flush_not_configured_and_failed_retain_queue(self):
         for sink in (None, _RejectingSink(), _RaisingSink()):

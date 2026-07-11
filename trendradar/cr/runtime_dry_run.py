@@ -1259,19 +1259,12 @@ def build_and_write_cr_runtime_dry_run(
         and dispatch_execution.receipts
         and dispatch_execution.receipts[0].accepted
     ):
-        existing_update_keys = {
-            entry.event_key for entry in state_update_entries
-        }
-        execution_candidates_to_update = tuple(
-            pc for pc in execution_state_candidates
-            if stable_event_key_for_candidate(pc) not in existing_update_keys
-        )
-        if execution_candidates_to_update:
-            state_update_entries.extend(
-                _state_entries_for_candidates(
-                    execution_candidates_to_update, seen_at=now_iso
-                )
+        state_update_entries.extend(
+            _state_entries_for_candidates(
+                execution_state_candidates,
+                seen_at=now_iso,
             )
+        )
         if state_update_entries:
             updated_snapshot = merge_cr_event_state_entries(
                 dispatch_state_load.snapshot,
