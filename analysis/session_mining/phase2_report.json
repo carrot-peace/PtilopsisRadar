@@ -1,0 +1,45 @@
+{
+  "candidate_files": 525,
+  "sampled_files": 45,
+  "sampled_records_first_150_lines": 4268,
+  "checkpoints": [
+    25
+  ],
+  "evidence": "/Users/ptilopsis/Projects/PtilopsisRadar/evidence.md",
+  "candidate_list": "/Users/ptilopsis/Projects/PtilopsisRadar/analysis/session_mining/candidate_files.txt",
+  "sample_list": "/Users/ptilopsis/Projects/PtilopsisRadar/analysis/session_mining/sample_files.txt",
+  "global_counts": {
+    "correction": {
+      "matches": 91542,
+      "files": 506
+    },
+    "frustration": {
+      "matches": 58473,
+      "files": 435
+    },
+    "delegate": {
+      "matches": 231994,
+      "files": 525
+    },
+    "deliberation": {
+      "matches": 224883,
+      "files": 511
+    },
+    "execution": {
+      "matches": 312198,
+      "files": 514
+    },
+    "config": {
+      "matches": 122585,
+      "files": 508
+    }
+  },
+  "section_receipts": {
+    "recurring": 51,
+    "correction": 43,
+    "repetition": 45,
+    "rhythm": 19,
+    "blindspots": 1,
+    "abandonment": 7
+  }
+}
