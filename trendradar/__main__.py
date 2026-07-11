@@ -956,25 +956,15 @@ class NewsAnalyzer:
                 pass
 
             # Lifecycle janitor post-run trigger (J2).
-            # Gated by PTILOPSIS_CR_LIFECYCLE_ENABLED; fail-closed: exceptions
+            # Gated by PTILOPSIS_CR_LIFECYCLE_ENABLED; non-fatal: exceptions
             # are caught and never propagate into the main run.
             if os.environ.get("PTILOPSIS_CR_LIFECYCLE_ENABLED") == "1":
                 try:
-                    _ilu = __import__("importlib.util", fromlist=["util"])
-                    _lifecycle_path = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "scripts", "cr_a_lifecycle.py",
-                    )
-                    _lc_spec = _ilu.spec_from_file_location(
-                        "cr_a_lifecycle_trigger", _lifecycle_path,
-                    )
-                    if _lc_spec and _lc_spec.loader:
-                        _lc_mod = _ilu.module_from_spec(_lc_spec)
-                        sys.modules[_lc_spec.name] = _lc_mod
-                        _lc_spec.loader.exec_module(_lc_mod)
-                        _lc_mod.main(["--now", self.ctx.get_time().isoformat()])
+                    from trendradar.cr.lifecycle_runner import main as lifecycle_main
+
+                    lifecycle_main(["--now", self.ctx.get_time().isoformat()])
                 except Exception as _lc_exc:
-                    print(f"[lifecycle] janitor error: {_lc_exc}")
+                    print(f"[lifecycle] janitor error: {_lc_exc}", file=sys.stderr)
 
         return stats, html_file, ai_result, rss_items
 

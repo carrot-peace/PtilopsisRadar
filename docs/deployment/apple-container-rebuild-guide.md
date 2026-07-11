@@ -180,6 +180,39 @@ tail -n 5 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log
 # 期望：包含 "container trendradar is running"
 ```
 
+#### Lifecycle 入口与启用验证
+
+正式镜像包含可安装的 lifecycle 入口；Docker build 会在项目安装后执行
+import smoke check。启用 enforce 前，仅执行 preview（不会修改 state）：
+
+```fish
+container exec trendradar env PTILOPSIS_CR_LIFECYCLE_ENABLED=1 \
+  PTILOPSIS_CR_LIFECYCLE_MODE=preview \
+  python -m trendradar.cr.lifecycle_runner
+
+# 宿主机可审计报告（output 已挂载到 /app/output）
+cat output/cr/latest/lifecycle_report.json
+```
+
+确认 preview 报告的 `errors` 为空后，先备份 state，再在 `docker/.env`
+中设置以下值并重建容器以启用 enforce；不要用 enforce 做构建或 canary
+smoke：
+
+```fish
+set backup output/cr/state/cr_dispatch_state.json.bak.(date +%Y%m%d-%H%M%S)
+cp output/cr/state/cr_dispatch_state.json $backup
+echo "lifecycle state backup: $backup"
+```
+
+```text
+PTILOPSIS_CR_LIFECYCLE_ENABLED=1
+PTILOPSIS_CR_LIFECYCLE_MODE=enforce
+```
+
+回滚时优先移除 `PTILOPSIS_CR_LIFECYCLE_ENABLED`（完全 disabled）；若仍需
+持续观察，则保留 enabled 并把 mode 改回 `preview`。两种回滚都只需按
+「场景 C」重建容器，不需要重建镜像。
+
 ### Step 9：回滚（如验证失败）
 
 见下方「场景 E：回滚」。
