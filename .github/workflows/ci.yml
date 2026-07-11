@@ -1,0 +1,72 @@
+name: CI
+run-name: CI · ${{ github.ref_name }}
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+  tests:
+    name: Python 3.12 tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install project dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Run unit tests
+        run: uv run python -m unittest discover -s tests -q
+
+      - name: Compile package
+        run: uv run python -m compileall -q trendradar mcp_server
+
+      - name: Check changed patches for whitespace errors
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]] \
+            && git cat-file -e "$BASE_SHA^{commit}"; then
+            git diff --check "$BASE_SHA"..HEAD
+          else
+            git diff --check HEAD^
+          fi
+        shell: bash
