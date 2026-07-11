@@ -671,20 +671,28 @@ def render_cr_html_audit(
         snapshot = health["snapshot"]
         reasons = ", ".join(health["reasons"]) or "none"
         warnings = ", ".join(health["warnings"]) or "none"
+        generated_at = snapshot["generated_at"] or "unknown"
+        age_minutes = (
+            snapshot["age_minutes"]
+            if snapshot["age_minutes"] is not None
+            else "unknown"
+        )
         lines.append('    <section class="input-health">')
         lines.append("      <h2>Input Health</h2>")
         lines.append(f"      <p><strong>Status:</strong> {_escape_html_text(health['status'])}</p>")
         lines.append(f"      <p><strong>Reasons:</strong> {_escape_html_text(reasons)}</p>")
         lines.append(
             "      <p><strong>Snapshot:</strong> "
-            f"{_escape_html_text(snapshot['generated_at'])}; "
-            f"age={_escape_html_text(snapshot['age_minutes'])} minutes; "
+            f"{_escape_html_text(generated_at)}; "
+            f"age={_escape_html_text(age_minutes)} minutes; "
             f"historical={_escape_html_text(snapshot['historical_data_reused'])}</p>"
         )
+        hotlist_ratio = health["hotlist"]["success_ratio"]
+        rss_ratio = health["rss"]["success_ratio"]
         lines.append(
             "      <p><strong>Source ratios:</strong> hotlist="
-            f"{_escape_html_text(health['hotlist']['success_ratio'])}; rss="
-            f"{_escape_html_text(health['rss']['success_ratio'])}</p>"
+            f"{_escape_html_text(hotlist_ratio if hotlist_ratio is not None else 'unknown')}; rss="
+            f"{_escape_html_text(rss_ratio if rss_ratio is not None else 'unknown')}</p>"
         )
         lines.append(f"      <p><strong>Warnings:</strong> {_escape_html_text(warnings)}</p>")
         lines.append("    </section>")

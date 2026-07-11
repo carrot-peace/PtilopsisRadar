@@ -431,11 +431,19 @@ def render_cr_markdown_audit(
             + (_escape_markdown_text(", ".join(health["reasons"])) or "none")
         )
         snapshot = health["snapshot"]
-        lines.append(f"- Snapshot Generated At: `{snapshot['generated_at']}`")
-        lines.append(f"- Snapshot Age Minutes: `{snapshot['age_minutes']}`")
+        generated_at = snapshot["generated_at"] or "unknown"
+        age_minutes = (
+            snapshot["age_minutes"]
+            if snapshot["age_minutes"] is not None
+            else "unknown"
+        )
+        lines.append(f"- Snapshot Generated At: `{generated_at}`")
+        lines.append(f"- Snapshot Age Minutes: `{age_minutes}`")
         lines.append(f"- Historical Data Reused: `{snapshot['historical_data_reused']}`")
-        lines.append(f"- Hotlist Success Ratio: `{health['hotlist']['success_ratio']}`")
-        lines.append(f"- RSS Success Ratio: `{health['rss']['success_ratio']}`")
+        hotlist_ratio = health["hotlist"]["success_ratio"]
+        rss_ratio = health["rss"]["success_ratio"]
+        lines.append(f"- Hotlist Success Ratio: `{hotlist_ratio if hotlist_ratio is not None else 'unknown'}`")
+        lines.append(f"- RSS Success Ratio: `{rss_ratio if rss_ratio is not None else 'unknown'}`")
         if health["warnings"]:
             lines.append(
                 "- Warnings: "
