@@ -42,6 +42,7 @@ from trendradar.cr.dispatch_plan import (
     count_by_level,
     cr_dispatch_plan_to_json_dict,
 )
+from trendradar.cr.event_identity import stable_event_key_for_candidate
 from trendradar.cr.models import CRCandidate
 from trendradar.cr.pipeline import CRPipelineResult, build_cr_pipeline_from_primitives
 from trendradar.cr.presentation import CRPresentedCandidate
@@ -324,6 +325,80 @@ class TestCandidateCounts(unittest.TestCase):
 
 
 class TestSelectedCandidate(unittest.TestCase):
+    def test_selected_event_key_uses_stable_event_identity(self):
+        presented = (
+            _make_presented(
+                candidate_id="c1",
+                cluster_key="ev1",
+                display_title="Urgent Topic",
+                decision_level=DECISION_URGENT,
+                total_score=90.0,
+            ),
+        )
+        pipeline = _make_pipeline(
+            cr_a_candidates=presented,
+            presented_candidates=presented,
+            cr_a_text="body",
+        )
+        plan = build_cr_a_dispatch_plan(pipeline)
+        d = cr_dispatch_plan_to_json_dict(
+            plan,
+            dispatch_mode="artifact",
+            presented_candidates=presented,
+            cr_a_candidates=presented,
+        )
+        self.assertEqual(d["selected_event_key"], stable_event_key_for_candidate(presented[0]))
+
+    def test_selected_event_key_ignores_cluster_key_url_and_candidate_id_changes(self):
+        base = _make_presented(
+            candidate_id="c-base",
+            cluster_key="cluster-a",
+            display_title="Event Title",
+            representative_url="https://example.com/article-a",
+            decision_level=DECISION_URGENT,
+            total_score=90.0,
+        )
+        cluster_only = _make_presented(
+            candidate_id="c-base",
+            cluster_key="cluster-b",
+            display_title="Event Title",
+            representative_url="https://example.com/article-a",
+            decision_level=DECISION_URGENT,
+            total_score=90.0,
+        )
+        candidate_id_only = _make_presented(
+            candidate_id="c-variant",
+            cluster_key="cluster-a",
+            display_title="Event Title",
+            representative_url="https://example.com/article-a",
+            decision_level=DECISION_URGENT,
+            total_score=90.0,
+        )
+        url_only = _make_presented(
+            candidate_id="c-base",
+            cluster_key="cluster-a",
+            display_title="Event Title",
+            representative_url="https://example.com/article-b",
+            decision_level=DECISION_URGENT,
+            total_score=90.0,
+        )
+        expected_event_key = stable_event_key_for_candidate(base)
+        for pc in (base, cluster_only, candidate_id_only, url_only):
+            pipeline = _make_pipeline(
+                cr_a_candidates=(pc,),
+                presented_candidates=(pc,),
+                cr_a_text="body",
+            )
+            plan = build_cr_a_dispatch_plan(pipeline)
+            d = cr_dispatch_plan_to_json_dict(
+                plan,
+                dispatch_mode="artifact",
+                presented_candidates=(pc,),
+                cr_a_candidates=(pc,),
+            )
+            self.assertEqual(stable_event_key_for_candidate(pc), expected_event_key)
+            self.assertEqual(d["selected_event_key"], expected_event_key)
+
     def test_selected_fields_when_dispatching(self):
         presented = (
             _make_presented(
@@ -346,7 +421,10 @@ class TestSelectedCandidate(unittest.TestCase):
             presented_candidates=presented,
             cr_a_candidates=presented,
         )
-        self.assertEqual(d["selected_event_key"], "ev1")
+        self.assertEqual(
+            d["selected_event_key"],
+            stable_event_key_for_candidate(presented[0]),
+        )
         self.assertEqual(d["selected_candidate_id"], "c1")
         self.assertEqual(d["selected_title"], "Urgent Topic")
         self.assertEqual(d["selected_level"], DECISION_URGENT)
