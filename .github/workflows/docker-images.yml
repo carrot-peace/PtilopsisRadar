@@ -1,4 +1,5 @@
 name: Build and Push Docker Images
+run-name: Docker images · ${{ github.ref_name }} · ${{ inputs.image || 'tag' }}
 
 on:
   push:
@@ -19,6 +20,9 @@ on:
 
 env:
   REGISTRY: docker.io
+
+permissions:
+  contents: read
 
 jobs:
   build-crawler:
