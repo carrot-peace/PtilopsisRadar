@@ -1,0 +1,97 @@
+name: Issue Prefix Labeler
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync label from conventional prefix
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.issue.title.trim();
+            const match = title.match(
+              /^(fix|feat|perf|refactor|test|chore|docs|ci|build|style)(?:\([^)]+\))?!?:\s+/i
+            );
+
+            if (!match) {
+              core.info(`No supported issue prefix in: ${title}`);
+              return;
+            }
+
+            const prefix = match[1].toLowerCase();
+            const labelByPrefix = {
+              fix: "bug",
+              feat: "enhancement",
+              perf: "maintenance",
+              refactor: "maintenance",
+              test: "maintenance",
+              chore: "maintenance",
+              docs: "maintenance",
+              ci: "maintenance",
+              build: "maintenance",
+              style: "maintenance",
+            };
+            const labelDefinitions = {
+              bug: {
+                color: "d73a4a",
+                description: "Something isn't working",
+              },
+              enhancement: {
+                color: "a2eeef",
+                description: "New feature or request",
+              },
+              maintenance: {
+                color: "6e7781",
+                description: "Maintenance, performance, tests, or tooling",
+              },
+            };
+
+            const target = labelByPrefix[prefix];
+            const managedLabels = Object.keys(labelDefinitions);
+            const currentLabels = new Set(
+              context.payload.issue.labels.map((label) =>
+                typeof label === "string" ? label : label.name
+              )
+            );
+
+            try {
+              await github.rest.issues.getLabel({
+                ...context.repo,
+                name: target,
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                ...context.repo,
+                name: target,
+                ...labelDefinitions[target],
+              });
+              core.info(`Created missing label: ${target}`);
+            }
+
+            for (const label of managedLabels) {
+              if (label === target || !currentLabels.has(label)) continue;
+              await github.rest.issues.removeLabel({
+                ...context.repo,
+                issue_number: context.issue.number,
+                name: label,
+              });
+              core.info(`Removed managed label: ${label}`);
+            }
+
+            if (!currentLabels.has(target)) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: context.issue.number,
+                labels: [target],
+              });
+              core.info(`Added label ${target} for prefix ${prefix}`);
+            }
