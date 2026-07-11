@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_THREAD_IDS = {"019f40d9-e1e1-72e2-9d6b-284e89980a1c"}
+DEFAULT_THREAD_IDS = set()
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,9 @@ class MiningConfig:
     all_list: Path
     final_body: Path
     current_thread_ids: set[str]
+    cutoff: float | None
+    cutoff_label: str | None
+    public_labels: dict[Path, str]
 
     @property
     def main_sources(self):
@@ -66,7 +69,7 @@ SENSITIVE_RE = [
 ]
 
 PROJECT_HINT_RE = re.compile(
-    r"(PtilopsisRadar|TrendRadar|Simense|whisper-s|DS-macOS|Codex|Claude|MCP|mimo|plugin|skill|AGENTS|CLAUDE|roadmap|mirror)",
+    r"(PtilopsisRadar|Codex|Claude|MCP|plugin|skill|AGENTS|CLAUDE|roadmap|mirror)",
     re.I,
 )
 
@@ -82,6 +85,9 @@ def build_config(args):
         all_list=output_dir / "analysis" / "session_mining" / "candidate_files.txt",
         final_body=output_dir / "analysis" / "session_mining" / "evidence_final_body.md",
         current_thread_ids=thread_ids,
+        cutoff=parse_cutoff(args.cutoff),
+        cutoff_label=args.cutoff,
+        public_labels={},
     )
 
 
@@ -90,7 +96,20 @@ def parse_args():
     parser.add_argument("--home", type=Path, default=Path.home())
     parser.add_argument("--output-dir", type=Path, default=Path.cwd())
     parser.add_argument("--exclude-thread-id", action="append")
+    parser.add_argument(
+        "--cutoff",
+        help="Include only files modified at or before this timezone-aware ISO-8601 timestamp.",
+    )
     return parser.parse_args()
+
+
+def parse_cutoff(value):
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("--cutoff must include a timezone offset or Z")
+    return parsed.timestamp()
 
 
 def iter_files(config):
@@ -104,6 +123,8 @@ def iter_files(config):
                         st = p.stat()
                     except OSError:
                         continue
+                    if config.cutoff is not None and st.st_mtime > config.cutoff:
+                        continue
                     yield {
                         "tool": tool,
                         "path": p,
@@ -116,9 +137,28 @@ def dt(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
 
-def short_path(p: Path, config):
-    s = str(p)
-    return s.replace(str(config.home), "~")
+def public_label(p: Path, config):
+    if p in config.public_labels:
+        return config.public_labels[p]
+    if p == config.all_list:
+        return "candidate manifest"
+    try:
+        p.relative_to(config.home)
+    except ValueError:
+        return "generated artifact"
+    return "local source [redacted]"
+
+
+def assign_public_labels(files, config):
+    for index, item in enumerate(files, start=1):
+        config.public_labels[item["path"]] = f"candidate-{index:04d}"
+
+
+def manifest_text(files, config):
+    return "\n".join(
+        f"{public_label(item['path'], config)} | {dt(item['mtime'])} | {item['tool']} | {item['size']} bytes"
+        for item in files
+    ) + ("\n" if files else "")
 
 
 def select_samples(files):
@@ -313,7 +353,7 @@ def add_receipt(receipts, section, date, tool, path, quote, note, config):
     receipts[section].append({
         "date": date,
         "tool": tool,
-        "path": short_path(path, config),
+        "path": public_label(path, config),
         "quote": quote,
         "note": note,
     })
@@ -344,17 +384,7 @@ def scan_pattern_stats(patterns, files):
 def top_project_dirs(files):
     c = Counter()
     for item in files:
-        p = item["path"]
-        parts = p.parts
-        label = None
-        if ".claude" in parts and "projects" in parts:
-            idx = parts.index("projects")
-            if idx + 1 < len(parts):
-                label = parts[idx + 1].replace("-Users-ptilopsis-", "").replace("-", "/")
-        elif ".codex" in parts:
-            label = "Codex/" + "/".join(parts[-5:-1])
-        if label:
-            c[label] += 1
+        c[item["tool"]] += 1
     return c
 
 
@@ -367,7 +397,7 @@ def project_lifecycles(files):
         if ".claude" in parts and "projects" in parts:
             idx = parts.index("projects")
             if idx + 1 < len(parts):
-                label = parts[idx + 1].replace("-Users-ptilopsis-", "").replace("-", "/")
+                label = "Claude project [redacted]"
         if not label:
             continue
         row = data.setdefault(label, {"count": 0, "first": item["mtime"], "last": item["mtime"], "tools": Counter()})
@@ -431,6 +461,8 @@ def write_evidence(files, sample, global_counts, receipts, project_counts, rhyth
     if oldest and newest:
         lines.append(f"- Candidate mtime range: {dt(oldest['mtime'])} -> {dt(newest['mtime'])}.")
     lines.append(f"- Sampled files read: {len(sample)}. Read cap: first 150 lines per sampled file.")
+    if config.cutoff_label:
+        lines.append(f"- Corpus cutoff: `{config.cutoff_label}` (inclusive).")
     lines.append("- Sample mix: " + ", ".join(f"{k}: {v}" for k, v in sorted(sampled_by_tool.items())))
     lines.append("- Full corpus sweeps used Python regex count/file-match operations; raw logs were not copied here.")
     lines.append("- Quotes are short and mechanically redacted for paths, URLs, emails, tokens, and likely secrets.")
@@ -503,10 +535,10 @@ def write_evidence(files, sample, global_counts, receipts, project_counts, rhyth
     lines.append("## Sampled files")
     lines.append("")
     for item in sample:
-        lines.append(f"- {dt(item['mtime'])} | {item['tool']} | `{short_path(item['path'], config)}` | {item['size']} bytes")
+        lines.append(f"- {dt(item['mtime'])} | {item['tool']} | `{public_label(item['path'], config)}` | {item['size']} bytes")
     lines.append("")
 
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def main():
@@ -516,9 +548,10 @@ def main():
 
     files = list(iter_files(config))
     files_sorted = sorted(files, key=lambda x: (x["mtime"], str(x["path"])))
-    config.all_list.write_text("\n".join(str(x["path"]) for x in files_sorted) + "\n", encoding="utf-8")
+    assign_public_labels(files_sorted, config)
+    config.all_list.write_text(manifest_text(files_sorted, config), encoding="utf-8")
     sample = select_samples(files_sorted)
-    config.sample_list.write_text("\n".join(str(x["path"]) for x in sample) + "\n", encoding="utf-8")
+    config.sample_list.write_text(manifest_text(sample, config), encoding="utf-8")
 
     all_paths = [x["path"] for x in files_sorted]
     checkpoint_lines = [
@@ -530,6 +563,8 @@ def main():
         "",
         f"- Started with {len(files_sorted)} candidate files after excluding the current audit thread.",
     ]
+    if config.cutoff_label:
+        checkpoint_lines.append(f"- Corpus cutoff: `{config.cutoff_label}` (inclusive).")
 
     blindspot_terms = ("test", "user feedback", "customer", "calendar", "sleep", "break", "done", "ship")
     full_scan_patterns = {**PATTERNS, **{f"blindspot:{term}": [term] for term in blindspot_terms}}
@@ -622,9 +657,10 @@ def main():
         "sampled_files": len(sample),
         "sampled_records_first_150_lines": sampled_records,
         "checkpoints": sample_batches_written,
-        "evidence": str(config.output),
-        "candidate_list": str(config.all_list),
-        "sample_list": str(config.sample_list),
+        "evidence": "evidence.md",
+        "candidate_list": "analysis/session_mining/candidate_files.txt",
+        "sample_list": "analysis/session_mining/sample_files.txt",
+        "corpus_cutoff": config.cutoff_label,
         "global_counts": global_counts,
         "section_receipts": {k: len(v) for k, v in receipts.items()},
     }
