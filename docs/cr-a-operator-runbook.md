@@ -118,6 +118,15 @@ live:
 | `PTILOPSIS_CR_QUIET_HOURS_START` | `HH:MM` (24h) | `23:00` | Malformed ⇒ `quiet_hours_config_error`, fails closed |
 | `PTILOPSIS_CR_QUIET_HOURS_END` | `HH:MM` (24h) | `08:00` | Malformed ⇒ `quiet_hours_config_error`, fails closed |
 | `PTILOPSIS_CR_QUIET_HOURS_ALLOW_URGENT` | `1` to enable, else off | Unset/off ⇒ urgent does **not** bypass quiet-hours | Any non-`1` value keeps urgent bypass disabled |
+| `PTILOPSIS_CR_INPUT_STALE_AFTER_MINUTES` | positive minutes | `120` | Older analysis snapshots fail closed; invalid/non-finite values use the default and emit an input-health warning |
+| `PTILOPSIS_CR_INPUT_DEGRADED_SUCCESS_RATIO` | ratio in `(0, 1]` | `0.67` | Lower hotlist success marks the run degraded; invalid/non-finite values use the default and emit a warning |
+
+Every live candidate must contain at least one item observed in the current
+crawl. Hotlist all-source failure and snapshots older than the stale threshold
+fail closed before cooldown state, quiet-hours deferral, deferred flush, or sink
+execution. `dispatch_plan.json`, `dispatch_receipts.json`, Markdown, and HTML
+record the same `input_health` status and reasons. Artifact/shadow modes retain
+the full candidate audit but never send stale-only candidates.
 
 Explicit guarantees:
 
@@ -234,6 +243,8 @@ of truth: [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receip
 | `skipped_cooldown` | No | No | No | None. Cooldown policy held the send. |
 | `skipped_repeat` | No | No | No | None. Repeat policy held the send. |
 | `skipped_state_error` | No | No | No | Investigate state file readability. |
+| `skipped_stale_input` | No | No | No | Inspect `input_health.snapshot`; wait for a fresh crawl or fix collection. |
+| `skipped_insufficient_fresh_sources` | No | No | No | Inspect failed source IDs; stale-only candidates are intentionally blocked. |
 | `not_configured` | No | No | No | Provide full Telegram token + chat id if a send was intended. |
 | `accepted` | Yes | Yes | Yes | None. Successful send. |
 | `rejected` | Yes | No | No | Inspect detail; check chat id / bot permissions. |
