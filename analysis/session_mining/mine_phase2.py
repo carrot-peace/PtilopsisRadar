@@ -2,9 +2,11 @@
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 HOME = Path.home()
@@ -102,7 +104,7 @@ def iter_files():
 
 
 def dt(ts):
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S %z")
+    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
 
 def short_path(p: Path):
@@ -400,7 +402,7 @@ def add_project_receipts(receipts, files):
         )
 
 
-def write_evidence(files, sample, sampled_records, global_counts, receipts, project_counts, rhythm):
+def write_evidence(files, sample, global_counts, receipts, project_counts, rhythm):
     total_size = sum(x["size"] for x in files)
     oldest = min(files, key=lambda x: x["mtime"]) if files else None
     newest = max(files, key=lambda x: x["mtime"]) if files else None
@@ -498,6 +500,8 @@ def write_evidence(files, sample, sampled_records, global_counts, receipts, proj
 
 
 def main():
+    if shutil.which("rg") is None:
+        sys.exit("error: ripgrep (`rg`) is required but was not found on PATH.")
     files = list(iter_files())
     files_sorted = sorted(files, key=lambda x: (x["mtime"], str(x["path"])))
     ALL_LIST.write_text("\n".join(str(x["path"]) for x in files_sorted) + "\n", encoding="utf-8")
@@ -604,7 +608,7 @@ def main():
     project_counts = top_project_dirs(files_sorted)
     final_body = ROOT / "analysis" / "session_mining" / "evidence_final_body.md"
     original_out = OUT.read_text(encoding="utf-8")
-    write_evidence(files_sorted, sample, sampled_records, global_counts, receipts, project_counts, rhythm)
+    write_evidence(files_sorted, sample, global_counts, receipts, project_counts, rhythm)
     final_structured = OUT.read_text(encoding="utf-8")
     final_body.write_text(final_structured, encoding="utf-8")
     OUT.write_text(original_out + "\n" + final_structured, encoding="utf-8")
