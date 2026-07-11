@@ -142,6 +142,12 @@ container stats --no-stream trendradar
 container logs -n 40 trendradar 2>&1 | tail -20
 # 判定：无 Traceback / Error / FATAL / OOM
 
+# 6.5 lifecycle package preview（绝不在验证阶段执行 enforce）
+container exec trendradar env PTILOPSIS_CR_LIFECYCLE_ENABLED=1 \
+  PTILOPSIS_CR_LIFECYCLE_MODE=preview \
+  python -m trendradar.cr.lifecycle_runner
+# 判定：output/cr/latest/lifecycle_report.json 已生成且 mode 为 preview
+
 # 7. supervisor 已识别
 tail -n 5 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log
 # 判定：包含 "container trendradar is running"
@@ -152,6 +158,10 @@ tail -n 5 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log
 ```
 result: 镜像更新完成。trendradar 正在运行，8080 可访问，supervisor 已识别。
 ```
+
+Lifecycle 回滚：从 `docker/.env` 移除
+`PTILOPSIS_CR_LIFECYCLE_ENABLED` 以 disabled；或保留 enabled 并将
+`PTILOPSIS_CR_LIFECYCLE_MODE=preview`。环境变量变更后按场景 C 重建容器。
 
 ---
 
