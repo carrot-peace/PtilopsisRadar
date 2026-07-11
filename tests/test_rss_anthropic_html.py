@@ -3,6 +3,9 @@
 import unittest
 import os
 import sys
+from unittest.mock import Mock, patch
+
+import requests
 
 sys.path.insert(0, os.path.dirname(__file__))
 import _bootstrap  # noqa: E402
@@ -103,6 +106,125 @@ class TestAnthropicHtmlFeed(unittest.TestCase):
         self.assertEqual(items[0].author, "Anthropic")
         self.assertEqual(items[1].title, "Coding agents in the social sciences")
         self.assertEqual(items[1].published_at, "2026-05-27")
+
+
+class TestRSSFetchRetries(unittest.TestCase):
+    def setUp(self):
+        self.feed = RSSFeedConfig(
+            id="example",
+            name="Example Feed",
+            url="https://example.com/feed.xml",
+        )
+        self.fetcher = RSSFetcher(
+            feeds=[self.feed],
+            request_interval=0,
+            max_retries=2,
+        )
+        self.fetcher.parser.parse = Mock(return_value=[])
+
+    @staticmethod
+    def _response():
+        response = Mock()
+        response.text = "<rss/>"
+        response.raise_for_status.return_value = None
+        return response
+
+    @staticmethod
+    def _http_failure(status_code):
+        http_response = requests.Response()
+        http_response.status_code = status_code
+        response = Mock()
+        response.raise_for_status.side_effect = requests.HTTPError(
+            f"HTTP {status_code}", response=http_response
+        )
+        return response
+
+    @patch("trendradar.crawler.rss.fetcher.random.uniform", return_value=0.0)
+    @patch("trendradar.crawler.rss.fetcher.time.sleep")
+    def test_timeout_retries_twice_then_succeeds(self, sleep, _uniform):
+        self.fetcher.session.get = Mock(side_effect=[
+            requests.Timeout(),
+            requests.Timeout(),
+            self._response(),
+        ])
+
+        items, error = self.fetcher.fetch_feed(self.feed)
+
+        self.assertEqual(items, [])
+        self.assertIsNone(error)
+        self.assertEqual(self.fetcher.session.get.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1.0, 2.0])
+
+    @patch("trendradar.crawler.rss.fetcher.random.uniform", return_value=0.0)
+    @patch("trendradar.crawler.rss.fetcher.time.sleep")
+    def test_connection_error_is_retried(self, sleep, _uniform):
+        self.fetcher.session.get = Mock(side_effect=[
+            requests.ConnectionError("reset"),
+            self._response(),
+        ])
+
+        _items, error = self.fetcher.fetch_feed(self.feed)
+
+        self.assertIsNone(error)
+        self.assertEqual(self.fetcher.session.get.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+
+    @patch("trendradar.crawler.rss.fetcher.random.uniform", return_value=0.0)
+    @patch("trendradar.crawler.rss.fetcher.time.sleep")
+    def test_429_and_5xx_are_retried(self, sleep, _uniform):
+        for status_code in (429, 503):
+            with self.subTest(status_code=status_code):
+                self.fetcher.session.get = Mock(side_effect=[
+                    self._http_failure(status_code),
+                    self._response(),
+                ])
+
+                _items, error = self.fetcher.fetch_feed(self.feed)
+
+                self.assertIsNone(error)
+                self.assertEqual(self.fetcher.session.get.call_count, 2)
+        self.assertEqual(sleep.call_count, 2)
+
+    @patch("trendradar.crawler.rss.fetcher.time.sleep")
+    def test_non_429_4xx_is_not_retried(self, sleep):
+        self.fetcher.session.get = Mock(return_value=self._http_failure(404))
+
+        _items, error = self.fetcher.fetch_feed(self.feed)
+
+        self.assertIn("请求失败", error)
+        self.assertEqual(self.fetcher.session.get.call_count, 1)
+        sleep.assert_not_called()
+
+    @patch("trendradar.crawler.rss.fetcher.time.sleep")
+    def test_parse_error_is_not_retried(self, sleep):
+        self.fetcher.session.get = Mock(return_value=self._response())
+        self.fetcher.parser.parse = Mock(side_effect=ValueError("invalid feed"))
+
+        _items, error = self.fetcher.fetch_feed(self.feed)
+
+        self.assertEqual(error, "解析失败: invalid feed")
+        self.assertEqual(self.fetcher.session.get.call_count, 1)
+        sleep.assert_not_called()
+
+    @patch("trendradar.crawler.rss.fetcher.random.uniform", return_value=0.0)
+    @patch("trendradar.crawler.rss.fetcher.time.sleep")
+    def test_exhausted_retries_return_one_failed_feed(self, sleep, _uniform):
+        self.fetcher.session.get = Mock(side_effect=requests.Timeout())
+
+        data = self.fetcher.fetch_all()
+
+        self.assertEqual(self.fetcher.session.get.call_count, 3)
+        self.assertEqual(data.failed_ids, [self.feed.id])
+        self.assertNotIn(self.feed.id, data.items)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_from_config_defaults_to_two_retries(self):
+        fetcher = RSSFetcher.from_config({"feeds": []})
+        self.assertEqual(fetcher.max_retries, 2)
+
+    def test_from_config_accepts_retry_override(self):
+        fetcher = RSSFetcher.from_config({"feeds": [], "max_retries": 1})
+        self.assertEqual(fetcher.max_retries, 1)
 
 
 if __name__ == "__main__":
