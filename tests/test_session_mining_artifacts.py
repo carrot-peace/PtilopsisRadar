@@ -17,6 +17,14 @@ def _session(home: Path, name: str, mtime: int) -> Path:
     return path
 
 
+def _claude_session(home: Path, project: str, name: str, mtime: int) -> Path:
+    path = home / ".claude" / "projects" / project / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"role": "user", "content": "please review and fix"}) + "\n")
+    os.utime(path, (mtime, mtime))
+    return path
+
+
 def test_artifacts_are_cutoff_bounded_and_do_not_publish_local_paths(tmp_path):
     home = tmp_path / "private-home"
     output = tmp_path / "output"
@@ -75,3 +83,33 @@ def test_cutoff_requires_timezone(tmp_path):
 
     assert result.returncode != 0
     assert "must include a timezone offset or Z" in result.stderr
+
+
+def test_distinct_claude_projects_keep_distinct_anonymous_lifecycles(tmp_path):
+    home = tmp_path / "private-home"
+    output = tmp_path / "output"
+    for project in ("secret-alpha", "secret-beta"):
+        for index in range(3):
+            _claude_session(home, project, f"session-{index}.jsonl", 1_700_000_000 + index)
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--home",
+            str(home),
+            "--output-dir",
+            str(output),
+            "--cutoff",
+            "2023-11-15T00:00:00Z",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    evidence = (output / "evidence.md").read_text()
+    assert "Claude project 001" in evidence
+    assert "Claude project 002" in evidence
+    assert "secret-alpha" not in evidence
+    assert "secret-beta" not in evidence

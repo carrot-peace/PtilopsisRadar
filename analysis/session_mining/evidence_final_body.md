@@ -41,7 +41,13 @@ Phase 2 evidence only. No interpretation. Patterns require 3+ occurrences unless
 
 ## 2. Abandonment graveyard - what I start and never finish
 
-- insufficient data.
+- 2026-06-05 15:36:59 +0800 -> 2026-06-28 09:44:13 +0800 | Claude Code | `local source [redacted]` | "Claude project 013" | path-derived lifecycle: 201 transcript files, no mtime in final 7 days of corpus
+- 2026-05-31 12:35:10 +0800 -> 2026-06-05 17:13:51 +0800 | Claude Code | `local source [redacted]` | "Claude project 015" | path-derived lifecycle: 53 transcript files, no mtime in final 7 days of corpus
+- 2026-06-25 09:31:21 +0800 -> 2026-06-26 13:22:06 +0800 | Claude Code | `local source [redacted]` | "Claude project 014" | path-derived lifecycle: 12 transcript files, no mtime in final 7 days of corpus
+- 2026-05-31 01:29:33 +0800 -> 2026-05-31 12:33:41 +0800 | Claude Code | `local source [redacted]` | "Claude project 007" | path-derived lifecycle: 5 transcript files, no mtime in final 7 days of corpus
+- 2026-06-10 22:14:25 +0800 -> 2026-06-26 15:55:01 +0800 | Claude Code | `local source [redacted]` | "Claude project 008" | path-derived lifecycle: 5 transcript files, no mtime in final 7 days of corpus
+- 2026-06-25 08:28:17 +0800 -> 2026-06-25 08:32:04 +0800 | Claude Code | `local source [redacted]` | "Claude project 006" | path-derived lifecycle: 4 transcript files, no mtime in final 7 days of corpus
+- 2026-05-31 01:00:20 +0800 -> 2026-05-31 01:01:04 +0800 | Claude Code | `local source [redacted]` | "Claude project 005" | path-derived lifecycle: 3 transcript files, no mtime in final 7 days of corpus
 
 ## 3. Correction patterns - what I fix in the AI's work
 

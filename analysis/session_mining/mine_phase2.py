@@ -388,16 +388,23 @@ def top_project_dirs(files):
     return c
 
 
+def claude_project_key(item):
+    parts = item["path"].parts
+    if ".claude" not in parts or "projects" not in parts:
+        return None
+    projects_index = parts.index("projects")
+    if projects_index + 1 >= len(parts):
+        return None
+    return parts[projects_index + 1]
+
+
 def project_lifecycles(files):
+    project_keys = sorted({key for item in files if (key := claude_project_key(item))})
+    aliases = {key: f"Claude project {index:03d}" for index, key in enumerate(project_keys, start=1)}
     data = {}
     for item in files:
-        p = item["path"]
-        parts = p.parts
-        label = None
-        if ".claude" in parts and "projects" in parts:
-            idx = parts.index("projects")
-            if idx + 1 < len(parts):
-                label = "Claude project [redacted]"
+        project_key = claude_project_key(item)
+        label = aliases.get(project_key)
         if not label:
             continue
         row = data.setdefault(label, {"count": 0, "first": item["mtime"], "last": item["mtime"], "tools": Counter()})

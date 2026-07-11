@@ -36,10 +36,11 @@
     }
   },
   "section_receipts": {
-    "recurring": 45,
+    "recurring": 51,
     "correction": 43,
     "repetition": 45,
     "rhythm": 19,
-    "blindspots": 1
+    "blindspots": 1,
+    "abandonment": 7
   }
 }
