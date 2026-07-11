@@ -228,6 +228,15 @@ def _load_rss_config(config_data: Dict) -> Dict:
     # 新鲜度过滤配置
     freshness_filter = rss.get("freshness_filter", {})
 
+    raw_max_retries = advanced_rss.get("max_retries", 2)
+    try:
+        max_retries = int(raw_max_retries)
+        if max_retries < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        print(f"[警告] RSS max_retries 格式错误 ({raw_max_retries})，使用默认值 2")
+        max_retries = 2
+
     # 验证并设置 max_age_days 默认值
     raw_max_age = freshness_filter.get("max_age_days", 3)
     try:
@@ -244,6 +253,7 @@ def _load_rss_config(config_data: Dict) -> Dict:
         "ENABLED": rss.get("enabled", False),
         "REQUEST_INTERVAL": advanced_rss.get("request_interval", 2000),
         "TIMEOUT": advanced_rss.get("timeout", 15),
+        "MAX_RETRIES": max_retries,
         "USE_PROXY": advanced_rss.get("use_proxy", False),
         "PROXY_URL": rss_proxy_url,
         "FEEDS": rss.get("feeds", []),
