@@ -71,6 +71,7 @@ _REASON_TO_DECISION: dict[str, DispatchPlanDecision] = {
     "deferred_quiet_hours": DECISION_DISPATCH,
     "quiet_hours_config_error": DECISION_SUPPRESSED,
     "skipped_deferred_queue_error": DECISION_SUPPRESSED,
+    "skipped_deferred_queue_upsert": DECISION_SUPPRESSED,
 }
 
 

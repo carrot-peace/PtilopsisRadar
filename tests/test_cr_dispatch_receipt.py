@@ -50,6 +50,7 @@ from trendradar.cr.dispatch_receipt import (
     STATUS_NOT_EXECUTED,
     STATUS_REJECTED,
     STATUS_SHADOW_ONLY,
+    STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT,
     STATUS_SKIPPED_NO_CANDIDATE,
     STATUS_SKIPPED_SUPPRESS,
     build_dispatch_receipts_json,
@@ -220,6 +221,21 @@ class TestPlanFields(unittest.TestCase):
         d = build_dispatch_receipts_json(plan, dispatch_mode="artifact")
         self.assertEqual(d["plan_decision"], DECISION_SUPPRESSED)
         self.assertFalse(d["plan_should_dispatch"])
+
+    def test_deferred_queue_upsert_skip_maps_to_suppressed_receipt(self):
+        plan = _make_skipped_plan(reason="skipped_deferred_queue_upsert")
+
+        data = build_dispatch_receipts_json(plan, dispatch_mode="live")
+
+        self.assertEqual(data["plan_decision"], DECISION_SUPPRESSED)
+        self.assertEqual(
+            data["receipts"][0]["status"],
+            STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT,
+        )
+        self.assertEqual(
+            data["receipts"][0]["detail"],
+            "deferred_queue_upsert_rejected",
+        )
 
     def test_plan_decision_dispatch(self):
         plan = _make_ready_plan()

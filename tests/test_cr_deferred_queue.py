@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from trendradar.cr.artifacts import CRArtifactConfig
 from trendradar.cr.decision import CRDecisionPolicy
@@ -19,8 +20,14 @@ from trendradar.cr.deferred_queue import (
     upsert_deferred_entry,
 )
 from trendradar.cr.dispatch_executor import CRDispatchReceipt, CRMemoryDispatchSink
+from trendradar.cr.event_identity import stable_event_key_for_candidate
+from trendradar.cr.models import CRCandidate
 from trendradar.cr.pipeline import CRPipelineConfig
-from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
+from trendradar.cr.runtime_dry_run import (
+    _deferred_receipts_for_upserts,
+    _queue_with_candidates,
+    build_and_write_cr_runtime_dry_run,
+)
 from trendradar.cr.state_store import load_cr_event_state_snapshot
 
 
@@ -91,6 +98,24 @@ def _entry(
     )
 
 
+def _presented_candidate(title: str, *, level: str = "alert") -> object:
+    raw = CRCandidate(
+        candidate_id=f"candidate-{title}",
+        cluster_key=f"cluster-{title}",
+        display_title=title,
+    )
+    return SimpleNamespace(
+        candidate=raw,
+        candidate_id=raw.candidate_id,
+        display_title=title,
+        decision_level=level,
+        total_score=75.0,
+        representative_url=None,
+        trigger_reasons=["test"],
+        suppress_labels=[],
+    )
+
+
 class _RejectingSink:
     def submit(self, message, *, message_index):  # noqa: ANN001
         return CRDispatchReceipt(
@@ -130,7 +155,7 @@ class TestDeferredQueueStore(unittest.TestCase):
             _entry("urgent-new", level="urgent", deferred_at="2026-06-18T00:20:00+08:00"),
             _entry("urgent-old", level="urgent", deferred_at="2026-06-17T23:30:00+08:00"),
         ):
-            queue = upsert_deferred_entry(queue, entry)
+            queue = upsert_deferred_entry(queue, entry).queue
         ordered = ordered_entries_for_flush(queue)
         self.assertEqual(
             [entry.event_key for entry in ordered],
@@ -138,12 +163,13 @@ class TestDeferredQueueStore(unittest.TestCase):
         )
 
     def test_dedupe_preserves_deferred_at_and_refreshes_same_level(self):
-        queue = upsert_deferred_entry(
+        first = upsert_deferred_entry(
             empty_deferred_dispatch_queue(),
             _entry("ev-A", level="alert", title="Old", score=70.0, text="old text"),
         )
-        queue = upsert_deferred_entry(
-            queue,
+        self.assertEqual(first.outcome, "inserted")
+        refreshed = upsert_deferred_entry(
+            first.queue,
             _entry(
                 "ev-A",
                 level="alert",
@@ -153,6 +179,9 @@ class TestDeferredQueueStore(unittest.TestCase):
                 text="new text",
             ),
         )
+        self.assertEqual(refreshed.outcome, "refreshed")
+        self.assertEqual(refreshed.reason, "same_level_refresh")
+        queue = refreshed.queue
         self.assertEqual(len(queue.entries), 1)
         entry = queue.entries[0]
         self.assertEqual(entry.deferred_at, "2026-06-17T23:30:00+08:00")
@@ -164,21 +193,79 @@ class TestDeferredQueueStore(unittest.TestCase):
         queue = upsert_deferred_entry(
             empty_deferred_dispatch_queue(),
             _entry("ev-A", level="alert"),
-        )
-        queue = upsert_deferred_entry(
+        ).queue
+        result = upsert_deferred_entry(
             queue,
             _entry("ev-A", level="urgent", text="urgent text"),
         )
+        self.assertEqual(result.outcome, "refreshed")
+        self.assertEqual(result.reason, "higher_level_refresh")
+        self.assertEqual(result.event_key, "ev-A")
+        self.assertEqual(result.candidate_id, "c-ev-A")
+        queue = result.queue
         self.assertEqual(len(queue.entries), 1)
         self.assertEqual(queue.entries[0].level, "urgent")
         self.assertEqual(queue.entries[0].message_text, "urgent text")
+
+    def test_lower_level_is_skipped_with_explicit_reason(self):
+        queue = upsert_deferred_entry(
+            empty_deferred_dispatch_queue(),
+            _entry("ev-A", level="urgent", text="urgent text"),
+        ).queue
+
+        result = upsert_deferred_entry(
+            queue,
+            _entry("ev-A", level="alert", text="alert text"),
+        )
+
+        self.assertEqual(result.outcome, "skipped")
+        self.assertEqual(result.reason, "existing_higher_level")
+        self.assertEqual(result.queue, queue)
+
+    def test_batch_upsert_reports_partial_success_without_false_receipt(self):
+        lower = _presented_candidate("Existing Event", level="alert")
+        inserted = _presented_candidate("New Event", level="alert")
+        lower_key = stable_event_key_for_candidate(lower)
+        queue = upsert_deferred_entry(
+            empty_deferred_dispatch_queue(),
+            _entry(lower_key, level="urgent"),
+        ).queue
+
+        updated, outcomes = _queue_with_candidates(
+            queue,
+            (lower, inserted),
+            deferred_at="2026-06-17T23:30:00+08:00",
+            deferred_until="2026-06-18T08:00:00+08:00",
+            run_label="partial-upsert",
+            high_score_suppressed_count=0,
+        )
+        receipts = _deferred_receipts_for_upserts(
+            outcomes,
+            deferred_until="2026-06-18T08:00:00+08:00",
+            queue_state_current=True,
+        )
+
+        self.assertEqual([item.outcome for item in outcomes], ["skipped", "inserted"])
+        self.assertEqual(
+            [receipt["status"] for receipt in receipts],
+            ["skipped_deferred_queue_upsert", "deferred_quiet_hours"],
+        )
+        self.assertEqual(
+            [receipt["deferred_upsert_reason"] for receipt in receipts],
+            ["existing_higher_level", "new_entry"],
+        )
+        self.assertEqual(len(updated.entries), 2)
+        self.assertEqual(
+            {entry.event_key for entry in updated.entries},
+            {lower_key, stable_event_key_for_candidate(inserted)},
+        )
 
 
 class TestDeferredQueueRuntime(unittest.TestCase):
     def _seed_queue(self, path: Path, *entries: CRDeferredDispatchEntry) -> None:
         queue = empty_deferred_dispatch_queue()
         for entry in entries:
-            queue = upsert_deferred_entry(queue, entry)
+            queue = upsert_deferred_entry(queue, entry).queue
         save = save_deferred_dispatch_queue(queue, path)
         self.assertTrue(save.saved, save.error)
 
