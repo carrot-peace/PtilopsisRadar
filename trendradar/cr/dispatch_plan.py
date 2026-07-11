@@ -29,6 +29,7 @@ from trendradar.cr.decision import (
 )
 from trendradar.cr.pipeline import CRPipelineResult
 from trendradar.cr.presentation import CRPresentedCandidate
+from trendradar.cr.event_identity import stable_event_key_for_candidate
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +346,7 @@ def cr_dispatch_plan_to_json_dict(
                     DECISION_ALERT,
                     DECISION_URGENT,
                 ):
-                    selected_event_key = pc.cluster_key
+                    selected_event_key = stable_event_key_for_candidate(pc)
                     selected_candidate_id = pc.candidate_id
                     selected_title = pc.display_title
                     selected_level = pc.decision_level
