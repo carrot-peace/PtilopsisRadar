@@ -194,6 +194,12 @@ def _dedupe_state_update_entries_keep_highest(
 
 
 def _parse_seen_at(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 ``seen_at`` string into a tz-aware UTC datetime.
+
+    Returns ``None`` when *value* is ``None`` or unparseable.  Naive
+    timestamps (no offset) are assumed UTC — this is a defensive fallback;
+    all ``seen_at`` values produced by the runtime carry an explicit offset.
+    """
     if value is None:
         return None
     try:
