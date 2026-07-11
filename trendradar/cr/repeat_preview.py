@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Literal, Mapping
 
 from trendradar.cr.decision import (
+    CR_DECISION_LEVEL_ORDER,
     DECISION_ALERT,
     DECISION_SUPPRESS,
     DECISION_URGENT,
@@ -75,14 +76,6 @@ class CRRepeatPreview:
     previous_seen_at: str | None = None
 
 
-_LEVEL_ORDER: dict[CRDecisionLevel, int] = {
-    DECISION_SUPPRESS: 0,
-    DECISION_WATCH: 1,
-    DECISION_ALERT: 2,
-    DECISION_URGENT: 3,
-}
-
-
 def normalize_cr_decision_level(value: str | None) -> CRDecisionLevel | None:
     """Normalize an existing CR decision label without guessing aggressively."""
     if value is None:
@@ -106,8 +99,8 @@ def compare_cr_decision_level(
     """Compare two CR decision levels using suppress < watch < alert < urgent."""
     if previous is None or current is None:
         return "unknown"
-    previous_rank = _LEVEL_ORDER.get(previous)
-    current_rank = _LEVEL_ORDER.get(current)
+    previous_rank = CR_DECISION_LEVEL_ORDER.get(previous)
+    current_rank = CR_DECISION_LEVEL_ORDER.get(current)
     if previous_rank is None or current_rank is None:
         return "unknown"
     if previous_rank == current_rank:
