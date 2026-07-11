@@ -262,9 +262,16 @@ class TestBothPresent(unittest.TestCase):
             selected_event_key = selected["event_key"]
             selected_candidate_id = selected["candidate_id"]
 
-            selected_outcome = [
+            matching_outcomes = [
                 o for o in outcomes if o["candidate_id"] == selected_candidate_id
-            ][0]
+            ]
+            self.assertEqual(
+                1,
+                len(matching_outcomes),
+                f"Expected exactly one cooldown outcome for candidate_id "
+                f"{selected_candidate_id}, found {len(matching_outcomes)}",
+            )
+            selected_outcome = matching_outcomes[0]
             self.assertEqual(selected_outcome["event_key"], selected_event_key)
             self.assertEqual(selected_outcome["candidate_id"], selected_candidate_id)
 
