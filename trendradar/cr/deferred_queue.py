@@ -15,11 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from trendradar.cr.decision import CR_DECISION_LEVEL_ORDER
+
 
 DEFERRED_QUEUE_SCHEMA_VERSION = "cr-deferred-dispatch-queue-v1"
 DEFAULT_DEFERRED_QUEUE_PATH = "output/cr/state/cr_deferred_dispatch_queue.json"
 
-_LEVEL_ORDER = {"alert": 2, "urgent": 3}
+#: Only alert and urgent are eligible for deferred dispatch.
+_DEFERRED_ALLOWED_LEVELS = frozenset({"alert", "urgent"})
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,7 @@ def _require_score(data: Mapping[str, object]) -> float:
 
 def _entry_from_mapping(data: Mapping[str, object]) -> CRDeferredDispatchEntry:
     level = _require_str(data, "level")
-    if level not in _LEVEL_ORDER:
+    if level not in _DEFERRED_ALLOWED_LEVELS:
         raise ValueError("entry level must be alert or urgent")
     payload = data.get("candidate_payload")
     if payload is None:
@@ -261,7 +264,7 @@ def save_deferred_dispatch_queue(
 
 
 def _rank(level: str | None) -> int:
-    return _LEVEL_ORDER.get(level or "", -1)
+    return CR_DECISION_LEVEL_ORDER.get(level or "", -1)
 
 
 def upsert_deferred_entry(

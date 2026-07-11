@@ -29,6 +29,16 @@ DECISION_WATCH: CRDecisionLevel = "watch"
 DECISION_ALERT: CRDecisionLevel = "alert"
 DECISION_URGENT: CRDecisionLevel = "urgent"
 
+#: Canonical ordering of decision levels from lowest to highest.
+#: Centralised here so every module that compares levels shares a single
+#: source of truth.
+CR_DECISION_LEVEL_ORDER: dict[str, int] = {
+    DECISION_SUPPRESS: 0,
+    DECISION_WATCH: 1,
+    DECISION_ALERT: 2,
+    DECISION_URGENT: 3,
+}
+
 
 # ---------------------------------------------------------------------------
 # Decision Policy
