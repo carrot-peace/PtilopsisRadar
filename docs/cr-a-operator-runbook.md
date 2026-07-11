@@ -255,7 +255,7 @@ of truth: [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receip
 Every `deferred_quiet_hours` receipt represents an `inserted` or `refreshed`
 upsert that was successfully persisted. A rejected upsert uses
 `skipped_deferred_queue_upsert`; a queue save failure uses
-`skipped_deferred_queue_error`, so neither can be mistaken for durable deferral.
+`skipped_deferred_queue_error`, so neither can be mistaken for a durable deferral.
 
 If actual emitted status names ever diverge from this table, treat
 [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receipt.py) and

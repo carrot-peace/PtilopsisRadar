@@ -199,6 +199,9 @@ class TestDeferredQueueStore(unittest.TestCase):
             _entry("ev-A", level="urgent", text="urgent text"),
         )
         self.assertEqual(result.outcome, "refreshed")
+        self.assertEqual(result.reason, "higher_level_refresh")
+        self.assertEqual(result.event_key, "ev-A")
+        self.assertEqual(result.candidate_id, "c-ev-A")
         queue = result.queue
         self.assertEqual(len(queue.entries), 1)
         self.assertEqual(queue.entries[0].level, "urgent")
@@ -239,13 +242,17 @@ class TestDeferredQueueStore(unittest.TestCase):
         receipts = _deferred_receipts_for_upserts(
             outcomes,
             deferred_until="2026-06-18T08:00:00+08:00",
-            persisted=True,
+            queue_state_current=True,
         )
 
         self.assertEqual([item.outcome for item in outcomes], ["skipped", "inserted"])
         self.assertEqual(
             [receipt["status"] for receipt in receipts],
             ["skipped_deferred_queue_upsert", "deferred_quiet_hours"],
+        )
+        self.assertEqual(
+            [receipt["deferred_upsert_reason"] for receipt in receipts],
+            ["existing_higher_level", "new_entry"],
         )
         self.assertEqual(len(updated.entries), 2)
         self.assertEqual(

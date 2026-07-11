@@ -217,6 +217,63 @@ class TestQuietHoursRuntime(unittest.TestCase):
             self.assertTrue(state.loaded)
             self.assertEqual(state.snapshot.entries[0].decision_level, "urgent")
 
+    def test_urgent_bypass_queue_cleanup_failure_is_audited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            state_path = Path(tmp) / "state.json"
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats("Urgent Cleanup Failure"),
+                run_label="urgent-cleanup-seed",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "seed"),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                dispatch_state_path=state_path,
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_env(PTILOPSIS_CR_QUIET_HOURS_ALLOW_URGENT="0"),
+                now=_dt("2026-06-17T23:00:00+08:00"),
+                pipeline_config=_urgent_pipeline_config(),
+            )
+            seeded_queue = queue_path.read_text(encoding="utf-8")
+            failed_save = Mock(return_value=CRDeferredQueueSaveResult(
+                saved=False,
+                error="unable to save deferred queue: OSError",
+                path=str(queue_path),
+            ))
+
+            with patch.dict(
+                build_and_write_cr_runtime_dry_run.__globals__,
+                {"save_deferred_dispatch_queue": failed_save},
+            ):
+                result = build_and_write_cr_runtime_dry_run(
+                    hotlist_stats=_hotlist_stats("Urgent Cleanup Failure"),
+                    run_label="urgent-cleanup-failure",
+                    artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "run"),
+                    dispatch_mode="live",
+                    dispatch_sink=CRMemoryDispatchSink(),
+                    dispatch_state_path=state_path,
+                    deferred_queue_path=queue_path,
+                    quiet_hours_env=_env(
+                        PTILOPSIS_CR_QUIET_HOURS_ALLOW_URGENT="1"
+                    ),
+                    now=_dt("2026-06-17T23:30:00+08:00"),
+                    pipeline_config=_urgent_pipeline_config(),
+                )
+
+            self.assertIsNotNone(result.deferred_queue_save)
+            self.assertFalse(result.deferred_queue_save.saved)
+            self.assertEqual(
+                _latest_receipts(result)["receipts"][0]["status"],
+                "accepted",
+            )
+            self.assertEqual(
+                _latest_plan(result)["quiet_hours"]["decision"],
+                "skipped_deferred_queue_error",
+            )
+            self.assertEqual(queue_path.read_text(encoding="utf-8"), seeded_queue)
+            state = load_cr_event_state_snapshot(state_path)
+            self.assertTrue(state.loaded)
+            self.assertEqual(state.snapshot.entries[0].decision_level, "urgent")
+
     def test_urgent_bypass_failure_is_queued_for_retry(self):
         for sink in (_RejectingSink(), _RaisingSink(), None):
             with self.subTest(sink=type(sink).__name__ if sink else "None"):
@@ -334,6 +391,47 @@ class TestQuietHoursRuntime(unittest.TestCase):
             self.assertEqual(receipts[0]["deferred_upsert_outcome"], "inserted")
             queue = json.loads(queue_path.read_text(encoding="utf-8"))
             self.assertEqual(len(queue["entries"]), 1)
+
+    def test_all_candidates_skipped_reports_zero_deferred_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats("Queued Higher Level"),
+                run_label="all-skipped-seed",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "seed"),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_env(PTILOPSIS_CR_QUIET_HOURS_ALLOW_URGENT="0"),
+                now=_dt("2026-06-17T23:00:00+08:00"),
+                pipeline_config=_urgent_pipeline_config(),
+            )
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats("Queued Higher Level"),
+                run_label="all-skipped-alert",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "run"),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_env(),
+                now=_dt("2026-06-17T23:30:00+08:00"),
+                urgent_threshold=999.0,
+            )
+
+            receipt = _latest_receipts(result)["receipts"][0]
+            self.assertEqual(receipt["status"], "skipped_deferred_queue_upsert")
+            self.assertEqual(
+                receipt["deferred_upsert_reason"],
+                "existing_higher_level",
+            )
+            plan = _latest_plan(result)
+            self.assertEqual(plan["decision"], "suppress")
+            self.assertEqual(
+                plan["quiet_hours"]["decision"],
+                "skipped_deferred_queue_upsert",
+            )
+            self.assertEqual(plan["quiet_hours"]["deferred_count"], 0)
 
     def test_queue_save_failure_never_emits_deferred_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
