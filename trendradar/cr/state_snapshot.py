@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
 
-from trendradar.cr.decision import CRDecisionLevel
+from trendradar.cr.decision import CR_DECISION_LEVEL_ORDER, CRDecisionLevel
 from trendradar.cr.event_identity import (
     CR_EVENT_IDENTITY_KEY_VERSION,
     build_cr_event_identity_from_candidate,
@@ -27,13 +27,6 @@ from trendradar.cr.repeat_preview import (
 
 
 CR_EVENT_STATE_SCHEMA_VERSION = "cr-event-state-v1"
-
-_CR_DECISION_LEVEL_ORDER: dict[str, int] = {
-    "suppress": 0,
-    "watch": 1,
-    "alert": 2,
-    "urgent": 3,
-}
 
 
 @dataclass(frozen=True)
@@ -168,11 +161,11 @@ def _dedupe_state_update_entries_keep_highest(
             by_key[event_key] = normalized_entry
             continue
 
-        existing_rank = _CR_DECISION_LEVEL_ORDER.get(
+        existing_rank = CR_DECISION_LEVEL_ORDER.get(
             existing.decision_level or "",
             -1,
         )
-        new_rank = _CR_DECISION_LEVEL_ORDER.get(
+        new_rank = CR_DECISION_LEVEL_ORDER.get(
             normalized_entry.decision_level or "",
             -1,
         )
