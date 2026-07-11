@@ -46,6 +46,7 @@ not_configured            transport never attempted (no/partial sink config)
 failed_transport          transport attempted, network/transport error
 rejected                  sink reached, send rejected
 deferred_quiet_hours      held in the deferred queue, not sent
+skipped_deferred_queue_upsert  candidate rejected by queue conflict, not deferred
 quiet_hours_config_error  invalid quiet-hours config, fails closed
 skipped_deferred_queue_error  queue unreadable, fails closed
 shadow_only / not_executed (artifact)  preview/artifact, never a send
@@ -209,6 +210,7 @@ artifact / shadow         -> no sink attempt, no state update
 not_configured            -> no state update (no/partial sink config)
 failed_transport          -> no state update (transport error)
 deferred_quiet_hours      -> queue entry exists, no state update
+skipped_deferred_queue_upsert -> no new/updated queue entry; inspect receipt detail
 skipped_deferred_queue_error -> queue untouched, no send
 quiet_hours_config_error  -> no send, no queue overwrite
 ```
@@ -238,8 +240,9 @@ of truth: [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receip
 | `failed_transport` | Yes | No | No | Transient network/transport; will retry next run. |
 | `failed_render` | No | No | No | Investigate message rendering. |
 | `http_error` | Yes | No | No | Inspect HTTP status / Telegram API response. |
-| `deferred_quiet_hours` | No | No | No | Expected during quiet-hours; flushes after window. |
+| `deferred_quiet_hours` | No | No | No | Queue insert/refresh was persisted; flushes after window. |
 | `skipped_quiet_hours` | No | No | No | Expected; suppressed by quiet-hours policy. |
+| `skipped_deferred_queue_upsert` | No | No | No | Candidate was not inserted/refreshed; inspect `deferred_upsert_reason`. |
 | `skipped_deferred_queue_error` | No | No | No | Queue unreadable; back up + inspect queue file. |
 | `quiet_hours_config_error` | No | No | No | Fix `PTILOPSIS_CR_TIMEZONE` / `START` / `END`. |
 | `unknown` | varies | No | No | Investigate; should not occur in normal operation. |
@@ -248,6 +251,11 @@ of truth: [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receip
 > `detail == "flushed_deferred"` and `source == "deferred_queue"`. The status
 > vocabulary for flush entries is the same accepted/rejected/failed_transport/
 > http_error set; "flushed_deferred" is a detail, not a status.
+
+Every `deferred_quiet_hours` receipt represents an `inserted` or `refreshed`
+upsert that was successfully persisted. A rejected upsert uses
+`skipped_deferred_queue_upsert`; a queue save failure uses
+`skipped_deferred_queue_error`, so neither can be mistaken for durable deferral.
 
 If actual emitted status names ever diverge from this table, treat
 [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receipt.py) and

@@ -6,10 +6,12 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from trendradar.cr.artifacts import CRArtifactConfig
 from trendradar.cr.decision import CRDecisionPolicy
 from trendradar.cr.dispatch_executor import CRDispatchReceipt, CRMemoryDispatchSink
+from trendradar.cr.deferred_queue import CRDeferredQueueSaveResult
 from trendradar.cr.pipeline import CRPipelineConfig
 from trendradar.cr.quiet_hours import evaluate_cr_quiet_hours
 from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
@@ -296,6 +298,71 @@ class TestQuietHoursRuntime(unittest.TestCase):
             self.assertFalse(queue_path.exists())
             statuses = [r["status"] for r in _latest_receipts(result)["receipts"]]
             self.assertIn("skipped_cooldown", statuses)
+
+    def test_same_level_candidate_is_queued_after_cooldown_expires(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            queue_path = Path(tmp) / "queue.json"
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats("Cooldown Expired"),
+                run_label="cooldown-expired-first",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "first"),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                dispatch_state_path=state_path,
+                deferred_queue_path=queue_path,
+                quiet_hours_env={},
+                now=_dt("2026-06-17T22:00:00+08:00"),
+                urgent_threshold=999.0,
+            )
+
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=_hotlist_stats("Cooldown Expired"),
+                run_label="cooldown-expired-second",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "second"),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                dispatch_state_path=state_path,
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_env(),
+                now=_dt("2026-06-17T23:30:00+08:00"),
+                urgent_threshold=999.0,
+            )
+
+            receipts = _latest_receipts(result)["receipts"]
+            self.assertEqual(receipts[0]["status"], "deferred_quiet_hours")
+            self.assertEqual(receipts[0]["deferred_upsert_outcome"], "inserted")
+            queue = json.loads(queue_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(queue["entries"]), 1)
+
+    def test_queue_save_failure_never_emits_deferred_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            failed_save = Mock(return_value=CRDeferredQueueSaveResult(
+                saved=False,
+                error="unable to save deferred queue: OSError",
+                path=str(queue_path),
+            ))
+            with patch.dict(
+                build_and_write_cr_runtime_dry_run.__globals__,
+                {"save_deferred_dispatch_queue": failed_save},
+            ):
+                result = build_and_write_cr_runtime_dry_run(
+                    hotlist_stats=_hotlist_stats("Queue Save Failure"),
+                    run_label="queue-save-failure",
+                    artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "art"),
+                    dispatch_mode="live",
+                    dispatch_sink=CRMemoryDispatchSink(),
+                    deferred_queue_path=queue_path,
+                    quiet_hours_env=_env(),
+                    now=_dt("2026-06-17T23:30:00+08:00"),
+                    urgent_threshold=999.0,
+                )
+
+            receipts = _latest_receipts(result)["receipts"]
+            self.assertEqual(receipts[0]["status"], "skipped_deferred_queue_error")
+            self.assertEqual(receipts[0]["detail"], "deferred_queue_save_failed")
+            self.assertFalse(queue_path.exists())
 
 
 if __name__ == "__main__":

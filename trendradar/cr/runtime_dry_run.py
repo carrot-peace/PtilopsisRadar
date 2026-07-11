@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
 
 from trendradar.cr.adapter import adapt_hotlist_stats, adapt_rss_stats
 from trendradar.cr.artifacts import (
@@ -55,13 +54,19 @@ from trendradar.cr.dispatch_plan import (
     build_cr_a_dispatch_plan,
     cr_dispatch_plan_to_json_dict,
 )
-from trendradar.cr.dispatch_receipt import build_dispatch_receipts_json
+from trendradar.cr.dispatch_receipt import (
+    STATUS_DEFERRED_QUIET_HOURS,
+    STATUS_SKIPPED_DEFERRED_QUEUE_ERROR,
+    STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT,
+    build_dispatch_receipts_json,
+)
 from trendradar.cr.decision import DECISION_URGENT
 from trendradar.cr.deferred_queue import (
     CRDeferredDispatchEntry,
     CRDeferredDispatchQueue,
     CRDeferredQueueLoadResult,
     CRDeferredQueueSaveResult,
+    CRDeferredQueueUpsertResult,
     DEFAULT_DEFERRED_QUEUE_PATH,
     load_deferred_dispatch_queue,
     ordered_entries_for_flush,
@@ -400,25 +405,17 @@ def _deferred_entry_for_candidate(
     )
 
 
-def _accepted_levels_from_seen_states(
-    seen_states: dict[str, CRSeenEventState] | None,
-) -> dict[str, str | None]:
-    if not seen_states:
-        return {}
-    return {key: value.decision_level for key, value in seen_states.items()}
-
-
 def _queue_with_candidates(
     queue: CRDeferredDispatchQueue,
     candidates: tuple,
     *,
-    accepted_levels: Mapping[str, str | None],
     deferred_at: str,
     deferred_until: str,
     run_label: str,
     high_score_suppressed_count: int,
-) -> CRDeferredDispatchQueue:
+) -> tuple[CRDeferredDispatchQueue, tuple[CRDeferredQueueUpsertResult, ...]]:
     updated = queue
+    outcomes: list[CRDeferredQueueUpsertResult] = []
     for pc in candidates:
         entry = _deferred_entry_for_candidate(
             pc,
@@ -427,33 +424,45 @@ def _queue_with_candidates(
             run_label=run_label,
             high_score_suppressed_count=high_score_suppressed_count,
         )
-        updated = upsert_deferred_entry(
-            updated, entry, accepted_levels=accepted_levels
-        )
-    return updated
+        result = upsert_deferred_entry(updated, entry)
+        updated = result.queue
+        outcomes.append(result)
+    return updated, tuple(outcomes)
 
 
-def _deferred_receipts_for_candidates(
-    candidates: tuple,
+def _deferred_receipts_for_upserts(
+    outcomes: tuple[CRDeferredQueueUpsertResult, ...],
     *,
     deferred_until: str | None,
+    persisted: bool,
 ) -> list[dict[str, object]]:
     receipts: list[dict[str, object]] = []
-    for index, pc in enumerate(candidates):
+    for index, outcome in enumerate(outcomes):
+        if outcome.outcome == "skipped":
+            status = STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT
+            detail = outcome.reason
+        elif persisted:
+            status = STATUS_DEFERRED_QUIET_HOURS
+            detail = f"quiet_hours_{outcome.outcome}"
+        else:
+            status = STATUS_SKIPPED_DEFERRED_QUEUE_ERROR
+            detail = "deferred_queue_save_failed"
         receipts.append({
             "message_index": index,
             "attempted": False,
             "accepted": False,
-            "status": "deferred_quiet_hours",
-            "detail": "quiet_hours_active",
+            "status": status,
+            "detail": detail,
             "transport": None,
             "http_status": None,
             "sink_ok": None,
             "exception_type": None,
             "exception_message": None,
             "deferred_until": deferred_until,
-            "event_key": stable_event_key_for_candidate(pc),
-            "candidate_id": getattr(pc, "candidate_id", None),
+            "deferred_upsert_outcome": outcome.outcome,
+            "deferred_upsert_reason": outcome.reason,
+            "event_key": outcome.event_key,
+            "candidate_id": outcome.candidate_id,
         })
     return receipts
 
@@ -969,6 +978,8 @@ def build_and_write_cr_runtime_dry_run(
     quiet_bypass_applied = False
     quiet_deferred_candidates: tuple = ()
     quiet_receipts: list[dict[str, object]] = []
+    quiet_upsert_outcomes: dict[str, CRDeferredQueueUpsertResult] = {}
+    deferred_event_keys: set[str] = set()
     dispatch_execution = None
     execution_state_candidates: tuple = ()
 
@@ -1090,10 +1101,9 @@ def build_and_write_cr_runtime_dry_run(
                     if quiet_hours.deferred_until is not None
                     else now_iso
                 )
-                updated_queue = _queue_with_candidates(
+                updated_queue, upsert_outcomes = _queue_with_candidates(
                     deferred_queue_load.queue,
                     quiet_deferred_candidates,
-                    accepted_levels=_accepted_levels_from_seen_states(seen_states),
                     deferred_at=now_iso,
                     deferred_until=deferred_until,
                     run_label=run_label,
@@ -1101,14 +1111,43 @@ def build_and_write_cr_runtime_dry_run(
                         pipeline_result.high_score_suppressed_count
                     ),
                 )
-                if updated_queue.entries != deferred_queue_load.queue.entries:
+                queue_changed = (
+                    updated_queue.entries != deferred_queue_load.queue.entries
+                )
+                persisted = not queue_changed
+                if queue_changed:
                     deferred_queue_save = save_deferred_dispatch_queue(
                         updated_queue, effective_queue_path
                     )
-                    quiet_receipts = _deferred_receipts_for_candidates(
-                        quiet_deferred_candidates,
-                        deferred_until=deferred_until,
+                    persisted = deferred_queue_save.saved
+                    if not persisted:
+                        queue_error_reason = "skipped_deferred_queue_error"
+                        dispatch_plan = replace(
+                            dispatch_plan,
+                            reason=queue_error_reason,
+                        )
+                quiet_receipts = _deferred_receipts_for_upserts(
+                    upsert_outcomes,
+                    deferred_until=deferred_until,
+                    persisted=persisted,
+                )
+                quiet_upsert_outcomes = {
+                    outcome.event_key: outcome for outcome in upsert_outcomes
+                }
+                if persisted:
+                    deferred_event_keys = {
+                        outcome.event_key
+                        for outcome in upsert_outcomes
+                        if outcome.outcome != "skipped"
+                    }
+                if upsert_outcomes and all(
+                    outcome.outcome == "skipped" for outcome in upsert_outcomes
+                ) and not bypass_candidates:
+                    dispatch_plan = replace(
+                        dispatch_plan,
+                        reason="skipped_deferred_queue_upsert",
                     )
+                if quiet_receipts:
                     if not bypass_candidates:
                         override_receipts = quiet_receipts
                     else:
@@ -1149,7 +1188,9 @@ def build_and_write_cr_runtime_dry_run(
     # 6e. Build quiet-hours context for plan JSON.
     quiet_entries: list[dict[str, object]] = []
     for pc in eligible_cr_a_candidates:
-        is_deferred = pc in quiet_deferred_candidates
+        event_key = stable_event_key_for_candidate(pc)
+        is_deferred = event_key in deferred_event_keys
+        upsert_outcome = quiet_upsert_outcomes.get(event_key)
         allowed = (
             pc.decision_level == DECISION_URGENT
             and quiet_hours.allow_urgent_bypass
@@ -1157,7 +1198,7 @@ def build_and_write_cr_runtime_dry_run(
         )
         quiet_entries.append({
             "candidate_id": pc.candidate_id,
-            "event_key": stable_event_key_for_candidate(pc),
+            "event_key": event_key,
             "level": pc.decision_level,
             "title": pc.display_title,
             "allowed_by_urgent_bypass": allowed,
@@ -1166,6 +1207,12 @@ def build_and_write_cr_runtime_dry_run(
                 quiet_hours.deferred_until.isoformat()
                 if is_deferred and quiet_hours.deferred_until is not None
                 else None
+            ),
+            "deferred_upsert_outcome": (
+                upsert_outcome.outcome if upsert_outcome is not None else None
+            ),
+            "deferred_upsert_reason": (
+                upsert_outcome.reason if upsert_outcome is not None else None
             ),
         })
     quiet_decision = None
@@ -1176,9 +1223,12 @@ def build_and_write_cr_runtime_dry_run(
     elif queue_error_reason is not None:
         quiet_decision = "skipped_deferred_queue_error"
         quiet_reason = "deferred_queue_error"
-    elif quiet_receipts:
+    elif deferred_event_keys:
         quiet_decision = "deferred_quiet_hours"
         quiet_reason = "quiet_hours_active"
+    elif quiet_upsert_outcomes:
+        quiet_decision = "skipped_deferred_queue_upsert"
+        quiet_reason = "deferred_queue_upsert_rejected"
     elif quiet_bypass_applied:
         quiet_decision = "urgent_bypass"
         quiet_reason = "urgent_bypass_allowed"
@@ -1187,7 +1237,7 @@ def build_and_write_cr_runtime_dry_run(
         decision=quiet_decision,
         reason=quiet_reason,
         bypass_applied=quiet_bypass_applied,
-        deferred_count=len(quiet_deferred_candidates),
+        deferred_count=len(deferred_event_keys),
         entries=quiet_entries,
     )
 

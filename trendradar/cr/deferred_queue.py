@@ -62,6 +62,17 @@ class CRDeferredQueueSaveResult:
     path: str | None = None
 
 
+@dataclass(frozen=True)
+class CRDeferredQueueUpsertResult:
+    """Outcome of attempting to add one candidate to the deferred queue."""
+
+    queue: CRDeferredDispatchQueue
+    outcome: str
+    reason: str
+    event_key: str
+    candidate_id: str
+
+
 def empty_deferred_dispatch_queue() -> CRDeferredDispatchQueue:
     return CRDeferredDispatchQueue(
         queue_schema_version=DEFERRED_QUEUE_SCHEMA_VERSION,
@@ -270,17 +281,17 @@ def _rank(level: str | None) -> int:
 def upsert_deferred_entry(
     queue: CRDeferredDispatchQueue,
     entry: CRDeferredDispatchEntry,
-    *,
-    accepted_levels: Mapping[str, str | None] | None = None,
-) -> CRDeferredDispatchQueue:
-    """Insert or refresh one deferred entry while deduping by event key."""
-    if accepted_levels:
-        accepted_level = accepted_levels.get(entry.event_key)
-        if _rank(accepted_level) >= _rank(entry.level):
-            return queue
+) -> CRDeferredQueueUpsertResult:
+    """Insert or refresh one deferred entry while deduping by event key.
+
+    Dispatch-state cooldown eligibility is deliberately resolved before this
+    queue boundary. Reapplying a level-only historical-state check here would
+    reject same-level candidates even after their cooldown has expired.
+    """
 
     output: list[CRDeferredDispatchEntry] = []
     replaced = False
+    outcome_reason = "new_entry"
     for existing in queue.entries:
         if existing.event_key != entry.event_key:
             output.append(existing)
@@ -288,6 +299,7 @@ def upsert_deferred_entry(
 
         replaced = True
         if _rank(entry.level) > _rank(existing.level):
+            outcome_reason = "higher_level_refresh"
             output.append(
                 CRDeferredDispatchEntry(
                     entry_id=existing.entry_id,
@@ -305,6 +317,7 @@ def upsert_deferred_entry(
                 )
             )
         elif _rank(entry.level) == _rank(existing.level):
+            outcome_reason = "same_level_refresh"
             output.append(
                 CRDeferredDispatchEntry(
                     entry_id=existing.entry_id,
@@ -322,29 +335,26 @@ def upsert_deferred_entry(
                 )
             )
         else:
-            output.append(
-                CRDeferredDispatchEntry(
-                    entry_id=existing.entry_id,
-                    event_key=existing.event_key,
-                    candidate_id=existing.candidate_id,
-                    title=entry.title or existing.title,
-                    level=existing.level,
-                    score=existing.score,
-                    deferred_at=existing.deferred_at,
-                    deferred_until=existing.deferred_until,
-                    reason=existing.reason,
-                    message_text=existing.message_text,
-                    candidate_payload=dict(existing.candidate_payload),
-                    last_seen_at=entry.last_seen_at,
-                )
+            return CRDeferredQueueUpsertResult(
+                queue=queue,
+                outcome="skipped",
+                reason="existing_higher_level",
+                event_key=entry.event_key,
+                candidate_id=entry.candidate_id,
             )
 
     if not replaced:
         output.append(entry)
 
-    return CRDeferredDispatchQueue(
-        queue_schema_version=DEFERRED_QUEUE_SCHEMA_VERSION,
-        entries=tuple(output),
+    updated_queue = CRDeferredDispatchQueue(
+        queue_schema_version=DEFERRED_QUEUE_SCHEMA_VERSION, entries=tuple(output)
+    )
+    return CRDeferredQueueUpsertResult(
+        queue=updated_queue,
+        outcome="refreshed" if replaced else "inserted",
+        reason=outcome_reason,
+        event_key=entry.event_key,
+        candidate_id=entry.candidate_id,
     )
 
 
