@@ -1194,6 +1194,7 @@ class NewsAnalyzer:
                 feeds=feeds,
                 request_interval=rss_config.get("REQUEST_INTERVAL", 2000),
                 timeout=rss_config.get("TIMEOUT", 15),
+                max_retries=rss_config.get("MAX_RETRIES", 2),
                 use_proxy=rss_config.get("USE_PROXY", False),
                 proxy_url=rss_proxy_url,
                 timezone=timezone,
