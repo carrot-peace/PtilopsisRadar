@@ -11,6 +11,7 @@ policy decisions about suppression.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Mapping
 
 from trendradar.cr.decision import CRDecisionLevel
@@ -26,6 +27,13 @@ from trendradar.cr.repeat_preview import (
 
 
 CR_EVENT_STATE_SCHEMA_VERSION = "cr-event-state-v1"
+
+_CR_DECISION_LEVEL_ORDER: dict[str, int] = {
+    "suppress": 0,
+    "watch": 1,
+    "alert": 2,
+    "urgent": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -127,6 +135,83 @@ def _canonical_entries(
     return tuple(by_key[key] for key in sorted(by_key))
 
 
+def _dedupe_state_update_entries_keep_highest(
+    entries: tuple[CREventStateEntry, ...],
+) -> tuple[CREventStateEntry, ...]:
+    """Dedupe one batch of state updates by event_key.
+
+    For duplicate event keys:
+      - keep the entry with the higher decision level;
+      - on the same level, keep the later seen_at;
+      - on a further tie, keep the later entry.
+
+    This helper is only for updates produced in one runtime execution. It must
+    not be applied across the previous snapshot, because a newer successful
+    dispatch must be allowed to replace an older, higher decision level.
+    """
+    by_key: dict[str, CREventStateEntry] = {}
+
+    for entry in entries:
+        event_key = _require_event_key(entry.event_key)
+        normalized_entry = CREventStateEntry(
+            event_key=event_key,
+            decision_level=entry.decision_level,
+            score=entry.score,
+            seen_at=entry.seen_at,
+            title=entry.title,
+            candidate_id=entry.candidate_id,
+            event_key_version=entry.event_key_version,
+        )
+
+        existing = by_key.get(event_key)
+        if existing is None:
+            by_key[event_key] = normalized_entry
+            continue
+
+        existing_rank = _CR_DECISION_LEVEL_ORDER.get(
+            existing.decision_level or "",
+            -1,
+        )
+        new_rank = _CR_DECISION_LEVEL_ORDER.get(
+            normalized_entry.decision_level or "",
+            -1,
+        )
+
+        if new_rank > existing_rank:
+            by_key[event_key] = normalized_entry
+            continue
+
+        if new_rank == existing_rank:
+            existing_seen_at = _parse_seen_at(existing.seen_at)
+            new_seen_at = _parse_seen_at(normalized_entry.seen_at)
+
+            if (
+                existing_seen_at is None
+                and new_seen_at is None
+            ) or (
+                new_seen_at is not None
+                and (
+                    existing_seen_at is None
+                    or new_seen_at >= existing_seen_at
+                )
+            ):
+                by_key[event_key] = normalized_entry
+
+    return tuple(by_key[key] for key in sorted(by_key))
+
+
+def _parse_seen_at(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def cr_event_state_snapshot_to_seen_states(
     snapshot: CREventStateSnapshot,
 ) -> dict[str, CRSeenEventState]:
@@ -190,9 +275,14 @@ def merge_cr_event_state_entries(
 ) -> CREventStateSnapshot:
     if previous.schema_version != CR_EVENT_STATE_SCHEMA_VERSION:
         raise ValueError("event state snapshot schema_version mismatch")
+
+    deduped_updates = _dedupe_state_update_entries_keep_highest(updates)
+
     return CREventStateSnapshot(
         schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
-        entries=_canonical_entries(previous.entries + updates),
+        # Keep the existing last-writer-wins behavior between the historical
+        # snapshot and this run's resolved updates.
+        entries=_canonical_entries(previous.entries + deduped_updates),
     )
 
 

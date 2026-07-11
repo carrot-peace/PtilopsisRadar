@@ -14,6 +14,7 @@ from trendradar.cr.state_snapshot import (
     CR_EVENT_STATE_SCHEMA_VERSION,
     CREventStateEntry,
     CREventStateSnapshot,
+    _dedupe_state_update_entries_keep_highest,
     build_cr_event_state_entries_from_presented_candidates,
     build_cr_event_state_entry_from_presented_candidate,
     cr_event_state_snapshot_from_json_dict,
@@ -103,6 +104,185 @@ class TestDuplicateMergeSemantics(unittest.TestCase):
         self.assertEqual(by_key["event-b"].decision_level, "urgent")
         self.assertEqual(by_key["event-b"].score, 88.0)
         self.assertEqual(by_key["event-a"].decision_level, "alert")
+
+    def test_new_lower_level_update_replaces_historical_higher_level(self):
+        previous = CREventStateSnapshot(
+            schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
+            entries=(
+                CREventStateEntry(
+                    event_key="event-a",
+                    decision_level="urgent",
+                    seen_at="2026-07-10T08:00:00+08:00",
+                ),
+            ),
+        )
+
+        merged = merge_cr_event_state_entries(
+            previous,
+            (
+                CREventStateEntry(
+                    event_key="event-a",
+                    decision_level="alert",
+                    seen_at="2026-07-11T08:00:00+08:00",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(merged.entries), 1)
+        self.assertEqual(merged.entries[0].decision_level, "alert")
+        self.assertEqual(
+            merged.entries[0].seen_at,
+            "2026-07-11T08:00:00+08:00",
+        )
+
+    def test_flush_alert_and_current_urgent_resolve_to_urgent(self):
+        previous = CREventStateSnapshot(
+            schema_version=CR_EVENT_STATE_SCHEMA_VERSION,
+            entries=(),
+        )
+
+        merged = merge_cr_event_state_entries(
+            previous,
+            (
+                CREventStateEntry(
+                    event_key="event-a",
+                    decision_level="alert",
+                    seen_at="2026-07-11T08:00:00+08:00",
+                    candidate_id="deferred",
+                ),
+                CREventStateEntry(
+                    event_key="event-a",
+                    decision_level="urgent",
+                    seen_at="2026-07-11T08:00:00+08:00",
+                    candidate_id="current",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(merged.entries), 1)
+        self.assertEqual(merged.entries[0].decision_level, "urgent")
+        self.assertEqual(merged.entries[0].candidate_id, "current")
+
+
+class TestStateUpdateDeduplication(unittest.TestCase):
+    def test_empty_updates(self):
+        self.assertEqual(
+            _dedupe_state_update_entries_keep_highest(()),
+            (),
+        )
+
+    def test_different_event_keys_are_preserved(self):
+        alert = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+        )
+        urgent = CREventStateEntry(
+            event_key="event-b",
+            decision_level="urgent",
+        )
+
+        result = _dedupe_state_update_entries_keep_highest(
+            (alert, urgent)
+        )
+
+        self.assertEqual(result, (alert, urgent))
+
+    def test_higher_level_wins_within_update_batch(self):
+        alert = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T08:00:00+08:00",
+        )
+        urgent = CREventStateEntry(
+            event_key="event-a",
+            decision_level="urgent",
+            seen_at="2026-07-11T08:00:00+08:00",
+        )
+
+        result = _dedupe_state_update_entries_keep_highest(
+            (alert, urgent)
+        )
+
+        self.assertEqual(result, (urgent,))
+
+    def test_higher_level_wins_even_if_it_appears_first(self):
+        urgent = CREventStateEntry(
+            event_key="event-a",
+            decision_level="urgent",
+            seen_at="2026-07-11T08:00:00+08:00",
+        )
+        alert = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T08:01:00+08:00",
+        )
+
+        result = _dedupe_state_update_entries_keep_highest(
+            (urgent, alert)
+        )
+
+        self.assertEqual(result, (urgent,))
+
+    def test_same_level_keeps_later_seen_at(self):
+        older = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T08:00:00+08:00",
+            candidate_id="older",
+        )
+        newer = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T08:01:00+08:00",
+            candidate_id="newer",
+        )
+
+        result = _dedupe_state_update_entries_keep_highest(
+            (older, newer)
+        )
+
+        self.assertEqual(result, (newer,))
+        self.assertEqual(result[0].candidate_id, "newer")
+
+    def test_same_level_compares_seen_at_as_instants(self):
+        later_as_text = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T09:30:00+08:00",
+            candidate_id="earlier-instant",
+        )
+        earlier_as_text = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T02:00:00+00:00",
+            candidate_id="later-instant",
+        )
+
+        result = _dedupe_state_update_entries_keep_highest(
+            (later_as_text, earlier_as_text)
+        )
+
+        self.assertEqual(result, (earlier_as_text,))
+
+    def test_full_tie_keeps_later_input_entry(self):
+        first = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T08:00:00+08:00",
+            candidate_id="first",
+        )
+        second = CREventStateEntry(
+            event_key="event-a",
+            decision_level="alert",
+            seen_at="2026-07-11T08:00:00+08:00",
+            candidate_id="second",
+        )
+
+        result = _dedupe_state_update_entries_keep_highest(
+            (first, second)
+        )
+
+        self.assertEqual(result, (second,))
 
 
 class TestSeenStateConversion(unittest.TestCase):
