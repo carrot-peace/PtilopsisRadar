@@ -113,11 +113,11 @@ def _compare_version(local: str, remote: str) -> str:
     """比较版本号，返回状态文字"""
     cmp = compare_version_tuple(local, remote)
     if cmp < 0:
-        return "⚠️ 需要更新"
+        return "[警告] 需要更新"
     elif cmp > 0:
-        return "🔮 超前版本"
+        return "[超前] 本地版本高于远端版本"
     else:
-        return "✅ 已是最新"
+        return "[成功] 已是最新"
 
 
 def _fetch_remote_version(version_url: str, proxy_url: Optional[str] = None) -> Optional[str]:
@@ -1656,7 +1656,7 @@ class NewsAnalyzer:
                 title_info = historical_title_info
                 results = all_results
             else:
-                print("❌ 严重错误：无法读取刚保存的数据文件")
+                print("[失败] 严重错误：无法读取刚保存的数据文件")
                 raise RuntimeError("数据一致性检查失败：保存后立即读取失败")
         elif self.report_mode == "daily":
             # daily 模式：使用全天累计数据
@@ -1787,9 +1787,9 @@ class NewsAnalyzer:
 def _record_doctor_result(results: List[Tuple[str, str, str]], status: str, item: str, detail: str) -> None:
     """记录并打印 doctor 检查结果"""
     icon_map = {
-        "pass": "✅",
-        "warn": "⚠️",
-        "fail": "❌",
+        "pass": "[成功]",
+        "warn": "[警告]",
+        "fail": "[失败]",
     }
     icon = icon_map.get(status, "•")
     results.append((status, item, detail))
@@ -1830,7 +1830,7 @@ def _save_doctor_report(
         )
         print(f"体检报告已保存: {output_path}")
     except Exception as e:
-        print(f"⚠️ 体检报告保存失败: {e}")
+        print(f"[警告] 体检报告保存失败: {e}")
 
 
 def _run_doctor(config_path: Optional[str] = None) -> bool:
@@ -1996,7 +1996,7 @@ def _run_doctor(config_path: Optional[str] = None) -> bool:
     _save_doctor_report(results, pass_count, warn_count, fail_count, config_path)
 
     print("-" * 60)
-    print(f"体检结果: ✅ {pass_count} 项通过  ⚠️ {warn_count} 项警告  ❌ {fail_count} 项失败")
+    print(f"体检结果: [成功] {pass_count} 项通过  [警告] {warn_count} 项警告  [失败] {fail_count} 项失败")
     print("=" * 60)
 
     if fail_count == 0:
@@ -2154,13 +2154,13 @@ def main():
         debug_mode = analyzer.ctx.config.get("DEBUG", False)
         analyzer.run()
     except FileNotFoundError as e:
-        print(f"❌ 配置文件错误: {e}")
+        print(f"[失败] 配置文件错误: {e}")
         print("\n请确保以下文件存在:")
         print("  • config/config.yaml")
         print("  • config/frequency_words.txt")
         print("\n参考项目文档进行正确配置")
     except Exception as e:
-        print(f"❌ 程序运行错误: {e}")
+        print(f"[失败] 程序运行错误: {e}")
         if debug_mode:
             raise
 
@@ -2182,28 +2182,28 @@ def _handle_status_commands(config: Dict) -> None:
         now = ctx.get_time()
         date_str = ctx.format_date()
 
-        print(f"\n⏰ 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')} ({ctx.timezone})")
-        print(f"📅 当前日期: {date_str}")
+        print(f"\n 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')} ({ctx.timezone})")
+        print(f" 当前日期: {date_str}")
 
-        print(f"\n📋 调度信息:")
+        print(f"\n 调度信息:")
         print(f"  日计划: {schedule.day_plan}")
         if schedule.period_key:
             print(f"  当前时间段: {schedule.period_name or schedule.period_key} ({schedule.period_key})")
         else:
             print(f"  当前时间段: 无（使用默认配置）")
 
-        print(f"\n🔧 行为开关:")
-        print(f"  采集数据: {'✅ 是' if schedule.collect else '❌ 否'}")
-        print(f"  AI 分析:  {'✅ 是' if schedule.analyze else '❌ 否'}")
+        print(f"\n 行为开关:")
+        print(f"  采集数据: {'[成功] 是' if schedule.collect else '[失败] 否'}")
+        print(f"  AI 分析:  {'[成功] 是' if schedule.analyze else '[失败] 否'}")
         print(f"  Legacy Push 开关: {'已配置但正常运行时忽略' if schedule.push else '未配置'}")
         print(f"  报告模式: {schedule.report_mode}")
         print(f"  AI 模式:  {schedule.ai_mode}")
 
         if schedule.period_key:
-            print(f"\n🔁 一次性控制:")
+            print("\n一次性控制:")
             if schedule.once_analyze:
                 already_analyzed = scheduler.already_executed(schedule.period_key, "analyze", date_str)
-                print(f"  AI 分析:  仅一次 {'(今日已执行 ⚠️)' if already_analyzed else '(今日未执行 ✅)'}")
+                print(f"  AI 分析:  仅一次 {'(今日已执行 [警告])' if already_analyzed else '(今日未执行 [成功])'}")
             else:
                 print(f"  AI 分析:  不限次数")
             if schedule.once_push:
@@ -2213,7 +2213,7 @@ def _handle_status_commands(config: Dict) -> None:
                 print(f"  Legacy Push once: 未配置")
 
     except Exception as e:
-        print(f"\n❌ 获取调度状态失败: {e}")
+        print(f"\n[失败] 获取调度状态失败: {e}")
 
     print("\n" + "=" * 60)
 

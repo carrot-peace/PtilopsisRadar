@@ -1271,13 +1271,13 @@ class AnalyticsTools:
 
 ---
 
-## 📊 数据概览
+##  数据概览
 
 - **总新闻数**: {len(all_titles_list)}
 - **覆盖平台**: {len(all_platforms_news)}
 - **热门关键词数**: {len(all_keywords)}
 
-## 🔥 TOP 10 热门话题
+## TOP 10 热门话题
 
 """
 
@@ -1286,7 +1286,7 @@ class AnalyticsTools:
                 markdown += f"{i}. **{keyword}** - 出现 {count} 次\n"
 
             # 平台分析
-            markdown += "\n## 📱 平台活跃度\n\n"
+            markdown += "\n## 平台活跃度\n\n"
             sorted_platforms = sorted(all_platforms_news.items(), key=lambda x: x[1], reverse=True)
 
             for platform, count in sorted_platforms:
@@ -1294,7 +1294,7 @@ class AnalyticsTools:
 
             # 趋势变化（如果是周报）
             if report_type == "weekly":
-                markdown += "\n## 📈 趋势分析\n\n"
+                markdown += "\n## [上升] 趋势分析\n\n"
                 markdown += "本周热度持续的话题（样本数据）：\n\n"
 
                 # 简单的趋势分析
@@ -1303,7 +1303,7 @@ class AnalyticsTools:
                     markdown += f"- **{keyword}**: 持续热门\n"
 
             # 添加样本新闻（按权重选择，确保确定性）
-            markdown += "\n## 📰 精选新闻样本\n\n"
+            markdown += "\n##  精选新闻样本\n\n"
 
             # 确定性选取：按标题的权重排序，取前5条
             # 这样相同输入总是返回相同结果

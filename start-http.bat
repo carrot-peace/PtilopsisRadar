@@ -8,7 +8,7 @@ echo.
 
 REM 检查虚拟环境
 if not exist ".venv\Scripts\python.exe" (
-    echo ❌ [错误] 虚拟环境未找到
+    echo [失败] 虚拟环境未找到
     echo 请先运行 setup-windows.bat 或 setup-windows-en.bat 进行部署
     echo.
     pause
