@@ -41,6 +41,7 @@ STATUS_SKIPPED_STATE_ERROR = "skipped_state_error"
 STATUS_DEFERRED_QUIET_HOURS = "deferred_quiet_hours"
 STATUS_SKIPPED_QUIET_HOURS = "skipped_quiet_hours"
 STATUS_SKIPPED_DEFERRED_QUEUE_ERROR = "skipped_deferred_queue_error"
+STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT = "skipped_deferred_queue_upsert"
 STATUS_QUIET_HOURS_CONFIG_ERROR = "quiet_hours_config_error"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_ACCEPTED = "accepted"
@@ -235,6 +236,9 @@ def _plan_skip_receipts(plan: CRDispatchPlan) -> list[dict[str, object]]:
     elif plan.reason == "skipped_deferred_queue_error":
         status = STATUS_SKIPPED_DEFERRED_QUEUE_ERROR
         detail = "deferred_queue_error"
+    elif plan.reason == "skipped_deferred_queue_upsert":
+        status = STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT
+        detail = "deferred_queue_upsert_rejected"
     else:
         status = STATUS_UNKNOWN
         detail = plan.reason
