@@ -19,6 +19,7 @@ from trendradar.cr.models import (
     _classify_rank,
     is_visible_rank,
 )
+from trendradar.cr.input_health import input_item_identity
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +286,11 @@ def _adapt_hotlist_title_item(
     count = title_item.get("count")
     count_sig = _derive_count_semantics(count, "hotlist")
 
+    observed_identity = input_item_identity(
+        source_type="hotlist",
+        source_id=title_item.get("source_id"),
+        title=title_item.get("title", ""),
+    )
     return CRSourceItem(
         source_type="hotlist",
         source_id=title_item.get("source_id"),
@@ -318,6 +324,9 @@ def _adapt_hotlist_title_item(
         count=count,
         has_count=count_sig["has_count"],
         count_semantics=count_sig["count_semantics"],
+        observed_in_current_run=(
+            observed_identity in context.observed_item_identities
+        ),
     )
 
 
@@ -414,6 +423,12 @@ def _adapt_rss_title_item(
     is_visible = False
     rank_sentinel = "missing"
 
+    observed_identity = input_item_identity(
+        source_type="rss",
+        feed_id=title_item.get("feed_id") or None,
+        title=title_item.get("title", ""),
+        url=title_item.get("url") or None,
+    )
     return CRSourceItem(
         source_type="rss",
         source_id=None,
@@ -451,6 +466,9 @@ def _adapt_rss_title_item(
         summary=title_item.get("summary") or None,
         author=title_item.get("author") or None,
         cross_evidence_admitted=bool(title_item.get("cross_evidence_admitted")),
+        observed_in_current_run=(
+            observed_identity in context.observed_item_identities
+        ),
     )
 
 

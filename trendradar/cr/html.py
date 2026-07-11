@@ -42,6 +42,7 @@ from trendradar.cr.scoring import CRScoreResult
 from trendradar.cr.state_transition_preview import (
     CREventStateTransitionPreview,
 )
+from trendradar.cr.input_health import CRInputHealth, input_health_to_json_dict
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +65,7 @@ class CRHTMLRenderConfig:
     cooldown_policy: CRCooldownPolicy | None = None
     include_state_transition_preview: bool = False
     state_transition_preview: CREventStateTransitionPreview | None = None
+    input_health: CRInputHealth | None = None
     collapse_suppress: bool = True
     collapse_watch: bool = False
 
@@ -441,6 +443,7 @@ def _render_state_transition_preview(
         )
     lines.append("      </dl>")
     lines.append("    </section>")
+
     return lines
 
 
@@ -662,6 +665,37 @@ def render_cr_html_audit(
         f"{high_score_suppressed}</p>"
     )
     lines.append("    </section>")
+
+    if config.input_health is not None:
+        health = input_health_to_json_dict(config.input_health)
+        snapshot = health["snapshot"]
+        reasons = ", ".join(health["reasons"]) or "none"
+        warnings = ", ".join(health["warnings"]) or "none"
+        generated_at = snapshot["generated_at"] or "unknown"
+        age_minutes = (
+            snapshot["age_minutes"]
+            if snapshot["age_minutes"] is not None
+            else "unknown"
+        )
+        lines.append('    <section class="input-health">')
+        lines.append("      <h2>Input Health</h2>")
+        lines.append(f"      <p><strong>Status:</strong> {_escape_html_text(health['status'])}</p>")
+        lines.append(f"      <p><strong>Reasons:</strong> {_escape_html_text(reasons)}</p>")
+        lines.append(
+            "      <p><strong>Snapshot:</strong> "
+            f"{_escape_html_text(generated_at)}; "
+            f"age={_escape_html_text(age_minutes)} minutes; "
+            f"historical={_escape_html_text(snapshot['historical_data_reused'])}</p>"
+        )
+        hotlist_ratio = health["hotlist"]["success_ratio"]
+        rss_ratio = health["rss"]["success_ratio"]
+        lines.append(
+            "      <p><strong>Source ratios:</strong> hotlist="
+            f"{_escape_html_text(hotlist_ratio if hotlist_ratio is not None else 'unknown')}; rss="
+            f"{_escape_html_text(rss_ratio if rss_ratio is not None else 'unknown')}</p>"
+        )
+        lines.append(f"      <p><strong>Warnings:</strong> {_escape_html_text(warnings)}</p>")
+        lines.append("    </section>")
 
     if (
         config.include_state_transition_preview

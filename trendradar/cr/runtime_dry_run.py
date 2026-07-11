@@ -104,6 +104,7 @@ from trendradar.cr.state_snapshot import (
     CREventStateSnapshot,
     cr_event_state_snapshot_to_seen_states,
     merge_cr_event_state_entries,
+    empty_cr_event_state_snapshot,
 )
 from trendradar.cr.state_store import (
     CREventStateLoadResult,
@@ -116,6 +117,11 @@ from trendradar.cr.state_transition_preview import (
     build_cr_event_state_transition_preview,
 )
 from trendradar.cr.html import render_cr_html_audit
+from trendradar.cr.input_health import (
+    CRInputHealth,
+    candidate_has_fresh_input,
+    input_health_to_json_dict,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +195,25 @@ class CRRuntimeDryRunResult:
     quiet_hours: CRQuietHoursEvaluation | None = None
     deferred_queue_load: CRDeferredQueueLoadResult | None = None
     deferred_queue_save: CRDeferredQueueSaveResult | None = None
+    input_health: CRInputHealth | None = None
 
 
 # ---------------------------------------------------------------------------
 # Audit-only render config assembly (artifact reporting only)
 # ---------------------------------------------------------------------------
+
+
+def _pipeline_config_with_input_health(
+    pipeline_config: CRPipelineConfig | None,
+    health: CRInputHealth,
+) -> CRPipelineConfig:
+    base = pipeline_config or CRPipelineConfig()
+    render = base.render
+    markdown = replace(
+        render.markdown or CRMarkdownRenderConfig(), input_health=health,
+    )
+    html = replace(render.html or CRHTMLRenderConfig(), input_health=health)
+    return replace(base, render=replace(render, markdown=markdown, html=html))
 
 
 def _pipeline_config_with_cooldown_audit(
@@ -314,12 +334,18 @@ def _pipeline_result_with_state_transition_preview(
 def _plan_for_candidates(
     pipeline_result: CRPipelineResult,
     candidates: tuple,
+    *,
+    text_config: object = None,
+    total_eligible_count: int | None = None,
 ) -> CRDispatchPlan:
     from trendradar.cr.presentation import CRPresentationRun, render_cr_a_text
 
     run = CRPresentationRun(
         run_label=pipeline_result.run_label,
         candidates=list(candidates),
+        total_eligible_count=(
+            len(candidates) if total_eligible_count is None else total_eligible_count
+        ),
         high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
     )
     filtered = CRPipelineResult(
@@ -330,7 +356,7 @@ def _plan_for_candidates(
         decisions=pipeline_result.decisions,
         presented_candidates=pipeline_result.presented_candidates,
         cr_a_candidates=candidates,
-        cr_a_text=render_cr_a_text(run),
+        cr_a_text=render_cr_a_text(run, config=text_config),
         markdown_audit_text=pipeline_result.markdown_audit_text,
         html_audit_text=pipeline_result.html_audit_text,
         high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
@@ -746,6 +772,11 @@ def build_and_write_cr_runtime_dry_run(
     #     written back.
     cooldown_policy_effective: CRCooldownPolicy | None = None
     effective_pipeline_config = pipeline_config
+    input_health = context.input_health
+    if input_health is not None:
+        effective_pipeline_config = _pipeline_config_with_input_health(
+            effective_pipeline_config, input_health,
+        )
     cooldown_snapshot_for_audit = cooldown_prior_snapshot
     cooldown_prior_snapshot_load: CREventStateLoadResult | None = None
     if include_cooldown_audit:
@@ -776,7 +807,7 @@ def build_and_write_cr_runtime_dry_run(
             else None
         )
         effective_pipeline_config = _pipeline_config_with_cooldown_audit(
-            pipeline_config,
+            effective_pipeline_config,
             policy=cooldown_policy_effective,
             seen_event_states=audit_seen_states,
         )
@@ -847,6 +878,48 @@ def build_and_write_cr_runtime_dry_run(
     if effective_now.tzinfo is None:
         effective_now = effective_now.replace(tzinfo=timezone.utc)
     now_iso = effective_now.isoformat()
+    health_json = (
+        input_health_to_json_dict(input_health)
+        if input_health is not None else None
+    )
+    health_blocked = False
+    eligible_cr_a_candidates = pipeline_result.cr_a_candidates
+    if input_health is not None:
+        from trendradar.cr.presentation import (
+            count_cr_a_eligible,
+            select_cr_a_candidates,
+        )
+
+        fresh_presented = [
+            pc for pc in pipeline_result.presented_candidates
+            if candidate_has_fresh_input(pc)
+        ]
+        text_config = effective_pipeline_config.render.text
+        fresh_selected = tuple(
+            select_cr_a_candidates(fresh_presented, config=text_config)
+        )
+        if input_health.fail_closed:
+            health_blocked = True
+        elif not fresh_selected:
+            health_blocked = True
+        else:
+            eligible_cr_a_candidates = fresh_selected
+            dispatch_plan = _plan_for_candidates(
+                pipeline_result,
+                fresh_selected,
+                text_config=text_config,
+                total_eligible_count=count_cr_a_eligible(fresh_presented),
+            )
+        if health_blocked:
+            dispatch_plan = CRDispatchPlan(
+                should_dispatch=False,
+                messages=(),
+                reason=input_health.dispatch_block_reason,
+                run_label=dispatch_plan.run_label,
+                candidate_count=dispatch_plan.candidate_count,
+                urgent_count=dispatch_plan.urgent_count,
+                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+            )
     quiet_hours = evaluate_cr_quiet_hours(
         quiet_hours_env,
         now=effective_now,
@@ -855,7 +928,16 @@ def build_and_write_cr_runtime_dry_run(
 
     # 6a. Load prior dispatch state and enforce cooldown (PR-CR-A4).
     effective_state_path = dispatch_state_path or DEFAULT_DISPATCH_STATE_PATH
-    dispatch_state_load = load_cr_event_state_snapshot(effective_state_path)
+    dispatch_state_load = (
+        CREventStateLoadResult(
+            snapshot=empty_cr_event_state_snapshot(),
+            loaded=False,
+            error=None,
+            path=str(effective_state_path),
+        )
+        if health_blocked
+        else load_cr_event_state_snapshot(effective_state_path)
+    )
     prior_snapshot_provided = dispatch_state_load.loaded
     state_load_error: str | None = dispatch_state_load.error
     seen_states: dict[str, CRSeenEventState] | None = None
@@ -875,6 +957,7 @@ def build_and_write_cr_runtime_dry_run(
     #     accepted flushes become prior state for the current run.
     if (
         effective_dispatch_mode == "live"
+        and not health_blocked
         and quiet_hours.enabled
         and quiet_hours.decision != "quiet_hours_config_error"
         and not quiet_hours.in_quiet_hours
@@ -905,13 +988,26 @@ def build_and_write_cr_runtime_dry_run(
             }]
         elif deferred_queue_load.queue.entries:
             queue_before_flush = deferred_queue_load.queue
+            queue_for_flush = queue_before_flush
+            if input_health is not None:
+                fresh_event_keys = {
+                    stable_event_key_for_candidate(pc)
+                    for pc in eligible_cr_a_candidates
+                }
+                queue_for_flush = replace(
+                    queue_before_flush,
+                    entries=tuple(
+                        entry for entry in queue_before_flush.entries
+                        if entry.event_key in fresh_event_keys
+                    ),
+                )
             pre_receipts, accepted_flush_keys = _flush_deferred_queue(
-                queue_before_flush,
+                queue_for_flush,
                 sink=dispatch_sink,
                 run_label=run_label,
             )
             if accepted_flush_keys:
-                flushed_entries = ordered_entries_for_flush(queue_before_flush)
+                flushed_entries = ordered_entries_for_flush(queue_for_flush)
                 state_update_entries.extend(
                     _state_entries_for_queue(
                         flushed_entries,
@@ -941,15 +1037,14 @@ def build_and_write_cr_runtime_dry_run(
 
     cooldown_enforcement: CRCooldownEnforcementResult | None = None
     cooldown_override_reason: str | None = None
-    eligible_cr_a_candidates = pipeline_result.cr_a_candidates  # default: all
     if (
         dispatch_plan.should_dispatch
-        and pipeline_result.cr_a_candidates
+        and eligible_cr_a_candidates
         and queue_error_reason is None
         and quiet_hours.decision != "quiet_hours_config_error"
     ):
         cooldown_enforcement = enforce_cr_cooldown_for_candidates(
-            cr_a_candidates=pipeline_result.cr_a_candidates,
+            cr_a_candidates=eligible_cr_a_candidates,
             seen_states=seen_states,
             prior_snapshot_provided=prior_snapshot_provided,
             state_error=state_load_error,
@@ -971,7 +1066,9 @@ def build_and_write_cr_runtime_dry_run(
             )
         elif eligible_cr_a_candidates != pipeline_result.cr_a_candidates:
             dispatch_plan = _plan_for_candidates(
-                pipeline_result, eligible_cr_a_candidates
+                pipeline_result,
+                eligible_cr_a_candidates,
+                text_config=effective_pipeline_config.render.text,
             )
 
     # 6c. Apply quiet-hours live policy after cooldown eligibility.
@@ -983,7 +1080,7 @@ def build_and_write_cr_runtime_dry_run(
     dispatch_execution = None
     execution_state_candidates: tuple = ()
 
-    if quiet_hours.decision == "quiet_hours_config_error":
+    if not health_blocked and quiet_hours.decision == "quiet_hours_config_error":
         dispatch_plan = CRDispatchPlan(
             should_dispatch=False,
             messages=(),
@@ -1007,6 +1104,7 @@ def build_and_write_cr_runtime_dry_run(
         }]
     elif (
         effective_dispatch_mode == "live"
+        and not health_blocked
         and quiet_hours.enabled
         and quiet_hours.in_quiet_hours
         and queue_error_reason is None
@@ -1252,6 +1350,7 @@ def build_and_write_cr_runtime_dry_run(
         created_at=now_iso,
         cooldown_context=cooldown_context,
         quiet_hours_context=quiet_hours_context,
+        input_health=health_json,
     )
     dispatch_plan_json_paths = write_dispatch_plan_json(
         dispatch_plan_json_dict,
@@ -1265,6 +1364,7 @@ def build_and_write_cr_runtime_dry_run(
         dispatch_execution is None
         and dispatch_sink is not None
         and effective_dispatch_mode == "live"
+        and not health_blocked
     ):
         if (
             cooldown_override_reason is None
@@ -1292,6 +1392,7 @@ def build_and_write_cr_runtime_dry_run(
         cooldown_entries=cooldown_entries_for_receipt,
         pre_receipts=pre_receipts or None,
         override_receipts=override_receipts,
+        input_health=health_json,
     )
     dispatch_receipt_json_paths = write_dispatch_receipts_json(
         dispatch_receipt_json_dict,
@@ -1303,6 +1404,7 @@ def build_and_write_cr_runtime_dry_run(
     dispatch_state_save: CREventStateSaveResult | None = None
     if (
         effective_dispatch_mode == "live"
+        and not health_blocked
         and cooldown_override_reason is None
         and queue_error_reason is None
         and quiet_hours.decision != "quiet_hours_config_error"
@@ -1325,7 +1427,10 @@ def build_and_write_cr_runtime_dry_run(
             dispatch_state_save = save_cr_event_state_snapshot(
                 updated_snapshot, effective_state_path
             )
-    elif state_update_entries and effective_dispatch_mode == "live":
+    elif (
+        state_update_entries and effective_dispatch_mode == "live"
+        and not health_blocked
+    ):
         updated_snapshot = merge_cr_event_state_entries(
             dispatch_state_load.snapshot,
             tuple(state_update_entries),
@@ -1352,4 +1457,5 @@ def build_and_write_cr_runtime_dry_run(
         quiet_hours=quiet_hours,
         deferred_queue_load=deferred_queue_load,
         deferred_queue_save=deferred_queue_save,
+        input_health=input_health,
     )

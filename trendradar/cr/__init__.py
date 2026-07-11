@@ -29,6 +29,17 @@ from trendradar.cr.adapter import (
     adapt_hotlist_stats,
     adapt_rss_stats,
 )
+from trendradar.cr.input_health import (
+    CRInputHealthPolicy,
+    CRInputSourceHealth,
+    CRInputHealth,
+    input_item_identity,
+    source_item_identity,
+    candidate_has_fresh_input,
+    policy_from_env,
+    evaluate_cr_input_health,
+    input_health_to_json_dict,
+)
 from trendradar.cr.cluster import (
     build_cr_candidates,
 )
@@ -215,6 +226,15 @@ __all__ = [
     "is_visible_rank",
     "adapt_hotlist_stats",
     "adapt_rss_stats",
+    "CRInputHealthPolicy",
+    "CRInputSourceHealth",
+    "CRInputHealth",
+    "input_item_identity",
+    "source_item_identity",
+    "candidate_has_fresh_input",
+    "policy_from_env",
+    "evaluate_cr_input_health",
+    "input_health_to_json_dict",
     "build_cr_candidates",
     "CRScoringProfile",
     "CRComponentScore",
