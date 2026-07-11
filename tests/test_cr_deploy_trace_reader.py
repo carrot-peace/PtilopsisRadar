@@ -246,6 +246,28 @@ class TestBothPresent(unittest.TestCase):
             b_outcome = [o for o in outcomes if o["candidate_id"] == "c-B"][0]
             self.assertTrue(b_outcome["suppressed_by_cooldown"])
 
+    def test_selected_candidate_event_key_matches_receipt_and_cooldown_outcome(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(plan_path)
+            _write_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(plan_path=plan_path, receipt_path=receipt_path)
+            cr = result["cr_dispatch"]
+
+            selected = cr["selected_candidate"]
+            outcomes = cr["candidate_outcomes"]
+
+            selected_event_key = selected["event_key"]
+            selected_candidate_id = selected["candidate_id"]
+
+            selected_outcome = [
+                o for o in outcomes if o["candidate_id"] == selected_candidate_id
+            ][0]
+            self.assertEqual(selected_outcome["event_key"], selected_event_key)
+            self.assertEqual(selected_outcome["candidate_id"], selected_candidate_id)
+
     def test_schema_versions_mapped(self):
         with tempfile.TemporaryDirectory() as tmp:
             plan_path = Path(tmp) / "dispatch_plan.json"
