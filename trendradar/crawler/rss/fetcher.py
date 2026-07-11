@@ -304,10 +304,6 @@ class RSSFetcher:
         else:
             parsed_items = self.parser.parse(response.text, feed.url)
 
-            # 限制条目数量（0=不限制）
-            if feed.max_items > 0:
-                parsed_items = parsed_items[:feed.max_items]
-
             # 转换为 RSSItem（使用配置的时区）
             now = get_configured_time(self.timezone)
             crawl_time = now.strftime("%H:%M")
