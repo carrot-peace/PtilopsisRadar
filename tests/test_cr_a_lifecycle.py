@@ -1,15 +1,16 @@
 # coding=utf-8
-"""Tests for scripts/cr_a_lifecycle.py (J2 + J5).
+"""Tests for the installable CR-A lifecycle entry (J2 + J5).
 
-The lifecycle janitor is standalone: it reads/writes versioned JSON file
-contracts through public boundaries, classifies entries via J1, and emits
-a lifecycle report.  These tests exercise it against temporary files only.
+The lifecycle janitor is independently runnable: it reads/writes versioned
+JSON file contracts through public boundaries, classifies entries via J1, and
+emits a lifecycle report.  These tests exercise it against temporary files
+only.
 """
 
-import importlib.util
 import inspect
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from unittest.mock import patch
 
 from trendradar.cr.cooldown_policy import DEFAULT_CR_COOLDOWN_POLICY
 from trendradar.cr.event_lifecycle import PHASE_ACTIVE, PHASE_EVICTABLE
+from trendradar.cr import lifecycle_runner as lifecycle
 from trendradar.cr.state_snapshot import (
     CREventStateEntry,
     CREventStateSnapshot,
@@ -28,12 +30,6 @@ from trendradar.cr.state_store import save_cr_event_state_snapshot
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT_PATH = os.path.join(ROOT, "scripts", "cr_a_lifecycle.py")
-
-_spec = importlib.util.spec_from_file_location("cr_a_lifecycle", SCRIPT_PATH)
-lifecycle = importlib.util.module_from_spec(_spec)
-assert _spec.loader is not None
-sys.modules["cr_a_lifecycle"] = lifecycle
-_spec.loader.exec_module(lifecycle)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +182,13 @@ class TestEnforceMode(unittest.TestCase):
             self.assertEqual(result.would_evict_count, 1)
             self.assertEqual(result.evicted_count, 1)
             self.assertTrue(result.state_saved)
+            self.assertTrue(result.report_written)
+
+            audit = _read_json(report)
+            self.assertEqual(audit["mode"], "enforce")
+            self.assertEqual(audit["would_evict_count"], 1)
+            self.assertEqual(audit["evicted_count"], 1)
+            self.assertEqual(audit["errors"], [])
 
             # Verify state file was pruned
             from trendradar.cr.state_store import load_cr_event_state_snapshot
@@ -354,6 +357,14 @@ class TestPostRunTrigger(unittest.TestCase):
     def _main_source(self) -> str:
         return Path(self.MAIN_PATH).read_text(encoding="utf-8")
 
+    def _lifecycle_gate_source(self) -> str:
+        source = self._main_source()
+        start = source.index(
+            'if os.environ.get("PTILOPSIS_CR_LIFECYCLE_ENABLED") == "1":',
+        )
+        end = source.index("\n\n        return stats, html_file", start)
+        return source[start:end]
+
     def test_trigger_gated_by_lifecycle_enabled(self) -> None:
         source = self._main_source()
         self.assertIn(
@@ -362,35 +373,23 @@ class TestPostRunTrigger(unittest.TestCase):
             "trigger must check PTILOPSIS_CR_LIFECYCLE_ENABLED",
         )
 
-    def test_trigger_loads_lifecycle_module(self) -> None:
-        source = self._main_source()
-        self.assertIn("cr_a_lifecycle.py", source)
-        self.assertIn(".main([", source)
+    def test_trigger_imports_installable_lifecycle_module(self) -> None:
+        gate = self._lifecycle_gate_source()
+        self.assertIn("from trendradar.cr.lifecycle_runner import main", gate)
+        self.assertIn("lifecycle_main([", gate)
+        self.assertNotIn("importlib.util", gate)
+        self.assertNotIn("cr_a_lifecycle.py", gate)
+        self.assertNotIn('"scripts",', gate)
 
-    def test_trigger_is_fail_closed(self) -> None:
-        source = self._main_source()
-        # The trigger must catch exceptions and print, never propagate.
-        self.assertIn("except Exception", source)
-        self.assertIn("[lifecycle] janitor error", source)
+    def test_trigger_failure_is_non_fatal_and_diagnostic(self) -> None:
+        gate = self._lifecycle_gate_source()
+        # The trigger must diagnose exceptions and never propagate them.
+        self.assertIn("try:", gate)
+        self.assertIn("except Exception", gate)
+        self.assertIn("[lifecycle] janitor error", gate)
+        self.assertIn("file=sys.stderr", gate)
 
-    def test_lifecycle_module_loadable_via_importlib(self) -> None:
-        """The trigger uses importlib.util to load the script; verify it works."""
-        import importlib.util as _ilu
-
-        lifecycle_path = os.path.join(ROOT, "scripts", "cr_a_lifecycle.py")
-        spec = _ilu.spec_from_file_location("cr_a_lifecycle_trigger_test", lifecycle_path)
-        self.assertIsNotNone(spec)
-        assert spec and spec.loader
-        mod = _ilu.module_from_spec(spec)
-        sys.modules[spec.name] = mod
-        spec.loader.exec_module(mod)
-        self.assertTrue(hasattr(mod, "run_lifecycle"))
-        self.assertTrue(hasattr(mod, "CRLifecycleRunResult"))
-
-    def test_trigger_import_style_runs_main_with_env_enabled(self) -> None:
-        """Mirror __main__.py trigger loading and verify env-gated execution."""
-        import importlib.util as _ilu
-
+    def test_package_main_runs_with_env_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state.json"
             report = Path(tmp) / "report.json"
@@ -400,22 +399,11 @@ class TestPostRunTrigger(unittest.TestCase):
             )
             _write_snapshot(state, _make_snapshot(entry))
 
-            lifecycle_path = os.path.join(ROOT, "scripts", "cr_a_lifecycle.py")
-            spec = _ilu.spec_from_file_location(
-                "cr_a_lifecycle_trigger_test_main",
-                lifecycle_path,
-            )
-            self.assertIsNotNone(spec)
-            assert spec and spec.loader
-            mod = _ilu.module_from_spec(spec)
-            sys.modules[spec.name] = mod
-            spec.loader.exec_module(mod)
-
             with patch.dict(os.environ, {
                 "PTILOPSIS_CR_LIFECYCLE_ENABLED": "1",
                 "PTILOPSIS_CR_LIFECYCLE_MODE": "preview",
             }):
-                code = mod.main([
+                code = lifecycle.main([
                     "--state-path", str(state),
                     "--report-path", str(report),
                     "--now", _NOW.isoformat(),
@@ -427,6 +415,58 @@ class TestPostRunTrigger(unittest.TestCase):
             self.assertTrue(data["enabled"])
             self.assertEqual(data["mode"], "preview")
 
+
+class TestLifecycleEntrypoints(unittest.TestCase):
+    def _run_cli(self, entry: list[str], state: Path, report: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                *entry,
+                "--enabled",
+                "--mode", "preview",
+                "--state-path", str(state),
+                "--report-path", str(report),
+                "--now", _NOW.isoformat(),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_module_cli_writes_preview_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            report = Path(tmp) / "module-report.json"
+            _write_snapshot(state, _make_snapshot())
+
+            completed = self._run_cli(
+                ["-m", "trendradar.cr.lifecycle_runner"], state, report,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(report.exists())
+            self.assertIn("mode=preview", completed.stdout)
+
+    def test_compatibility_wrapper_writes_preview_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            report = Path(tmp) / "wrapper-report.json"
+            _write_snapshot(state, _make_snapshot())
+
+            completed = self._run_cli([SCRIPT_PATH], state, report)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(report.exists())
+
+    def test_wrapper_reexports_public_api(self) -> None:
+        wrapper_source = Path(SCRIPT_PATH).read_text(encoding="utf-8")
+        self.assertIn("from trendradar.cr.lifecycle_runner import", wrapper_source)
+        for name in ("CRLifecycleRunResult", "build_ttl_for_level", "run_lifecycle", "main"):
+            self.assertIn(name, wrapper_source)
+
+
+class TestLifecycleRuntimeGate(unittest.TestCase):
     def test_trigger_does_not_modify_state_when_disabled(self) -> None:
         """When lifecycle is not enabled, run_lifecycle returns enabled=False."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -467,6 +507,17 @@ class TestPostRunTrigger(unittest.TestCase):
             self.assertEqual(data["schema_version"], "cr-lifecycle-report-v1")
 
 
+class TestProductionImageLoadability(unittest.TestCase):
+    def test_dockerfile_smoke_checks_installed_package(self) -> None:
+        source = (Path(ROOT) / "docker" / "Dockerfile").read_text(encoding="utf-8")
+        install_pos = source.index(
+            "uv sync --locked --no-dev", source.index("COPY trendradar/"),
+        )
+        smoke_pos = source.index("from trendradar.cr.lifecycle_runner import")
+        self.assertGreater(smoke_pos, install_pos)
+        self.assertNotIn("COPY scripts/", source)
+
+
 class TestForbiddenImports(unittest.TestCase):
     def test_no_runtime_imports(self) -> None:
         source = inspect.getsource(lifecycle)
@@ -478,7 +529,10 @@ class TestForbiddenImports(unittest.TestCase):
             "deploy_trace",
         )
         for token in forbidden:
-            self.assertNotIn(token, source, f"forbidden token {token!r} in cr_a_lifecycle.py")
+            self.assertNotIn(
+                token, source,
+                f"forbidden token {token!r} in lifecycle_runner.py",
+            )
 
 
 if __name__ == "__main__":

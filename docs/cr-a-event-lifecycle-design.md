@@ -68,11 +68,12 @@ left as a future knob.
 
 ## 2. Architecture — out-of-band janitor
 
-Lifecycle management is a **standalone, independently-runnable tool** (same
-shape as [`scripts/cr_a_smoke_check.py`](../scripts/cr_a_smoke_check.py)) that
-talks only to the **versioned file contracts** (`cr-event-state-v1`,
-`cr-deferred-dispatch-queue-v1`, archive directories). It is **never imported
-into, or inlined within, `runtime_dry_run.py`**.
+Lifecycle management is an **independently-runnable package tool** at
+`trendradar.cr.lifecycle_runner`.  The legacy
+[`scripts/cr_a_lifecycle.py`](../scripts/cr_a_lifecycle.py) command is a thin
+compatibility wrapper.  The package tool talks only to the **versioned file
+contracts** (`cr-event-state-v1`, `cr-deferred-dispatch-queue-v1`, archive
+directories) and is never inlined within `runtime_dry_run.py`.
 
 ```
               reads/writes versioned JSON contracts (public load/save boundary)
@@ -191,7 +192,7 @@ is_evictable(entry, now=now, ttl_for_level=ttl_for_level)
 | Step | Content | Invasion | When |
 | --- | --- | --- | --- |
 | **J1** | Pure module `trendradar/cr/event_lifecycle.py`: `is_evictable(...)` + `describe_phase(...)` label. Zero imports; TTL injected. Full unit tests in isolation. | **None** (new leaf) | **Now** |
-| **J2** | Janitor `scripts/cr_a_lifecycle.py`: load `cr-event-state-v1` (public) → `preview` (report `would_evict`) or `enforce` (atomic save of pruned snapshot). Builds `ttl_for_level` from public cooldown policy + `TTL_FLOOR`. | **None** (standalone) | **Now** |
+| **J2** | Janitor `trendradar.cr.lifecycle_runner` (with `scripts/cr_a_lifecycle.py` compatibility wrapper): load `cr-event-state-v1` (public) → `preview` (report `would_evict`) or `enforce` (atomic save of pruned snapshot). Builds `ttl_for_level` from public cooldown policy + `TTL_FLOOR`. | **None** (package composition root) | **Now** |
 | **J3a** | Weekly event archive rollup — **generate only**. Reads per-run archive artifacts (`cr/archive/{dispatch_plan,dispatch_receipts}/`), aggregates by `event_key` per ISO week, writes `output/cr/archive_weekly/events/YYYY-WNN.json`. Does **not** delete any per-run archive. | Low (reads dir listings + JSON) | **Deferred — non-compounding** |
 | **J3b** | Per-run archive retention. Deletes per-run archive files **only** when: (1) the covering weekly rollup exists and records the source run; (2) the per-run archive exceeds the short-term retention window. Never touches `latest/`. Preview-first. | Low (reads dir listings, deletes files) | **After J3a** |
 | **J4** | Deferred-queue hygiene: expire entries past `deferred_until` + grace, or cap retries; via public `remove_deferred_entries`; records eviction in a report. | Low (public API only) | **Deferred — non-compounding** |

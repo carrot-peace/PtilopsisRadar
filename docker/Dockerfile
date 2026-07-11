@@ -64,6 +64,9 @@ COPY trendradar/ ./trendradar/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
+# Fail the production image build if the installable lifecycle entry is absent.
+RUN .venv/bin/python -c "from trendradar.cr.lifecycle_runner import main, run_lifecycle"
+
 ENV PATH="/app/.venv/bin:$PATH"
 
 # 复制 entrypoint.sh 并强制转换为 LF 格式
