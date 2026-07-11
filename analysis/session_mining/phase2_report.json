@@ -1,0 +1,46 @@
+{
+  "candidate_files": 523,
+  "sampled_files": 45,
+  "sampled_records_first_150_lines": 4473,
+  "checkpoints": [
+    25
+  ],
+  "evidence": "evidence.md",
+  "candidate_list": "analysis/session_mining/candidate_files.txt",
+  "sample_list": "analysis/session_mining/sample_files.txt",
+  "corpus_cutoff": "2026-07-08T16:29:15+08:00",
+  "global_counts": {
+    "correction": {
+      "matches": 84557,
+      "files": 504
+    },
+    "frustration": {
+      "matches": 37414,
+      "files": 433
+    },
+    "delegate": {
+      "matches": 181847,
+      "files": 523
+    },
+    "deliberation": {
+      "matches": 195541,
+      "files": 509
+    },
+    "execution": {
+      "matches": 253258,
+      "files": 512
+    },
+    "config": {
+      "matches": 103270,
+      "files": 506
+    }
+  },
+  "section_receipts": {
+    "recurring": 51,
+    "correction": 43,
+    "repetition": 45,
+    "rhythm": 19,
+    "blindspots": 1,
+    "abandonment": 7
+  }
+}
