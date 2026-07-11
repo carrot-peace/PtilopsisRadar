@@ -1,34 +1,32 @@
 #!/usr/bin/env python3
+import argparse
 import json
-import os
 import re
-import shutil
-import subprocess
-import sys
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-HOME = Path.home()
-ROOT = Path.cwd()
-OUT = ROOT / "evidence.md"
-REPORT = ROOT / "analysis" / "session_mining" / "phase2_report.json"
-SAMPLE_LIST = ROOT / "analysis" / "session_mining" / "sample_files.txt"
-ALL_LIST = ROOT / "analysis" / "session_mining" / "candidate_files.txt"
-CURRENT_THREAD_IDS = {"019f40d9-e1e1-72e2-9d6b-284e89980a1c"}
+DEFAULT_THREAD_IDS = {"019f40d9-e1e1-72e2-9d6b-284e89980a1c"}
 
-MAIN_SOURCES = [
-    ("Claude Code", HOME / ".claude" / "projects", "*.jsonl"),
-    ("Codex active", HOME / ".codex" / "sessions", "*.jsonl"),
-    ("Codex archived", HOME / ".codex" / "archived_sessions", "*.jsonl"),
-]
 
-AUX_SOURCES = [
-    ("Claude history", HOME / ".claude" / "history.jsonl"),
-    ("Claude jobs", HOME / ".claude" / "jobs"),
-    ("Codex history", HOME / ".codex" / "history.jsonl"),
-    ("Codex session index", HOME / ".codex" / "session_index.jsonl"),
-]
+@dataclass(frozen=True)
+class MiningConfig:
+    home: Path
+    output: Path
+    report: Path
+    sample_list: Path
+    all_list: Path
+    final_body: Path
+    current_thread_ids: set[str]
+
+    @property
+    def main_sources(self):
+        return [
+            ("Claude Code", self.home / ".claude" / "projects", "*.jsonl"),
+            ("Codex active", self.home / ".codex" / "sessions", "*.jsonl"),
+            ("Codex archived", self.home / ".codex" / "archived_sessions", "*.jsonl"),
+        ]
 
 PATTERNS = {
     "correction": [
@@ -73,23 +71,34 @@ PROJECT_HINT_RE = re.compile(
 )
 
 
-def sh(args, input_text=None):
-    return subprocess.run(
-        args,
-        input=input_text,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+def build_config(args):
+    output_dir = args.output_dir.resolve()
+    thread_ids = set(args.exclude_thread_id or DEFAULT_THREAD_IDS)
+    return MiningConfig(
+        home=args.home.resolve(),
+        output=output_dir / "evidence.md",
+        report=output_dir / "analysis" / "session_mining" / "phase2_report.json",
+        sample_list=output_dir / "analysis" / "session_mining" / "sample_files.txt",
+        all_list=output_dir / "analysis" / "session_mining" / "candidate_files.txt",
+        final_body=output_dir / "analysis" / "session_mining" / "evidence_final_body.md",
+        current_thread_ids=thread_ids,
     )
 
 
-def iter_files():
-    for tool, base, glob in MAIN_SOURCES:
+def parse_args():
+    parser = argparse.ArgumentParser(description="Mine Phase 2 session evidence artifacts.")
+    parser.add_argument("--home", type=Path, default=Path.home())
+    parser.add_argument("--output-dir", type=Path, default=Path.cwd())
+    parser.add_argument("--exclude-thread-id", action="append")
+    return parser.parse_args()
+
+
+def iter_files(config):
+    for tool, base, glob in config.main_sources:
         if base.exists():
             for p in base.rglob(glob):
                 if p.is_file():
-                    if any(thread_id in p.name for thread_id in CURRENT_THREAD_IDS):
+                    if any(thread_id in p.name for thread_id in config.current_thread_ids):
                         continue
                     try:
                         st = p.stat()
@@ -107,9 +116,9 @@ def dt(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
 
-def short_path(p: Path):
+def short_path(p: Path, config):
     s = str(p)
-    return s.replace(str(HOME), "~")
+    return s.replace(str(config.home), "~")
 
 
 def select_samples(files):
@@ -297,39 +306,39 @@ def hit_patterns(text):
     return hits
 
 
-def add_receipt(receipts, section, date, tool, path, quote, note):
+def add_receipt(receipts, section, date, tool, path, quote, note, config):
     quote = sanitize(quote)
     if not quote:
         return
     receipts[section].append({
         "date": date,
         "tool": tool,
-        "path": short_path(path),
+        "path": short_path(path, config),
         "quote": quote,
         "note": note,
     })
 
 
-def rg_count(pattern, files):
-    if not files:
-        return 0
-    proc = sh(["rg", "-i", "--count-matches", pattern, *[str(p) for p in files]])
-    total = 0
-    for line in proc.stdout.splitlines():
-        if ":" not in line:
-            continue
+def scan_pattern_stats(patterns, files):
+    stats = {name: {"matches": 0, "files": 0} for name in patterns}
+    token_to_names = defaultdict(list)
+    for name, words in patterns.items():
+        for word in words:
+            token_to_names[word.lower()].append(name)
+    matcher = re.compile("|".join(re.escape(token) for token in sorted(token_to_names, key=len, reverse=True)))
+    for path in files:
         try:
-            total += int(line.rsplit(":", 1)[1])
-        except ValueError:
-            pass
-    return total
-
-
-def rg_files(pattern, files):
-    if not files:
-        return 0
-    proc = sh(["rg", "-i", "-l", pattern, *[str(p) for p in files]])
-    return len([x for x in proc.stdout.splitlines() if x.strip()])
+            text = path.read_text(encoding="utf-8", errors="replace").lower()
+        except OSError:
+            continue
+        file_hits = set()
+        for match in matcher.finditer(text):
+            for name in token_to_names[match.group(0)]:
+                stats[name]["matches"] += 1
+                file_hits.add(name)
+        for name in file_hits:
+            stats[name]["files"] += 1
+    return stats
 
 
 def top_project_dirs(files):
@@ -369,7 +378,7 @@ def project_lifecycles(files):
     return data
 
 
-def add_project_receipts(receipts, files):
+def add_project_receipts(receipts, files, config):
     if not files:
         return
     latest = max(x["mtime"] for x in files)
@@ -381,9 +390,10 @@ def add_project_receipts(receipts, files):
                 "recurring",
                 f"{dt(row['first'])} -> {dt(row['last'])}",
                 "Claude Code",
-                HOME / ".claude" / "projects",
+                config.home / ".claude" / "projects",
                 f"{label}",
                 f"path-derived project recurrence: {row['count']} transcript files",
+                config,
             )
     vanished = []
     seven_days = 7 * 24 * 60 * 60
@@ -396,13 +406,14 @@ def add_project_receipts(receipts, files):
             "abandonment",
             f"{dt(row['first'])} -> {dt(row['last'])}",
             "Claude Code",
-            HOME / ".claude" / "projects",
+            config.home / ".claude" / "projects",
             f"{label}",
             f"path-derived lifecycle: {row['count']} transcript files, no mtime in final 7 days of corpus",
+            config,
         )
 
 
-def write_evidence(files, sample, global_counts, receipts, project_counts, rhythm):
+def write_evidence(files, sample, global_counts, receipts, project_counts, rhythm, blindspot_counts, config):
     total_size = sum(x["size"] for x in files)
     oldest = min(files, key=lambda x: x["mtime"]) if files else None
     newest = max(files, key=lambda x: x["mtime"]) if files else None
@@ -421,7 +432,7 @@ def write_evidence(files, sample, global_counts, receipts, project_counts, rhyth
         lines.append(f"- Candidate mtime range: {dt(oldest['mtime'])} -> {dt(newest['mtime'])}.")
     lines.append(f"- Sampled files read: {len(sample)}. Read cap: first 150 lines per sampled file.")
     lines.append("- Sample mix: " + ", ".join(f"{k}: {v}" for k, v in sorted(sampled_by_tool.items())))
-    lines.append("- Full corpus sweeps used `rg` count/file-match operations; raw logs were not copied here.")
+    lines.append("- Full corpus sweeps used Python regex count/file-match operations; raw logs were not copied here.")
     lines.append("- Quotes are short and mechanically redacted for paths, URLs, emails, tokens, and likely secrets.")
     lines.append("")
 
@@ -484,8 +495,7 @@ def write_evidence(files, sample, global_counts, receipts, project_counts, rhyth
     section("5. Rhythm - when I do my best work, when I spiral", "rhythm", rhythm_intro)
 
     blind_intro = []
-    for label in ("test", "user feedback", "customer", "calendar", "sleep", "break", "done", "ship"):
-        cnt = rg_count(label, [x["path"] for x in files])
+    for label, cnt in blindspot_counts.items():
         if cnt < 3:
             blind_intro.append(f"Absence/low-frequency term: `{label}` appears {cnt} times in full transcript candidates.")
     section("6. Blind spots - conspicuously absent", "blindspots", blind_intro)
@@ -493,37 +503,39 @@ def write_evidence(files, sample, global_counts, receipts, project_counts, rhyth
     lines.append("## Sampled files")
     lines.append("")
     for item in sample:
-        lines.append(f"- {dt(item['mtime'])} | {item['tool']} | `{short_path(item['path'])}` | {item['size']} bytes")
+        lines.append(f"- {dt(item['mtime'])} | {item['tool']} | `{short_path(item['path'], config)}` | {item['size']} bytes")
     lines.append("")
 
-    OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return "\n".join(lines) + "\n"
 
 
 def main():
-    if shutil.which("rg") is None:
-        sys.exit("error: ripgrep (`rg`) is required but was not found on PATH.")
-    files = list(iter_files())
+    config = build_config(parse_args())
+    for path in (config.output, config.report, config.sample_list, config.all_list, config.final_body):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    files = list(iter_files(config))
     files_sorted = sorted(files, key=lambda x: (x["mtime"], str(x["path"])))
-    ALL_LIST.write_text("\n".join(str(x["path"]) for x in files_sorted) + "\n", encoding="utf-8")
+    config.all_list.write_text("\n".join(str(x["path"]) for x in files_sorted) + "\n", encoding="utf-8")
     sample = select_samples(files_sorted)
-    SAMPLE_LIST.write_text("\n".join(str(x["path"]) for x in sample) + "\n", encoding="utf-8")
+    config.sample_list.write_text("\n".join(str(x["path"]) for x in sample) + "\n", encoding="utf-8")
 
     all_paths = [x["path"] for x in files_sorted]
-    OUT.write_text(
-        "# evidence.md\n\n"
-        "Phase 2 evidence only. No interpretation. Patterns require 3+ occurrences unless marked insufficient data.\n\n"
-        "## Process checkpoints\n\n"
-        f"- Started with {len(files_sorted)} candidate files after excluding the current audit thread.\n",
-        encoding="utf-8",
-    )
+    checkpoint_lines = [
+        "# evidence.md",
+        "",
+        "Phase 2 evidence only. No interpretation. Patterns require 3+ occurrences unless marked insufficient data.",
+        "",
+        "## Process checkpoints",
+        "",
+        f"- Started with {len(files_sorted)} candidate files after excluding the current audit thread.",
+    ]
 
-    global_counts = {}
-    for name, words in PATTERNS.items():
-        pattern = "|".join(re.escape(w) for w in words)
-        global_counts[name] = {
-            "matches": rg_count(pattern, all_paths),
-            "files": rg_files(pattern, all_paths),
-        }
+    blindspot_terms = ("test", "user feedback", "customer", "calendar", "sleep", "break", "done", "ship")
+    full_scan_patterns = {**PATTERNS, **{f"blindspot:{term}": [term] for term in blindspot_terms}}
+    full_scan_stats = scan_pattern_stats(full_scan_patterns, all_paths)
+    global_counts = {name: full_scan_stats[name] for name in PATTERNS}
+    blindspot_counts = {term: full_scan_stats[f"blindspot:{term}"]["matches"] for term in blindspot_terms}
 
     receipts = defaultdict(list)
     rhythm = Counter()
@@ -537,7 +549,6 @@ def main():
         file_text_fragments = []
         first_date = dt(item["mtime"])
         userish = []
-        toolish = []
         for obj in records:
             rec_date = parse_ts_from_obj(obj, item["mtime"])
             first_date = rec_date or first_date
@@ -553,8 +564,6 @@ def main():
             for text in strings:
                 if role == "user":
                     userish.append(text)
-                elif role in ("tool", "assistant"):
-                    toolish.append(text)
                 file_text_fragments.append(text)
 
         joined_sample = " ".join(file_text_fragments)
@@ -564,18 +573,19 @@ def main():
                 receipts, "recurring", first_date, item["tool"], item["path"],
                 userish[0] if userish else projectish[0],
                 "sampled first-150-line project/theme hint",
+                config,
             )
         if "correction" in file_hit_categories or "frustration" in file_hit_categories:
             quote = next((t for t in userish if hit_patterns(t)), userish[0] if userish else joined_sample)
-            add_receipt(receipts, "correction", first_date, item["tool"], item["path"], quote, "correction/friction hit in sampled head")
+            add_receipt(receipts, "correction", first_date, item["tool"], item["path"], quote, "correction/friction hit in sampled head", config)
         if "delegate" in file_hit_categories or "config" in file_hit_categories:
             quote = next((t for t in userish if "auto" in t.lower() or "自动" in t or "config" in t.lower() or "配置" in t), userish[0] if userish else joined_sample)
-            add_receipt(receipts, "repetition", first_date, item["tool"], item["path"], quote, "automation/config/tooling hit in sampled head")
+            add_receipt(receipts, "repetition", first_date, item["tool"], item["path"], quote, "automation/config/tooling hit in sampled head", config)
         if "deliberation" in file_hit_categories and "execution" not in file_hit_categories:
             quote = userish[0] if userish else joined_sample
-            add_receipt(receipts, "abandonment", first_date, item["tool"], item["path"], quote, "planning/research hit without execution term in sampled head")
+            add_receipt(receipts, "abandonment", first_date, item["tool"], item["path"], quote, "planning/research hit without execution term in sampled head", config)
         if len(records) >= 150:
-            add_receipt(receipts, "rhythm", first_date, item["tool"], item["path"], f"sample reached 150-line cap at {first_date}", "long session head reached read cap")
+            add_receipt(receipts, "rhythm", first_date, item["tool"], item["path"], f"sample reached 150-line cap at {first_date}", "long session head reached read cap", config)
         if idx % 25 == 0:
             sample_batches_written.append(idx)
             partial = {
@@ -583,48 +593,42 @@ def main():
                 "records_read_so_far": sampled_records,
                 "note": "partial evidence checkpoint; raw records discarded by process",
             }
-            (ROOT / "analysis" / "session_mining" / f"checkpoint_{idx}.json").write_text(
-                json.dumps(partial, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
+            checkpoint_path = config.output.parent / "analysis" / "session_mining" / f"checkpoint_{idx}.json"
+            checkpoint_path.write_text(json.dumps(partial, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            checkpoint_lines.append(
+                f"- After {idx} sampled files: {sampled_records} first-150-line records read; "
+                "raw records discarded after aggregate receipts were retained."
             )
-            with OUT.open("a", encoding="utf-8") as f:
-                f.write(
-                    f"- After {idx} sampled files: {sampled_records} first-150-line records read; "
-                    "raw records discarded after aggregate receipts were retained.\n"
-                )
 
-    # Blind spot receipts: only record concrete low-frequency evidence, no raw content needed.
     add_receipt(
         receipts,
         "blindspots",
         dt(max(x["mtime"] for x in files_sorted)) if files_sorted else "",
         "all sources",
-        ALL_LIST,
+        config.all_list,
         "low-frequency terms recorded in section intro",
-        "absence is counted via full-corpus rg sweeps",
+        "absence is counted via full-corpus Python regex sweeps",
+        config,
     )
 
-    add_project_receipts(receipts, files_sorted)
+    add_project_receipts(receipts, files_sorted, config)
     project_counts = top_project_dirs(files_sorted)
-    final_body = ROOT / "analysis" / "session_mining" / "evidence_final_body.md"
-    original_out = OUT.read_text(encoding="utf-8")
-    write_evidence(files_sorted, sample, global_counts, receipts, project_counts, rhythm)
-    final_structured = OUT.read_text(encoding="utf-8")
-    final_body.write_text(final_structured, encoding="utf-8")
-    OUT.write_text(original_out + "\n" + final_structured, encoding="utf-8")
+    final_structured = write_evidence(files_sorted, sample, global_counts, receipts, project_counts, rhythm, blindspot_counts, config)
+    config.final_body.write_text(final_structured, encoding="utf-8")
+    config.output.write_text("\n".join(checkpoint_lines) + "\n\n" + final_structured, encoding="utf-8")
 
     report = {
         "candidate_files": len(files_sorted),
         "sampled_files": len(sample),
         "sampled_records_first_150_lines": sampled_records,
         "checkpoints": sample_batches_written,
-        "evidence": str(OUT),
-        "candidate_list": str(ALL_LIST),
-        "sample_list": str(SAMPLE_LIST),
+        "evidence": str(config.output),
+        "candidate_list": str(config.all_list),
+        "sample_list": str(config.sample_list),
         "global_counts": global_counts,
         "section_receipts": {k: len(v) for k, v in receipts.items()},
     }
-    REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
         "candidate_files": report["candidate_files"],
         "sampled_files": report["sampled_files"],
