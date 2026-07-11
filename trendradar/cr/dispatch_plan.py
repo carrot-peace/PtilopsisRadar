@@ -30,6 +30,7 @@ from trendradar.cr.decision import (
 from trendradar.cr.pipeline import CRPipelineResult
 from trendradar.cr.presentation import CRPresentedCandidate
 from trendradar.cr.event_identity import stable_event_key_for_candidate
+from trendradar.cr.input_health import candidate_has_fresh_input
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +73,8 @@ _REASON_TO_DECISION: dict[str, DispatchPlanDecision] = {
     "quiet_hours_config_error": DECISION_SUPPRESSED,
     "skipped_deferred_queue_error": DECISION_SUPPRESSED,
     "skipped_deferred_queue_upsert": DECISION_SUPPRESSED,
+    "stale_input": DECISION_SUPPRESSED,
+    "insufficient_fresh_sources": DECISION_SUPPRESSED,
 }
 
 
@@ -255,6 +258,7 @@ def cr_dispatch_plan_to_json_dict(
     created_at: str | None = None,
     cooldown_context: dict[str, object] | None = None,
     quiet_hours_context: dict[str, object] | None = None,
+    input_health: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Serialize a :class:`CRDispatchPlan` to a JSON-serializable dict.
 
@@ -310,6 +314,7 @@ def cr_dispatch_plan_to_json_dict(
                     "suppress_reasons": list(pc.suppress_labels),
                     "source_count": len(source_items),
                     "platform_count": len(source_ids),
+                    "fresh_input_eligible": candidate_has_fresh_input(pc),
                 }
             )
 
@@ -386,4 +391,6 @@ def cr_dispatch_plan_to_json_dict(
         result["cooldown"] = cooldown_context
     if quiet_hours_context is not None:
         result["quiet_hours"] = quiet_hours_context
+    if input_health is not None:
+        result["input_health"] = input_health
     return result

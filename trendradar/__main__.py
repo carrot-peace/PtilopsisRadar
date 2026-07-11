@@ -302,6 +302,22 @@ class NewsAnalyzer:
         # _run_analysis_pipeline).  See trendradar/cr/cross_evidence_ingest.
         self._cr_raw_rss_items = None
         self._hotlist_total_count = 0
+        self._cr_hotlist_configured_ids = {
+            str(p.get("id", "")) for p in self.ctx.platforms if p.get("id")
+        }
+        self._cr_hotlist_successful_ids: set[str] = set()
+        self._cr_hotlist_failed_ids: set[str] = set()
+        self._cr_rss_configured_ids = {
+            str(feed.get("id", ""))
+            for feed in self.ctx.rss_feeds
+            if feed.get("id") and feed.get("enabled", True)
+        }
+        self._cr_rss_successful_ids: set[str] = set()
+        self._cr_rss_failed_ids: set[str] = set()
+        self._cr_observed_item_identities: set[str] = set()
+        self._cr_input_snapshot_generated_at: str | None = None
+        self._cr_historical_data_reused = False
+        self._cr_rss_historical_data_reused = False
 
         # 初始化存储管理器（使用 AppContext）
         self._init_storage_manager()
@@ -874,6 +890,10 @@ class NewsAnalyzer:
         _cr_mode = resolve_cr_dispatch_mode(os.environ)
         if _cr_mode != CR_DISPATCH_OFF:
             from trendradar.cr.models import CRRunContext
+            from trendradar.cr.input_health import (
+                evaluate_cr_input_health,
+                policy_from_env,
+            )
             from trendradar.cr.runtime_dry_run import (
                 build_and_write_cr_runtime_dry_run,
             )
@@ -936,11 +956,34 @@ class NewsAnalyzer:
                 _cr_rss_stats = rss_items
 
             _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
+            _health_policy, _health_warnings = policy_from_env(os.environ)
+            _input_health = evaluate_cr_input_health(
+                hotlist_configured_ids=self._cr_hotlist_configured_ids,
+                hotlist_successful_ids=self._cr_hotlist_successful_ids,
+                hotlist_failed_ids=self._cr_hotlist_failed_ids,
+                rss_configured_ids=self._cr_rss_configured_ids,
+                rss_successful_ids=self._cr_rss_successful_ids,
+                rss_failed_ids=self._cr_rss_failed_ids,
+                observed_item_identities=self._cr_observed_item_identities,
+                snapshot_generated_at=self._cr_input_snapshot_generated_at,
+                now=self.ctx.get_time(),
+                historical_data_reused=self._cr_historical_data_reused,
+                policy=_health_policy,
+                warnings=_health_warnings,
+            )
+            for _warning in _input_health.warnings:
+                print(f"[CR-A] input health warning: {_warning}", file=sys.stderr)
             build_and_write_cr_runtime_dry_run(
                 hotlist_stats=stats,
                 rss_stats=_cr_rss_stats,
                 run_label=_run_label,
-                run_context=CRRunContext(mode=mode),
+                run_context=CRRunContext(
+                    mode=mode,
+                    observed_item_identities=frozenset(
+                        self._cr_observed_item_identities
+                    ),
+                    input_health=_input_health,
+                ),
                 pipeline_config=CRPipelineConfig(cluster=_pipeline_cluster_cfg),
                 dispatch_sink=_dispatch_sink,
                 dispatch_mode=_cr_mode,
@@ -1092,6 +1135,17 @@ class NewsAnalyzer:
         results, id_to_name, failed_ids = self.data_fetcher.crawl_websites(
             ids, self.request_interval, domain_rules=domain_rules
         )
+        from trendradar.cr.input_health import input_item_identity
+
+        self._cr_hotlist_successful_ids = set(results)
+        self._cr_hotlist_failed_ids = {str(v) for v in failed_ids}
+        for source_id, titles in results.items():
+            for title in titles:
+                self._cr_observed_item_identities.add(input_item_identity(
+                    source_type="hotlist", source_id=str(source_id), title=str(title),
+                ))
+        if self._cr_hotlist_successful_ids:
+            self._cr_input_snapshot_generated_at = self.ctx.get_time().isoformat()
 
         # 转换为 NewsData 格式并保存到存储后端
         crawl_time = self.ctx.format_time()
@@ -1197,6 +1251,20 @@ class NewsAnalyzer:
 
             self._rss_source_total = len(feeds)
             self._rss_source_failed = len(rss_data.failed_ids)
+            self._cr_rss_successful_ids = set(rss_data.items)
+            self._cr_rss_failed_ids = {str(v) for v in rss_data.failed_ids}
+            from trendradar.cr.input_health import input_item_identity
+
+            for feed_id, items in rss_data.items.items():
+                for item in items:
+                    self._cr_observed_item_identities.add(input_item_identity(
+                        source_type="rss",
+                        feed_id=str(feed_id),
+                        title=item.title,
+                        url=item.url,
+                    ))
+            if self._cr_rss_successful_ids:
+                self._cr_input_snapshot_generated_at = self.ctx.get_time().isoformat()
 
             # 保存到存储后端
             if self.storage_manager.save_rss_data(rss_data):
@@ -1209,10 +1277,12 @@ class NewsAnalyzer:
                 return None, None, None, set()
 
         except ImportError as e:
+            self._cr_rss_failed_ids = set(self._cr_rss_configured_ids)
             print(f"[RSS] 缺少依赖: {e}")
             print("[RSS] 请安装 feedparser: pip install feedparser")
             return None, None, None, set()
         except Exception as e:
+            self._cr_rss_failed_ids = set(self._cr_rss_configured_ids)
             print(f"[RSS] 抓取失败: {e}")
             return None, None, None, set()
 
@@ -1264,10 +1334,12 @@ class NewsAnalyzer:
         elif self.report_mode == "current":
             latest_data = self.storage_manager.get_latest_rss_data(rss_data.date)
             if latest_data:
+                self._cr_rss_historical_data_reused = True
                 raw_rss_items = self._convert_rss_items_to_list(latest_data.items, latest_data.id_to_name)
         else:  # daily
             all_data = self.storage_manager.get_rss_data(rss_data.date)
             if all_data:
+                self._cr_rss_historical_data_reused = True
                 raw_rss_items = self._convert_rss_items_to_list(all_data.items, all_data.id_to_name)
 
         # 2. 获取新增条目（用于统计）
@@ -1541,11 +1613,13 @@ class NewsAnalyzer:
         stats = []
         ai_result = None
         title_info = None
+        self._cr_historical_data_reused = self._cr_rss_historical_data_reused
 
         # current 模式需要使用完整的历史数据
         if self.report_mode == "current":
             analysis_data = self._load_analysis_data()
             if analysis_data:
+                self._cr_historical_data_reused = True
                 (
                     all_results,
                     historical_id_to_name,
@@ -1588,6 +1662,7 @@ class NewsAnalyzer:
             # daily 模式：使用全天累计数据
             analysis_data = self._load_analysis_data()
             if analysis_data:
+                self._cr_historical_data_reused = True
                 (
                     all_results,
                     historical_id_to_name,
@@ -1675,6 +1750,15 @@ class NewsAnalyzer:
         try:
             if not self._initialize_and_check_config():
                 return
+
+            self._cr_hotlist_successful_ids.clear()
+            self._cr_hotlist_failed_ids.clear()
+            self._cr_rss_successful_ids.clear()
+            self._cr_rss_failed_ids.clear()
+            self._cr_observed_item_identities.clear()
+            self._cr_input_snapshot_generated_at = None
+            self._cr_historical_data_reused = False
+            self._cr_rss_historical_data_reused = False
 
             mode_strategy = self._get_mode_strategy()
 

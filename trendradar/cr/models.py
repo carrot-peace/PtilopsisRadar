@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     # Type-only import: keeps the data-model layer free of a runtime dependency
     # on the entity-matching loader / YAML logic.
     from trendradar.cr.entity_match import EntityResources
+    from trendradar.cr.input_health import CRInputHealth
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +144,7 @@ class CRSourceItem:
     summary: Optional[str] = None
     author: Optional[str] = None
     cross_evidence_admitted: bool = False
+    observed_in_current_run: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +190,8 @@ class CRRunContext:
     mode: Literal["current", "incremental", "daily", "unknown"] = "unknown"
     run_time: Optional[str] = None
     first_crawl_of_day: Optional[bool] = None
+    observed_item_identities: frozenset[str] = field(default_factory=frozenset)
+    input_health: "CRInputHealth | None" = None
 
 
 # ---------------------------------------------------------------------------

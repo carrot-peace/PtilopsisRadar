@@ -42,6 +42,8 @@ STATUS_DEFERRED_QUIET_HOURS = "deferred_quiet_hours"
 STATUS_SKIPPED_QUIET_HOURS = "skipped_quiet_hours"
 STATUS_SKIPPED_DEFERRED_QUEUE_ERROR = "skipped_deferred_queue_error"
 STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT = "skipped_deferred_queue_upsert"
+STATUS_SKIPPED_STALE_INPUT = "skipped_stale_input"
+STATUS_SKIPPED_INSUFFICIENT_FRESH_SOURCES = "skipped_insufficient_fresh_sources"
 STATUS_QUIET_HOURS_CONFIG_ERROR = "quiet_hours_config_error"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_ACCEPTED = "accepted"
@@ -127,6 +129,7 @@ def build_dispatch_receipts_json(
     cooldown_entries: list[dict[str, object]] | None = None,
     pre_receipts: list[dict[str, object]] | None = None,
     override_receipts: list[dict[str, object]] | None = None,
+    input_health: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the dispatch receipts JSON dict.
 
@@ -161,6 +164,8 @@ def build_dispatch_receipts_json(
             _build_skipped_receipt_entry(0, cooldown_override_reason, cooldown_override_reason)
         ]
     # --- Mode-level skip (no execution possible) ---
+    elif plan.reason in {"stale_input", "insufficient_fresh_sources"}:
+        receipts = _plan_skip_receipts(plan)
     elif dispatch_mode == "artifact":
         receipts = _mode_receipts(plan, STATUS_NOT_EXECUTED, "artifact_mode_no_send")
     elif dispatch_mode == "shadow":
@@ -191,6 +196,8 @@ def build_dispatch_receipts_json(
     }
     if cooldown_entries:
         result["candidate_outcomes"] = cooldown_entries
+    if input_health is not None:
+        result["input_health"] = input_health
     return result
 
 
@@ -239,6 +246,12 @@ def _plan_skip_receipts(plan: CRDispatchPlan) -> list[dict[str, object]]:
     elif plan.reason == "skipped_deferred_queue_upsert":
         status = STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT
         detail = "deferred_queue_upsert_rejected"
+    elif plan.reason == "stale_input":
+        status = STATUS_SKIPPED_STALE_INPUT
+        detail = "stale_input"
+    elif plan.reason == "insufficient_fresh_sources":
+        status = STATUS_SKIPPED_INSUFFICIENT_FRESH_SOURCES
+        detail = "insufficient_fresh_sources"
     else:
         status = STATUS_UNKNOWN
         detail = plan.reason

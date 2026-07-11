@@ -41,6 +41,7 @@ from trendradar.cr.scoring import CRScoreResult
 from trendradar.cr.state_transition_preview import (
     CREventStateTransitionPreview,
 )
+from trendradar.cr.input_health import CRInputHealth, input_health_to_json_dict
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ class CRMarkdownRenderConfig:
     cooldown_policy: CRCooldownPolicy | None = None
     include_state_transition_preview: bool = False
     state_transition_preview: CREventStateTransitionPreview | None = None
+    input_health: CRInputHealth | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +419,36 @@ def render_cr_markdown_audit(
     lines.append(f"Run: {_escape_markdown_text(run_label)}")
     lines.append(f"Candidates: {len(sorted_candidates)}")
     lines.append(f"High-score suppressed candidates: {high_score_suppressed}")
+
+    if config.input_health is not None:
+        health = input_health_to_json_dict(config.input_health)
+        lines.append("")
+        lines.append("## Input Health")
+        lines.append("")
+        lines.append(f"- Status: `{_escape_markdown_text(str(health['status']))}`")
+        lines.append(
+            "- Reasons: "
+            + (_escape_markdown_text(", ".join(health["reasons"])) or "none")
+        )
+        snapshot = health["snapshot"]
+        generated_at = snapshot["generated_at"] or "unknown"
+        age_minutes = (
+            snapshot["age_minutes"]
+            if snapshot["age_minutes"] is not None
+            else "unknown"
+        )
+        lines.append(f"- Snapshot Generated At: `{generated_at}`")
+        lines.append(f"- Snapshot Age Minutes: `{age_minutes}`")
+        lines.append(f"- Historical Data Reused: `{snapshot['historical_data_reused']}`")
+        hotlist_ratio = health["hotlist"]["success_ratio"]
+        rss_ratio = health["rss"]["success_ratio"]
+        lines.append(f"- Hotlist Success Ratio: `{hotlist_ratio if hotlist_ratio is not None else 'unknown'}`")
+        lines.append(f"- RSS Success Ratio: `{rss_ratio if rss_ratio is not None else 'unknown'}`")
+        if health["warnings"]:
+            lines.append(
+                "- Warnings: "
+                + _escape_markdown_text(", ".join(health["warnings"]))
+            )
 
     if (
         config.include_state_transition_preview
