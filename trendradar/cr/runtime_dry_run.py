@@ -434,14 +434,14 @@ def _deferred_receipts_for_upserts(
     outcomes: tuple[CRDeferredQueueUpsertResult, ...],
     *,
     deferred_until: str | None,
-    persisted: bool,
+    queue_state_current: bool,
 ) -> list[dict[str, object]]:
     receipts: list[dict[str, object]] = []
     for index, outcome in enumerate(outcomes):
         if outcome.outcome == "skipped":
             status = STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT
             detail = outcome.reason
-        elif persisted:
+        elif queue_state_current:
             status = STATUS_DEFERRED_QUIET_HOURS
             detail = f"quiet_hours_{outcome.outcome}"
         else:
@@ -1080,6 +1080,8 @@ def build_and_write_cr_runtime_dry_run(
                             updated_queue,
                             effective_queue_path,
                         )
+                        if not deferred_queue_save.saved:
+                            queue_error_reason = "skipped_deferred_queue_error"
                 else:
                     quiet_deferred_candidates = (
                         quiet_deferred_candidates + bypass_candidates
@@ -1114,13 +1116,13 @@ def build_and_write_cr_runtime_dry_run(
                 queue_changed = (
                     updated_queue.entries != deferred_queue_load.queue.entries
                 )
-                persisted = not queue_changed
+                queue_state_current = not queue_changed
                 if queue_changed:
                     deferred_queue_save = save_deferred_dispatch_queue(
                         updated_queue, effective_queue_path
                     )
-                    persisted = deferred_queue_save.saved
-                    if not persisted:
+                    queue_state_current = deferred_queue_save.saved
+                    if not queue_state_current:
                         queue_error_reason = "skipped_deferred_queue_error"
                         dispatch_plan = replace(
                             dispatch_plan,
@@ -1129,12 +1131,12 @@ def build_and_write_cr_runtime_dry_run(
                 quiet_receipts = _deferred_receipts_for_upserts(
                     upsert_outcomes,
                     deferred_until=deferred_until,
-                    persisted=persisted,
+                    queue_state_current=queue_state_current,
                 )
                 quiet_upsert_outcomes = {
                     outcome.event_key: outcome for outcome in upsert_outcomes
                 }
-                if persisted:
+                if queue_state_current:
                     deferred_event_keys = {
                         outcome.event_key
                         for outcome in upsert_outcomes
