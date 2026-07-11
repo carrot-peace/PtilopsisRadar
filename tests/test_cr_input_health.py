@@ -230,5 +230,67 @@ class TestRuntimeGate(unittest.TestCase):
             )
 
 
+class TestAuditNonePlaceholder(unittest.TestCase):
+    """Snapshot fields rendered as 'unknown' rather than literal None."""
+
+    def _run(self, tmp: str, health):
+        return build_and_write_cr_runtime_dry_run(
+            hotlist_stats=_stats(_item("x", "a")),
+            run_label="audit-run",
+            run_context=CRRunContext(
+                mode="current",
+                observed_item_identities=health.observed_item_identities,
+                input_health=health,
+            ),
+            pipeline_config=CRPipelineConfig(
+                decision=CRDecisionPolicy(alert_threshold=1.0),
+            ),
+            artifact_config=CRArtifactConfig(root_dir=Path(tmp)),
+            dispatch_mode="artifact",
+            dispatch_state_path=Path(tmp) / "state.json",
+            deferred_queue_path=Path(tmp) / "queue.json",
+            now=NOW,
+        )
+
+    def test_snapshot_none_fields_show_unknown_in_markdown(self) -> None:
+        health = evaluate_cr_input_health(
+            hotlist_configured_ids=("a",),
+            hotlist_failed_ids=("a",),
+            now=NOW,
+        )
+        self.assertIsNone(health.snapshot_generated_at)
+        self.assertIsNone(health.snapshot_age_minutes)
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(tmp, health)
+            md = result.pipeline.markdown_audit_text
+            self.assertIn("unknown", md)
+            self.assertNotIn("`None`", md)
+
+    def test_snapshot_none_fields_show_unknown_in_html(self) -> None:
+        health = evaluate_cr_input_health(
+            hotlist_configured_ids=("a",),
+            hotlist_failed_ids=("a",),
+            now=NOW,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(tmp, health)
+            html = result.pipeline.html_audit_text
+            self.assertIn("unknown", html)
+            self.assertNotIn("None", html)
+
+    def test_age_zero_is_not_replaced(self) -> None:
+        health = evaluate_cr_input_health(
+            hotlist_configured_ids=("a",),
+            hotlist_successful_ids=("a",),
+            snapshot_generated_at=NOW.isoformat(),
+            now=NOW,
+        )
+        self.assertEqual(health.snapshot_age_minutes, 0.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(tmp, health)
+            md = result.pipeline.markdown_audit_text
+            self.assertIn("0.0", md)
+
+
 if __name__ == "__main__":
     unittest.main()
