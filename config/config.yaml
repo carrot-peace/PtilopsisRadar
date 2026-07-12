@@ -484,14 +484,14 @@ ai:
                                     #    如果你用的是 DeepSeek、OpenAI、Gemini 等主流服务商，
                                     #    不用填这个，留空就行。
                                     #
-                                    #  怎么填？两步走：
+                                    # 怎么填？两步走：
                                     #    第一步 - api_base 填写服务商给你的接口地址
                                     #      例如: https://your-provider.com/v1
                                     #
                                     #    第二步 - model 前面加上 "openai/" 前缀
                                     #      例如: openai/deepseek-ai/DeepSeek-V3
                                     #
-                                    #  为什么要加 openai/ 前缀？
+                                    # 为什么要加 openai/ 前缀？
                                     #    大部分 AI 服务商都兼容同一套通用接口格式，
                                     #    加上 openai/ 就是告诉系统"用这套通用格式去连接"，
                                     #    这样几乎任何服务商都能接入。

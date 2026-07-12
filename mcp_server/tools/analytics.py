@@ -1271,7 +1271,7 @@ class AnalyticsTools:
 
 ---
 
-##  数据概览
+## 数据概览
 
 - **总新闻数**: {len(all_titles_list)}
 - **覆盖平台**: {len(all_platforms_news)}
@@ -1294,7 +1294,7 @@ class AnalyticsTools:
 
             # 趋势变化（如果是周报）
             if report_type == "weekly":
-                markdown += "\n## [上升] 趋势分析\n\n"
+                markdown += "\n## 趋势分析\n\n"
                 markdown += "本周热度持续的话题（样本数据）：\n\n"
 
                 # 简单的趋势分析

@@ -9,7 +9,7 @@ fi
 
 case "${RUN_MODE:-cron}" in
 "once")
-    echo " 单次执行"
+    echo "单次执行"
     exec python -m trendradar
     ;;
 "cron")
@@ -23,7 +23,7 @@ case "${RUN_MODE:-cron}" in
     # 生成 crontab
     echo "$CRON_EXPR cd /app && python -m trendradar" > /tmp/crontab
     
-    echo " 生成的crontab内容:"
+    echo "生成的crontab内容:"
     cat /tmp/crontab
 
     if ! /usr/local/bin/supercronic -test /tmp/crontab; then
@@ -33,16 +33,16 @@ case "${RUN_MODE:-cron}" in
 
     # 立即执行一次（如果配置了）
     if [ "${IMMEDIATE_RUN:-false}" = "true" ]; then
-        echo " 立即执行一次"
+        echo "立即执行一次"
         python -m trendradar
     fi
 
     # 启动 Web 服务器
-    echo " 启动 Web 服务器..."
+    echo "启动 Web 服务器..."
     python manage.py start_webserver
 
-    echo " 启动supercronic: $CRON_EXPR"
-    echo " supercronic 将作为 PID 1 运行"
+    echo "启动supercronic: $CRON_EXPR"
+    echo "supercronic 将作为 PID 1 运行"
 
     exec /usr/local/bin/supercronic -passthrough-logs /tmp/crontab
     ;;
