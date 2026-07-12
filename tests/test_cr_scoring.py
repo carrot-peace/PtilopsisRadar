@@ -22,6 +22,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
+from trendradar.core.source_tiers import SourceTierResolver
 from trendradar.cr.scoring import (
     CRComponentScore,
     CRScoringProfile,
@@ -92,6 +93,23 @@ def _make_candidate(
     )
 
 
+_TIER_RESOLVER = SourceTierResolver(
+    source_tiers={
+        "platforms": {
+            "weibo": {"tier": "D"},
+            "douyin": {"tier": "D"},
+            "tieba": {"tier": "D"},
+            "thepaper": {"tier": "C"},
+        },
+        "rss_feeds": {
+            "reuters": {"tier": "B"},
+            "openai-news": {"tier": "A"},
+            "social-rss": {"tier": "D"},
+        },
+    }
+)
+
+
 # ===========================================================================
 # A. Profile defaults
 # ===========================================================================
@@ -129,6 +147,7 @@ class TestProfileDefaults(unittest.TestCase):
         self.assertAlmostEqual(p.evidence_multiplier_strong, 1.10)
         self.assertAlmostEqual(p.cross_evidence_bonus_factor, 0.25)
         self.assertAlmostEqual(p.cross_evidence_bonus_cap, 5.0)
+        self.assertIsNone(p.source_tier_resolver)
 
     def test_frozen(self):
         with self.assertRaises(AttributeError):
@@ -1378,6 +1397,101 @@ class TestB2LiteEvidenceMultiplier(unittest.TestCase):
         self.assertAlmostEqual(em["legacy_total_score"], 80.0)
         # adjusted = 70*0.88 + min(10*0.25, 5) = 61.6 + 2.5 = 64.1
         self.assertAlmostEqual(em["adjusted_total_score"], 64.1)
+
+
+class TestTierBasedCrossEvidence(unittest.TestCase):
+    def setUp(self):
+        self.profile = CRScoringProfile(
+            source_tier_resolver=_TIER_RESOLVER,
+        )
+
+    def test_same_d_tier_echo_stays_weak(self):
+        candidate = _make_candidate(
+            source_items=[
+                _make_item(source_id="weibo"),
+                _make_item(source_id="douyin"),
+                _make_item(source_id="tieba"),
+            ],
+            has_hotlist=True,
+            primary_source_type="hotlist",
+        )
+
+        multiplier, reason = _compute_evidence_multiplier(
+            candidate, self.profile
+        )
+        cross = score_cross_layer_raw(candidate, profile=self.profile)
+
+        self.assertEqual(multiplier, self.profile.evidence_multiplier_single)
+        self.assertEqual(reason, "same_tier_echo:D")
+        self.assertEqual(cross.capped_score, 0.0)
+        self.assertEqual(cross.debug["tier_evidence"]["tiers"], ["D"])
+
+    def test_d_tier_confirmed_by_b_tier_is_strong(self):
+        candidate = _make_candidate(
+            source_items=[
+                _make_item(source_id="weibo"),
+                _make_item(
+                    source_type="rss",
+                    source_id=None,
+                    feed_id="reuters",
+                    source_name="Reuters",
+                ),
+            ],
+            has_hotlist=True,
+            has_rss=True,
+            primary_source_type="mixed",
+        )
+
+        multiplier, reason = _compute_evidence_multiplier(
+            candidate, self.profile
+        )
+        cross = score_cross_layer_raw(candidate, profile=self.profile)
+
+        self.assertEqual(multiplier, self.profile.evidence_multiplier_strong)
+        self.assertEqual(reason, "strong_cross_tier_evidence:B,D")
+        self.assertEqual(cross.debug["tier_evidence"]["strength"], "strong")
+        self.assertGreater(cross.capped_score, 0.0)
+
+    def test_c_and_d_hotlists_get_cross_tier_credit(self):
+        candidate = _make_candidate(
+            source_items=[
+                _make_item(source_id="weibo"),
+                _make_item(source_id="thepaper"),
+            ],
+            has_hotlist=True,
+            primary_source_type="hotlist",
+        )
+
+        multiplier, reason = _compute_evidence_multiplier(
+            candidate, self.profile
+        )
+        cross = score_cross_layer_raw(candidate, profile=self.profile)
+
+        self.assertEqual(multiplier, self.profile.evidence_multiplier_moderate)
+        self.assertEqual(reason, "moderate_cross_tier_evidence:C,D")
+        self.assertEqual(cross.debug["tier_evidence"]["strength"], "moderate")
+
+    def test_hotlist_rss_same_tier_is_not_automatically_strong(self):
+        candidate = _make_candidate(
+            source_items=[
+                _make_item(source_id="weibo"),
+                _make_item(
+                    source_type="rss",
+                    source_id=None,
+                    feed_id="social-rss",
+                ),
+            ],
+            has_hotlist=True,
+            has_rss=True,
+            primary_source_type="mixed",
+        )
+
+        multiplier, reason = _compute_evidence_multiplier(
+            candidate, self.profile
+        )
+
+        self.assertEqual(multiplier, self.profile.evidence_multiplier_single)
+        self.assertEqual(reason, "same_tier_echo:D")
 
 
 class TestB2LiteScenarios(unittest.TestCase):

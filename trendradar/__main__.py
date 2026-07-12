@@ -931,8 +931,12 @@ class NewsAnalyzer:
             _cr_rss_stats = rss_items
             from trendradar.cr.models import CRClusterConfig
             from trendradar.cr.pipeline import CRPipelineConfig
+            from trendradar.cr.scoring import CRScoringProfile
 
             _pipeline_cluster_cfg = CRClusterConfig()
+            _pipeline_scoring_cfg = CRScoringProfile(
+                source_tier_resolver=self.ctx.source_tier_resolver,
+            )
             try:
                 from trendradar.cr.cross_evidence_ingest import (
                     build_cross_evidence_cluster_config_from_env,
@@ -1006,7 +1010,10 @@ class NewsAnalyzer:
                     ),
                     input_health=_input_health,
                 ),
-                pipeline_config=CRPipelineConfig(cluster=_pipeline_cluster_cfg),
+                pipeline_config=CRPipelineConfig(
+                    cluster=_pipeline_cluster_cfg,
+                    scoring=_pipeline_scoring_cfg,
+                ),
                 dispatch_sink=_dispatch_sink,
                 dispatch_mode=_cr_mode,
                 quiet_hours_env=os.environ,
