@@ -2,10 +2,10 @@ name: Docker Build (PR)
 
 on:
   pull_request:
-    branches: [master]
     paths:
       - 'docker/**'
       - 'trendradar/**'
+      - '.github/workflows/docker-pr.yml'
       - 'mcp_server/**'
       - 'pyproject.toml'
       - 'uv.lock'

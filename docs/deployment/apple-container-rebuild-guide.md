@@ -398,16 +398,32 @@ echo $status
 ```
 
 单次检查覆盖：目标本地 image 是否存在、运行容器 digest、`docker/.env`
-修改时间、HTTP endpoint、`output/meta/last_task_completed.json` 以及最新
-`current/index.html` / `daily/full.html`。`env_drift` 或 `image_drift` 只会明确提示
+内容哈希、HTTP endpoint、`output/meta/last_task_completed.json` 以及
+`current/index.html` / `daily/full.html`。heartbeat 必须是
+`task-heartbeat-v1` 且 `completed_at` 为带时区时间；文件 mtime 不能伪造一次成功。
+`env_drift` 或 `image_drift` 只会明确提示
 需要 recreate，不会在后台静默替换容器。目标本地 image 不存在时 supervisor
 直接返回 `local_image_missing`，不会执行 `container run`，因此不会回退公网 registry。
+容器缺失或停止时，`run` / `start` 返回 0 后仍会在同轮等待 running + HTTP ready；
+默认等待 30 秒、每 2 秒重试，可用 `TREND_RADAR_READINESS_TIMEOUT` 和
+`TREND_RADAR_READINESS_INTERVAL` 调整。Apple Container 控制命令本身也有默认
+30 秒上限，可用 `TREND_RADAR_COMMAND_TIMEOUT` 调整；readiness 内部会使用剩余
+预算作为更短的硬上限，避免 inspect 或 HTTP 请求卡住整轮诊断。
 
-默认 task heartbeat 最长 90 分钟，最新 artifact 最长 3 小时，首次启动宽限
-1 小时；可分别用 `TREND_RADAR_MAX_TASK_AGE`、
-`TREND_RADAR_MAX_ARTIFACT_AGE`、`TREND_RADAR_STARTUP_GRACE` 调整（单位秒）。
+默认 task heartbeat 最长 90 分钟；current artifact 最长 3 小时、启动宽限
+1 小时；daily artifact 最长 30 小时、启动宽限 30 小时。两类 artifact 独立
+检查，不能互相掩盖。可分别用 `TREND_RADAR_MAX_TASK_AGE`、
+`TREND_RADAR_MAX_CURRENT_ARTIFACT_AGE`、`TREND_RADAR_MAX_DAILY_ARTIFACT_AGE`、
+`TREND_RADAR_STARTUP_GRACE`、`TREND_RADAR_DAILY_STARTUP_GRACE` 调整（单位秒）。
+旧的 `TREND_RADAR_MAX_ARTIFACT_AGE` 仅作为 current 阈值的兼容 fallback。
 失败告警只发给 Telegram owner，并按错误码默认一小时去重；诊断日志不会输出
 `.env` 内容或完整 container environment。
+
+supervisor 只在 `output/meta/` 保存安全状态：
+`supervisor-deployment-state.json` 包含 container identity、image digest 和 env
+SHA-256；`supervisor-alerts.json` 仅包含 diagnostic code、owner hash 和投递时间。
+健康轮次会清除 active alert，使恢复后的同类新故障可以立即告警。这些文件均不
+包含 token、chat ID 或 `.env` 原文。
 
 supervisor 日志默认达到 5 MiB 后轮转、保留 5 代；每轮还保存 container
 末尾 500 行的受限快照并保留 5 代。路径分别为
