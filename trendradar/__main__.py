@@ -69,6 +69,17 @@ LEGACY_PUSH_REMOVED_MSG = (
     "Use CR-New canary / CR dry-run Telegram sink instead."
 )
 
+DOCTOR_STATUS_LABELS = {
+    "pass": "[通过]",
+    "warn": "[警告]",
+    "fail": "[失败]",
+}
+
+
+def _format_switch_state(enabled: bool) -> str:
+    """Return a neutral label for a configured boolean switch."""
+    return "[开启]" if enabled else "[关闭]"
+
 
 def _telegram_receiver_chat_ids(config: Dict) -> List[str]:
     """Return Telegram receiver chat ids using the same access parser as runtime senders."""
@@ -1786,14 +1797,9 @@ class NewsAnalyzer:
 
 def _record_doctor_result(results: List[Tuple[str, str, str]], status: str, item: str, detail: str) -> None:
     """记录并打印 doctor 检查结果"""
-    icon_map = {
-        "pass": "[成功]",
-        "warn": "[警告]",
-        "fail": "[失败]",
-    }
-    icon = icon_map.get(status, "•")
+    label = DOCTOR_STATUS_LABELS.get(status, "[未知]")
     results.append((status, item, detail))
-    print(f"{icon} {item}: {detail}")
+    print(f"{label} {item}: {detail}")
 
 
 def _save_doctor_report(
@@ -1996,7 +2002,12 @@ def _run_doctor(config_path: Optional[str] = None) -> bool:
     _save_doctor_report(results, pass_count, warn_count, fail_count, config_path)
 
     print("-" * 60)
-    print(f"体检结果: [成功] {pass_count} 项通过  [警告] {warn_count} 项警告  [失败] {fail_count} 项失败")
+    print(
+        "体检结果: "
+        f"{DOCTOR_STATUS_LABELS['pass']} {pass_count} 项通过  "
+        f"{DOCTOR_STATUS_LABELS['warn']} {warn_count} 项警告  "
+        f"{DOCTOR_STATUS_LABELS['fail']} {fail_count} 项失败"
+    )
     print("=" * 60)
 
     if fail_count == 0:
@@ -2193,8 +2204,8 @@ def _handle_status_commands(config: Dict) -> None:
             print(f"  当前时间段: 无（使用默认配置）")
 
         print(f"\n 行为开关:")
-        print(f"  采集数据: {'[成功] 是' if schedule.collect else '[失败] 否'}")
-        print(f"  AI 分析:  {'[成功] 是' if schedule.analyze else '[失败] 否'}")
+        print(f"  采集数据: {_format_switch_state(schedule.collect)}")
+        print(f"  AI 分析:  {_format_switch_state(schedule.analyze)}")
         print(f"  Legacy Push 开关: {'已配置但正常运行时忽略' if schedule.push else '未配置'}")
         print(f"  报告模式: {schedule.report_mode}")
         print(f"  AI 模式:  {schedule.ai_mode}")
@@ -2203,7 +2214,8 @@ def _handle_status_commands(config: Dict) -> None:
             print("\n一次性控制:")
             if schedule.once_analyze:
                 already_analyzed = scheduler.already_executed(schedule.period_key, "analyze", date_str)
-                print(f"  AI 分析:  仅一次 {'(今日已执行 [警告])' if already_analyzed else '(今日未执行 [成功])'}")
+                once_state = "[已执行]" if already_analyzed else "[待执行]"
+                print(f"  AI 分析:  仅一次 {once_state}")
             else:
                 print(f"  AI 分析:  不限次数")
             if schedule.once_push:
