@@ -916,6 +916,7 @@ class TestEdgeCases(unittest.TestCase):
             title="Recovered RSS event",
             feed_id="feed-a",
         )
+        raw["precomputed_entities"] = ["entity-a", "entity-b"]
         identity = input_item_identity(
             source_type="rss",
             feed_id="feed-a",
@@ -937,6 +938,10 @@ class TestEdgeCases(unittest.TestCase):
         )[0].source_items[0]
         self.assertTrue(item.observed_in_current_run)
         self.assertTrue(item.observed_after_ingest_gap)
+        self.assertEqual(
+            item.precomputed_entities,
+            frozenset({"entity-a", "entity-b"}),
+        )
 
 
 if __name__ == "__main__":

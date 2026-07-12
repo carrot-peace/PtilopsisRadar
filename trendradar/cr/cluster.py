@@ -195,7 +195,14 @@ def _cluster_source_items(
     if config.use_entity_match:
         resources = config.entity_resources or load_entity_resources()
         stoplist = resources.stoplist
-        entities = [extract_entities(it.title, resources.dictionary) for it in items]
+        entities = [
+            (
+                set(item.precomputed_entities)
+                if item.precomputed_entities is not None
+                else extract_entities(item.title, resources.dictionary)
+            )
+            for item in items
+        ]
 
     uf = _UnionFind()
 
