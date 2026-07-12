@@ -64,7 +64,7 @@ container stats --no-stream trendradar
 ```
 
 > **为什么要 bootout / bootstrap？**
-> supervisor 每 60s 巡检一次：容器不存在就重建，停止就重启。
+> supervisor 每 60s 检查容器、HTTP、任务 heartbeat、artifact 与 env/image 漂移；容器不存在才使用已验证存在的本地镜像重建，停止则重启。
 > 如果不先 bootout，步骤 3 删除容器后 supervisor 会用旧参数抢先重建，导致步骤 4 报 "container already exists"。
 
 ---
@@ -177,7 +177,7 @@ bash -c 'launchctl print gui/$(id -u)/com.carrot-peace.ptilopsis-radar' | grep s
 
 # supervisor 已识别新容器
 tail -n 5 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log
-# 期望：包含 "container trendradar is running"
+# 期望：包含 "health check passed"
 ```
 
 #### Lifecycle 入口与启用验证
@@ -389,6 +389,34 @@ scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 
 ---
 
+## Supervisor 健康诊断与保留策略
+
+```fish
+# 单次运行全部检查；健康为 0，失败为非 0
+scripts/apple-container/trendradar-supervisor.zsh --once
+echo $status
+```
+
+单次检查覆盖：目标本地 image 是否存在、运行容器 digest、`docker/.env`
+修改时间、HTTP endpoint、`output/meta/last_task_completed.json` 以及最新
+`current/index.html` / `daily/full.html`。`env_drift` 或 `image_drift` 只会明确提示
+需要 recreate，不会在后台静默替换容器。目标本地 image 不存在时 supervisor
+直接返回 `local_image_missing`，不会执行 `container run`，因此不会回退公网 registry。
+
+默认 task heartbeat 最长 90 分钟，最新 artifact 最长 3 小时，首次启动宽限
+1 小时；可分别用 `TREND_RADAR_MAX_TASK_AGE`、
+`TREND_RADAR_MAX_ARTIFACT_AGE`、`TREND_RADAR_STARTUP_GRACE` 调整（单位秒）。
+失败告警只发给 Telegram owner，并按错误码默认一小时去重；诊断日志不会输出
+`.env` 内容或完整 container environment。
+
+supervisor 日志默认达到 5 MiB 后轮转、保留 5 代；每轮还保存 container
+末尾 500 行的受限快照并保留 5 代。路径分别为
+`trendradar-supervisor.log[.N]` 和 `trendradar-container.log[.N]`，均位于
+`~/Library/Logs/PtilopsisRadar/`。可用 `TREND_RADAR_LOG_MAX_BYTES`、
+`TREND_RADAR_LOG_KEEP`、`TREND_RADAR_CONTAINER_LOG_LINES` 调整。
+
+---
+
 ## 排查清单
 
 | 现象 | 检查命令 | 期望结果 |
@@ -396,7 +424,7 @@ scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 | 8080 无响应 | `lsof -nP -iTCP:8080 -sTCP:LISTEN` | 有输出说明有进程在监听（若无说明容器未起） |
 | 容器未启动 | `container list --all` | 确认 trendradar 是否存在及 STATE |
 | 容器反复重启 | `container logs -n 100 trendradar` | 找 Traceback / FATAL / OOM |
-| supervisor 不重建 | `tail -n 30 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log` | 有无 "missing" 或 "not running" |
+| supervisor 诊断失败 | `scripts/apple-container/trendradar-supervisor.zsh --once` | 按 `code=` 修复；`env_drift` / `image_drift` 需要 recreate |
 | launchd 未启动 | `bash -c 'launchctl print gui/$(id -u)/com.carrot-peace.ptilopsis-radar'` | `state = running`？ |
 | 内存持续增长 | `container stats --no-stream trendradar` | 空闲态应 < 200 MiB |
 | 构建失败 | `container system start` 是否正常 | `network error` 通常是网络问题 |
@@ -414,4 +442,5 @@ scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 | supervisor 脚本 | `scripts/apple-container/trendradar-supervisor.zsh` |
 | launchd plist | `~/Library/LaunchAgents/com.carrot-peace.ptilopsis-radar.plist` |
 | supervisor 日志 | `~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log` |
+| container 日志快照 | `~/Library/Logs/PtilopsisRadar/trendradar-container.log` |
 | AI Agent 操作协议 | `docs/deployment/apple-container-rebuild-agent.md` |
