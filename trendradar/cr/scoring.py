@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
+from trendradar.cr.input_health import (
+    CRInputHealth,
+    collection_coverage_summary,
+)
 
 if TYPE_CHECKING:
     from trendradar.core.source_tiers import SourceTierResolver
@@ -182,6 +186,11 @@ class CRScoringProfile:
     # --- ABCD source-tier evidence (falls back to legacy when unset) ---
     source_tier_resolver: "SourceTierResolver | None" = None
 
+    # --- Collection coverage correction (opt-in) ---
+    coverage_penalty_enabled: bool = False
+    coverage_penalty_threshold: float = 0.67
+    coverage_penalty_factor: float = 0.85
+
 
 DEFAULT_CR_SCORING_PROFILE = CRScoringProfile()
 
@@ -233,6 +242,7 @@ class CRScoreResult:
 
     total_score: float = 0.0
     trigger_reasons: list[str] = field(default_factory=list)
+    coverage_warning: str | None = None
     debug: dict[str, object] = field(default_factory=dict)
 
 
@@ -840,6 +850,7 @@ def combine_cr_scores(
     background_support_raw: CRComponentScore | float | None = None,
     trigger_reasons: list[str] | None = None,
     debug: dict[str, object] | None = None,
+    input_health: CRInputHealth | None = None,
 ) -> CRScoreResult:
     """Combine component scores into a final CRScoreResult.
 
@@ -872,6 +883,47 @@ def combine_cr_scores(
     # Total — B2-lite or legacy.
     heat_score = heat_cs.capped_score
     cross_evidence_score = cross_ev_cs.capped_score
+
+    coverage = (
+        collection_coverage_summary(input_health)
+        if input_health is not None
+        else None
+    )
+    coverage_ratio = coverage["ratio"] if coverage is not None else None
+    penalty_applied = bool(
+        profile.coverage_penalty_enabled
+        and coverage_ratio is not None
+        and coverage_ratio < profile.coverage_penalty_threshold
+    )
+    penalty_factor = (
+        max(0.0, min(1.0, profile.coverage_penalty_factor))
+        if penalty_applied
+        else 1.0
+    )
+    if penalty_applied:
+        heat_score *= penalty_factor
+        cross_evidence_score *= penalty_factor
+        heat_cs.capped_score = heat_score
+        cross_ev_cs.capped_score = cross_evidence_score
+        heat_cs.reasons.append(
+            f"collection_coverage_penalty={penalty_factor:.2f}"
+        )
+        cross_ev_cs.reasons.append(
+            f"collection_coverage_penalty={penalty_factor:.2f}"
+        )
+
+    coverage_debug = {
+        "collection_coverage": coverage_ratio,
+        "configured_sources": coverage["configured"] if coverage else 0,
+        "successful_sources": coverage["successful"] if coverage else 0,
+        "failed_sources": coverage["failed"] if coverage else 0,
+        "penalty_enabled": profile.coverage_penalty_enabled,
+        "penalty_threshold": profile.coverage_penalty_threshold,
+        "penalty_factor": penalty_factor,
+        "penalty_applied": penalty_applied,
+    }
+    heat_cs.debug["collection_coverage"] = coverage_debug
+    cross_ev_cs.debug["collection_coverage"] = coverage_debug
 
     if profile.evidence_multiplier_enabled:
         # B2-lite: heat × multiplier + small cross-evidence bonus.
@@ -937,6 +989,7 @@ def combine_cr_scores(
         "cross_evidence_raw": cross_ev_raw,
         "total_raw": total_raw,
         "evidence_multiplier": evidence_multiplier_debug,
+        "collection_coverage": coverage_debug,
     }
     if debug:
         merged_debug.update(debug)
@@ -953,6 +1006,7 @@ def combine_cr_scores(
         cross_evidence=cross_ev_cs,
         total_score=total_score,
         trigger_reasons=all_reasons,
+        coverage_warning=(coverage["warning"] if coverage else None),
         debug=merged_debug,
     )
 
@@ -966,6 +1020,7 @@ def score_cr_candidate(
     candidate: CRCandidate,
     *,
     profile: CRScoringProfile | None = None,
+    input_health: CRInputHealth | None = None,
 ) -> CRScoreResult:
     """Score a single CRCandidate using v0.1 deterministic scoring.
 
@@ -985,6 +1040,7 @@ def score_cr_candidate(
         growth_raw=growth,
         current_heat_raw=current_heat,
         cross_layer_raw=cross_layer,
+        input_health=input_health,
         debug={
             "candidate_id": candidate.candidate_id,
             "profile_version": profile.profile_version,

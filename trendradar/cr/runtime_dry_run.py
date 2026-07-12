@@ -353,6 +353,7 @@ def _plan_for_candidates(
     run = CRPresentationRun(
         run_label=pipeline_result.run_label,
         candidates=list(candidates),
+        coverage_warning=pipeline_result.coverage_warning,
         total_eligible_count=(
             len(candidates) if total_eligible_count is None else total_eligible_count
         ),
@@ -370,6 +371,7 @@ def _plan_for_candidates(
         markdown_audit_text=pipeline_result.markdown_audit_text,
         html_audit_text=pipeline_result.html_audit_text,
         high_score_suppressed_count=suppressed_count,
+        coverage_warning=pipeline_result.coverage_warning,
     )
     return build_cr_a_dispatch_plan(filtered)
 
@@ -861,6 +863,7 @@ def build_and_write_cr_runtime_dry_run(
         run_label=run_label,
         config=effective_pipeline_config,
         urgent_threshold=urgent_threshold,
+        input_health=input_health,
     )
     effective_text_config = (
         effective_pipeline_config.render.text

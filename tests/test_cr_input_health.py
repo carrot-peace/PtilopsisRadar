@@ -22,6 +22,7 @@ from trendradar.cr.input_health import (
     REASON_STALE_INPUT,
     STATUS_DEGRADED,
     STATUS_FAIL_CLOSED,
+    collection_coverage_summary,
     evaluate_cr_input_health,
     input_item_identity,
     policy_from_env,
@@ -174,6 +175,21 @@ class TestPolicy(unittest.TestCase):
         self.assertIn(REASON_HOTLIST_SUCCESS_RATIO_LOW, health.reasons)
         self.assertIn(REASON_RSS_ALL_FAILED, health.reasons)
 
+    def test_collection_coverage_summary(self) -> None:
+        health = _health(
+            configured=("a", "b", "c"),
+            successful=("a", "b"),
+            failed=("c",),
+            rss_configured=("r1",),
+            rss_failed=("r1",),
+        )
+        summary = collection_coverage_summary(health)
+        self.assertEqual(summary["configured"], 4)
+        self.assertEqual(summary["successful"], 2)
+        self.assertEqual(summary["failed"], 2)
+        self.assertEqual(summary["ratio"], 0.5)
+        self.assertIn("2/4", summary["warning"])
+
 
 class TestMainWiring(unittest.TestCase):
     def test_main_preserves_rss_failed_ids_and_builds_health_context(self) -> None:
@@ -321,6 +337,10 @@ class TestRuntimeGate(unittest.TestCase):
             self.assertEqual(health.status, STATUS_DEGRADED)
             self.assertTrue(result.dispatch_plan.should_dispatch)
             self.assertEqual(len(sink.submitted_messages), 1)
+            self.assertIn(
+                "Collection coverage: 1/2 (1 failed)",
+                sink.submitted_messages[0].text,
+            )
 
     def test_one_fresh_item_allows_mixed_candidate(self) -> None:
         fresh = _item("shared event", "a")

@@ -39,6 +39,7 @@ from trendradar.cr.input_health import (
     policy_from_env,
     evaluate_cr_input_health,
     input_health_to_json_dict,
+    collection_coverage_summary,
 )
 from trendradar.cr.cluster import (
     build_cr_candidates,
@@ -235,6 +236,7 @@ __all__ = [
     "policy_from_env",
     "evaluate_cr_input_health",
     "input_health_to_json_dict",
+    "collection_coverage_summary",
     "build_cr_candidates",
     "CRScoringProfile",
     "CRComponentScore",

@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
 from trendradar.core.source_tiers import SourceTierResolver
+from trendradar.cr.input_health import evaluate_cr_input_health
 from trendradar.cr.scoring import (
     CRComponentScore,
     CRScoringProfile,
@@ -151,6 +152,12 @@ class TestProfileDefaults(unittest.TestCase):
         self.assertAlmostEqual(p.cross_evidence_bonus_factor, 0.25)
         self.assertAlmostEqual(p.cross_evidence_bonus_cap, 5.0)
         self.assertIsNone(p.source_tier_resolver)
+
+    def test_coverage_penalty_disabled_by_default(self):
+        p = DEFAULT_CR_SCORING_PROFILE
+        self.assertFalse(p.coverage_penalty_enabled)
+        self.assertAlmostEqual(p.coverage_penalty_threshold, 0.67)
+        self.assertAlmostEqual(p.coverage_penalty_factor, 0.85)
 
     def test_frozen(self):
         with self.assertRaises(AttributeError):
@@ -1541,6 +1548,56 @@ class TestProductionTieredProfileWiring(unittest.TestCase):
         version = production_calls[0].get("profile_version")
         self.assertIsInstance(version, ast.Name)
         self.assertEqual(version.id, "TIERED_CR_SCORING_PROFILE_VERSION")
+class TestCollectionCoveragePenalty(unittest.TestCase):
+    def setUp(self):
+        self.candidate = _make_candidate(
+            source_items=[_make_item()],
+            has_hotlist=True,
+            primary_source_type="hotlist",
+        )
+        self.health = evaluate_cr_input_health(
+            hotlist_configured_ids=("a", "b", "c", "d"),
+            hotlist_successful_ids=("a",),
+            hotlist_failed_ids=("b", "c", "d"),
+        )
+
+    def _combine(self, profile):
+        return combine_cr_scores(
+            self.candidate,
+            profile=profile,
+            growth_raw=40.0,
+            current_heat_raw=30.0,
+            cross_layer_raw=10.0,
+            input_health=self.health,
+        )
+
+    def test_disabled_penalty_preserves_score_but_warns(self):
+        profile = CRScoringProfile(evidence_multiplier_enabled=False)
+        result = self._combine(profile)
+
+        self.assertAlmostEqual(result.total_score, 80.0)
+        self.assertIn("Collection coverage: 1/4", result.coverage_warning)
+        self.assertFalse(
+            result.debug["collection_coverage"]["penalty_applied"]
+        )
+
+    def test_enabled_penalty_attenuates_heat_and_cross_evidence(self):
+        profile = CRScoringProfile(
+            evidence_multiplier_enabled=False,
+            coverage_penalty_enabled=True,
+            coverage_penalty_threshold=0.75,
+            coverage_penalty_factor=0.5,
+        )
+        result = self._combine(profile)
+
+        self.assertAlmostEqual(result.heat.raw_score, 70.0)
+        self.assertAlmostEqual(result.heat.capped_score, 35.0)
+        self.assertAlmostEqual(result.cross_evidence.capped_score, 5.0)
+        self.assertAlmostEqual(result.total_score, 40.0)
+        coverage = result.heat.debug["collection_coverage"]
+        self.assertEqual(coverage["collection_coverage"], 0.25)
+        self.assertTrue(coverage["penalty_applied"])
+        self.assertEqual(coverage["penalty_factor"], 0.5)
 
 
 class TestB2LiteScenarios(unittest.TestCase):

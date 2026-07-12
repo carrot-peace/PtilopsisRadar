@@ -230,3 +230,25 @@ def input_health_to_json_dict(health: CRInputHealth) -> dict[str, object]:
         },
         "warnings": list(health.warnings),
     }
+
+
+def collection_coverage_summary(health: CRInputHealth) -> dict[str, object]:
+    """Return run-wide configured/successful coverage and a display warning."""
+    configured = len(health.hotlist.configured_ids) + len(health.rss.configured_ids)
+    successful = len(health.hotlist.successful_ids) + len(health.rss.successful_ids)
+    successful = min(successful, configured)
+    failed = max(0, configured - successful)
+    ratio = successful / configured if configured else None
+    warning = None
+    if configured and failed:
+        warning = (
+            f"Collection coverage: {successful}/{configured} "
+            f"({failed} failed); scores may be based on incomplete data."
+        )
+    return {
+        "configured": configured,
+        "successful": successful,
+        "failed": failed,
+        "ratio": ratio,
+        "warning": warning,
+    }
