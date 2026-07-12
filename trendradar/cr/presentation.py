@@ -82,6 +82,9 @@ class CRPresentationRun:
     candidates before the max_candidates cap was applied.  When it exceeds
     ``len(candidates)`` the difference signals that candidates were truncated.
     Defaults to 0, which the renderer treats as "use len(candidates)".
+
+    ``high_score_suppressed_count`` defaults to 0 for callers that do not run
+    decision-layer suppression; dispatch paths should pass the observed count.
     """
 
     run_label: str
@@ -431,6 +434,7 @@ def render_cr_a_text_from_parts(
     *,
     run_label: str,
     config: CRTextPresentationConfig | None = None,
+    urgent_threshold: float = 80.0,
 ) -> str:
     """Convenience: bind → select → run → render in one call.
 
@@ -444,7 +448,9 @@ def render_cr_a_text_from_parts(
     run = CRPresentationRun(
         run_label=run_label,
         candidates=selected,
-        high_score_suppressed_count=count_high_score_suppressed(decisions),
+        high_score_suppressed_count=count_high_score_suppressed(
+            decisions, urgent_threshold=urgent_threshold
+        ),
         total_eligible_count=eligible_total,
     )
     return render_cr_a_text(run, config=config)
