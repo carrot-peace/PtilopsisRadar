@@ -24,6 +24,7 @@ from trendradar.cr.input_health import (
     STATUS_FAIL_CLOSED,
     collection_coverage_summary,
     evaluate_cr_input_health,
+    input_health_to_json_dict,
     input_item_identity,
     policy_from_env,
 )
@@ -190,6 +191,33 @@ class TestPolicy(unittest.TestCase):
         self.assertEqual(summary["ratio"], 0.5)
         self.assertIn("2/4", summary["warning"])
 
+    def test_recovery_markers_are_serialized_for_audit(self) -> None:
+        health = evaluate_cr_input_health(
+            hotlist_successful_ids=("a",),
+            hotlist_recovered_ids=("a",),
+            rss_successful_ids=("r1",),
+            rss_recovered_ids=("r1",),
+            recovery_state_status="tracked",
+        )
+        payload = input_health_to_json_dict(health)
+        self.assertEqual(payload["hotlist"]["recovered_ids"], ["a"])
+        self.assertEqual(payload["rss"]["recovered_ids"], ["r1"])
+        self.assertEqual(payload["recovery"]["state_status"], "tracked")
+        self.assertTrue(payload["recovery"]["new_burst_evidence_trusted"])
+
+    def test_failed_source_wins_over_overlapping_success(self) -> None:
+        health = evaluate_cr_input_health(
+            hotlist_configured_ids=("a",),
+            hotlist_successful_ids=("a",),
+            hotlist_failed_ids=("a",),
+        )
+        self.assertEqual(health.hotlist.successful_ids, ())
+        self.assertEqual(health.hotlist.failed_ids, ("a",))
+        self.assertTrue(health.fail_closed)
+        summary = collection_coverage_summary(health)
+        self.assertEqual(summary["successful"], 0)
+        self.assertEqual(summary["failed"], 1)
+
 
 class TestMainWiring(unittest.TestCase):
     def test_main_preserves_rss_failed_ids_and_builds_health_context(self) -> None:
@@ -200,6 +228,9 @@ class TestMainWiring(unittest.TestCase):
         self.assertIn("rss_data.failed_ids", source)
         self.assertIn("evaluate_cr_input_health", source)
         self.assertIn("observed_item_identities=frozenset", source)
+        self.assertIn("load_cr_input_health_state", source)
+        self.assertIn("recovered_source_ids", source)
+        self.assertIn("save_cr_input_health_state", source)
 
 
 class TestRuntimeGate(unittest.TestCase):

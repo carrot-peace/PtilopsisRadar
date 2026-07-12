@@ -40,6 +40,17 @@ from trendradar.cr.input_health import (
     evaluate_cr_input_health,
     input_health_to_json_dict,
     collection_coverage_summary,
+    RECOVERY_STATE_BASELINE,
+    RECOVERY_STATE_TRACKED,
+    RECOVERY_STATE_UNTRUSTED,
+)
+from trendradar.cr.input_health_state import (
+    CRInputHealthState,
+    CRInputHealthStateLoadResult,
+    CRInputHealthStateSaveResult,
+    load_cr_input_health_state,
+    recovered_source_ids,
+    save_cr_input_health_state,
 )
 from trendradar.cr.cluster import (
     build_cr_candidates,
@@ -237,6 +248,15 @@ __all__ = [
     "evaluate_cr_input_health",
     "input_health_to_json_dict",
     "collection_coverage_summary",
+    "RECOVERY_STATE_BASELINE",
+    "RECOVERY_STATE_TRACKED",
+    "RECOVERY_STATE_UNTRUSTED",
+    "CRInputHealthState",
+    "CRInputHealthStateLoadResult",
+    "CRInputHealthStateSaveResult",
+    "load_cr_input_health_state",
+    "recovered_source_ids",
+    "save_cr_input_health_state",
     "build_cr_candidates",
     "CRScoringProfile",
     "CRComponentScore",

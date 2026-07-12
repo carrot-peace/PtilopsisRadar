@@ -27,6 +27,26 @@ from trendradar.cr.input_health import input_item_identity
 # ---------------------------------------------------------------------------
 
 
+def _observed_after_ingest_gap(
+    context: CRRunContext,
+    *,
+    source_type: str,
+    source_id: object,
+    observed_in_current_run: bool,
+) -> bool:
+    if not observed_in_current_run or context.input_health is None:
+        return False
+    source_key = str(source_id or "").strip()
+    if not source_key:
+        return False
+    source_health = (
+        context.input_health.hotlist
+        if source_type == "hotlist"
+        else context.input_health.rss
+    )
+    return source_key in source_health.recovered_ids
+
+
 def _is_reliable_timeline(
     rank_timeline: List[dict],
     mode: str,
@@ -291,6 +311,9 @@ def _adapt_hotlist_title_item(
         source_id=title_item.get("source_id"),
         title=title_item.get("title", ""),
     )
+    observed_in_current_run = (
+        observed_identity in context.observed_item_identities
+    )
     return CRSourceItem(
         source_type="hotlist",
         source_id=title_item.get("source_id"),
@@ -324,8 +347,12 @@ def _adapt_hotlist_title_item(
         count=count,
         has_count=count_sig["has_count"],
         count_semantics=count_sig["count_semantics"],
-        observed_in_current_run=(
-            observed_identity in context.observed_item_identities
+        observed_in_current_run=observed_in_current_run,
+        observed_after_ingest_gap=_observed_after_ingest_gap(
+            context,
+            source_type="hotlist",
+            source_id=title_item.get("source_id"),
+            observed_in_current_run=observed_in_current_run,
         ),
     )
 
@@ -429,6 +456,9 @@ def _adapt_rss_title_item(
         title=title_item.get("title", ""),
         url=title_item.get("url") or None,
     )
+    observed_in_current_run = (
+        observed_identity in context.observed_item_identities
+    )
     return CRSourceItem(
         source_type="rss",
         source_id=None,
@@ -466,8 +496,12 @@ def _adapt_rss_title_item(
         summary=title_item.get("summary") or None,
         author=title_item.get("author") or None,
         cross_evidence_admitted=bool(title_item.get("cross_evidence_admitted")),
-        observed_in_current_run=(
-            observed_identity in context.observed_item_identities
+        observed_in_current_run=observed_in_current_run,
+        observed_after_ingest_gap=_observed_after_ingest_gap(
+            context,
+            source_type="rss",
+            source_id=title_item.get("feed_id"),
+            observed_in_current_run=observed_in_current_run,
         ),
     )
 

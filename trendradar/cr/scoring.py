@@ -382,7 +382,12 @@ def _score_item_rank_movement(item: CRSourceItem) -> tuple[float, dict[str, obje
     return 0.0, debug
 
 
-def _score_item_new_burst(item: CRSourceItem, single_source: bool) -> tuple[float, dict[str, object]]:
+def _score_item_new_burst(
+    item: CRSourceItem,
+    single_source: bool,
+    *,
+    recovery_evidence_trusted: bool = True,
+) -> tuple[float, dict[str, object]]:
     """Score new-burst for a single source item.
 
     Returns (score, debug_dict).  Score range: 0–15.
@@ -392,6 +397,17 @@ def _score_item_new_burst(item: CRSourceItem, single_source: bool) -> tuple[floa
     # Gate.
     if item.source_type != "hotlist":
         return 0.0, debug
+    if not recovery_evidence_trusted:
+        return 0.0, {
+            "rule": "ingest_recovery_state_untrusted",
+            "score": 0.0,
+        }
+    if item.observed_after_ingest_gap:
+        return 0.0, {
+            "rule": "ingest_recovery_not_event_new",
+            "source_id": item.source_id,
+            "score": 0.0,
+        }
     if item.first_crawl_of_day is True:
         return 0.0, debug
     if item.is_new is not True:
@@ -535,6 +551,7 @@ def score_growth_raw(
     candidate: CRCandidate,
     *,
     profile: CRScoringProfile | None = None,
+    input_health: CRInputHealth | None = None,
 ) -> CRComponentScore:
     """Score Growth Raw for a candidate.
 
@@ -553,14 +570,42 @@ def score_growth_raw(
     best_nb: tuple[float, dict, CRSourceItem | None] = (0.0, _zero_debug, None)
     best_rec: tuple[float, dict, CRSourceItem | None] = (0.0, _zero_debug, None)
     best_wp: tuple[float, dict, CRSourceItem | None] = (0.0, _zero_debug, None)
+    new_burst_gates: list[dict[str, object]] = []
 
     for item in items:
         rm_s, rm_d = _score_item_rank_movement(item)
         if rm_s > best_rm[0]:
             best_rm = (rm_s, rm_d, item)
 
-        nb_s, nb_d = _score_item_new_burst(item, single_source)
-        if nb_s > best_nb[0]:
+        nb_s, nb_d = _score_item_new_burst(
+            item,
+            single_source,
+            recovery_evidence_trusted=(
+                input_health.new_burst_evidence_trusted
+                if input_health is not None
+                else True
+            ),
+        )
+        if nb_d.get("rule") in {
+            "ingest_recovery_not_event_new",
+            "ingest_recovery_state_untrusted",
+        }:
+            new_burst_gates.append(
+                {
+                    "title": item.title,
+                    "source_id": item.source_id,
+                    "feed_id": item.feed_id,
+                    "rule": nb_d["rule"],
+                }
+            )
+        if nb_s > best_nb[0] or (
+            best_nb[2] is None
+            and nb_d.get("rule")
+            in {
+                "ingest_recovery_not_event_new",
+                "ingest_recovery_state_untrusted",
+            }
+        ):
             best_nb = (nb_s, nb_d, item)
 
         rec_s, rec_d = _score_item_recency_momentum(item)
@@ -578,6 +623,8 @@ def score_growth_raw(
             "title": item.title,
             "source_name": item.source_name,
             "source_id": item.source_id,
+            "feed_id": item.feed_id,
+            "observed_after_ingest_gap": item.observed_after_ingest_gap,
         }
 
     raw = best_rm[0] + best_nb[0] + best_rec[0] + best_wp[0]
@@ -585,6 +632,7 @@ def score_growth_raw(
     debug = {
         "rank_movement": {**best_rm[1], "max_item": _item_label(best_rm[2])},
         "new_burst": {**best_nb[1], "max_item": _item_label(best_nb[2])},
+        "new_burst_gates": new_burst_gates,
         "recency_momentum": {**best_rec[1], "max_item": _item_label(best_rec[2])},
         "weak_persistence": {**best_wp[1], "max_item": _item_label(best_wp[2])},
     }
@@ -1030,7 +1078,11 @@ def score_cr_candidate(
     if profile is None:
         profile = DEFAULT_CR_SCORING_PROFILE
 
-    growth = score_growth_raw(candidate, profile=profile)
+    growth = score_growth_raw(
+        candidate,
+        profile=profile,
+        input_health=input_health,
+    )
     current_heat = score_current_heat_raw(candidate, profile=profile)
     cross_layer = score_cross_layer_raw(candidate, profile=profile)
 

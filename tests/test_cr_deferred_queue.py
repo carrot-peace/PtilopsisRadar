@@ -260,6 +260,23 @@ class TestDeferredQueueStore(unittest.TestCase):
             {lower_key, stable_event_key_for_candidate(inserted)},
         )
 
+    def test_deferred_message_preserves_coverage_warning(self):
+        candidate = _presented_candidate("Coverage Event", level="alert")
+        updated, outcomes = _queue_with_candidates(
+            empty_deferred_dispatch_queue(),
+            (candidate,),
+            deferred_at="2026-07-13T01:00:00+08:00",
+            deferred_until="2026-07-13T08:00:00+08:00",
+            run_label="coverage-warning",
+            high_score_suppressed_count=0,
+            coverage_warning="Collection coverage: 1/4 (3 failed)",
+        )
+        self.assertEqual(outcomes[0].outcome, "inserted")
+        self.assertIn(
+            "Collection coverage: 1/4 (3 failed)",
+            updated.entries[0].message_text,
+        )
+
 
 class TestDeferredQueueRuntime(unittest.TestCase):
     def _seed_queue(self, path: Path, *entries: CRDeferredDispatchEntry) -> None:

@@ -20,6 +20,10 @@ REASON_HOTLIST_SUCCESS_RATIO_LOW = "hotlist_success_ratio_low"
 REASON_RSS_ALL_FAILED = "rss_all_failed"
 REASON_STALE_INPUT = "stale_input"
 
+RECOVERY_STATE_BASELINE = "baseline"
+RECOVERY_STATE_TRACKED = "tracked"
+RECOVERY_STATE_UNTRUSTED = "untrusted"
+
 
 @dataclass(frozen=True)
 class CRInputHealthPolicy:
@@ -32,6 +36,7 @@ class CRInputSourceHealth:
     configured_ids: tuple[str, ...] = ()
     successful_ids: tuple[str, ...] = ()
     failed_ids: tuple[str, ...] = ()
+    recovered_ids: tuple[str, ...] = ()
 
     @property
     def success_ratio(self) -> float | None:
@@ -50,6 +55,7 @@ class CRInputHealth:
     snapshot_generated_at: str | None = None
     snapshot_age_minutes: float | None = None
     historical_data_reused: bool = False
+    recovery_state_status: str = RECOVERY_STATE_BASELINE
     policy: CRInputHealthPolicy = field(default_factory=CRInputHealthPolicy)
     warnings: tuple[str, ...] = ()
 
@@ -63,11 +69,39 @@ class CRInputHealth:
             return "stale_input"
         return "insufficient_fresh_sources"
 
+    @property
+    def new_burst_evidence_trusted(self) -> bool:
+        return self.recovery_state_status != RECOVERY_STATE_UNTRUSTED
+
 
 def _clean_ids(values: object) -> tuple[str, ...]:
     if isinstance(values, str):
         values = (values,)
     return tuple(sorted({str(v).strip() for v in (values or ()) if str(v).strip()}))
+
+
+def _source_health(
+    *,
+    configured_ids: object,
+    successful_ids: object,
+    failed_ids: object,
+    recovered_ids: object,
+) -> CRInputSourceHealth:
+    configured = set(_clean_ids(configured_ids))
+    failed = set(_clean_ids(failed_ids))
+    successful = set(_clean_ids(successful_ids)) - failed
+    recovered = set(_clean_ids(recovered_ids))
+    if configured:
+        failed &= configured
+        successful &= configured
+        recovered &= configured
+    recovered &= successful
+    return CRInputSourceHealth(
+        configured_ids=tuple(sorted(configured)),
+        successful_ids=tuple(sorted(successful)),
+        failed_ids=tuple(sorted(failed)),
+        recovered_ids=tuple(sorted(recovered)),
+    )
 
 
 def input_item_identity(
@@ -142,19 +176,25 @@ def evaluate_cr_input_health(
     hotlist_configured_ids: object = (), hotlist_successful_ids: object = (),
     hotlist_failed_ids: object = (), rss_configured_ids: object = (),
     rss_successful_ids: object = (), rss_failed_ids: object = (),
+    hotlist_recovered_ids: object = (), rss_recovered_ids: object = (),
     observed_item_identities: object = (), snapshot_generated_at: str | None = None,
     now: datetime | None = None, historical_data_reused: bool = False,
+    recovery_state_status: str = RECOVERY_STATE_BASELINE,
     policy: CRInputHealthPolicy | None = None, warnings: object = (),
 ) -> CRInputHealth:
     """Evaluate source success and snapshot staleness without side effects."""
     effective_policy = policy or CRInputHealthPolicy()
-    hotlist = CRInputSourceHealth(
-        _clean_ids(hotlist_configured_ids), _clean_ids(hotlist_successful_ids),
-        _clean_ids(hotlist_failed_ids),
+    hotlist = _source_health(
+        configured_ids=hotlist_configured_ids,
+        successful_ids=hotlist_successful_ids,
+        failed_ids=hotlist_failed_ids,
+        recovered_ids=hotlist_recovered_ids,
     )
-    rss = CRInputSourceHealth(
-        _clean_ids(rss_configured_ids), _clean_ids(rss_successful_ids),
-        _clean_ids(rss_failed_ids),
+    rss = _source_health(
+        configured_ids=rss_configured_ids,
+        successful_ids=rss_successful_ids,
+        failed_ids=rss_failed_ids,
+        recovered_ids=rss_recovered_ids,
     )
 
     age_minutes: float | None = None
@@ -200,6 +240,7 @@ def evaluate_cr_input_health(
         snapshot_generated_at=snapshot_generated_at,
         snapshot_age_minutes=age_minutes,
         historical_data_reused=historical_data_reused,
+        recovery_state_status=str(recovery_state_status),
         policy=effective_policy,
         warnings=tuple(str(v) for v in (warnings or ())),
     )
@@ -211,6 +252,7 @@ def input_health_to_json_dict(health: CRInputHealth) -> dict[str, object]:
             "configured_ids": list(value.configured_ids),
             "successful_ids": list(value.successful_ids),
             "failed_ids": list(value.failed_ids),
+            "recovered_ids": list(value.recovered_ids),
             "success_ratio": value.success_ratio,
         }
 
@@ -223,6 +265,10 @@ def input_health_to_json_dict(health: CRInputHealth) -> dict[str, object]:
             "generated_at": health.snapshot_generated_at,
             "age_minutes": health.snapshot_age_minutes,
             "historical_data_reused": health.historical_data_reused,
+        },
+        "recovery": {
+            "state_status": health.recovery_state_status,
+            "new_burst_evidence_trusted": health.new_burst_evidence_trusted,
         },
         "policy": {
             "stale_after_minutes": health.policy.stale_after_minutes,

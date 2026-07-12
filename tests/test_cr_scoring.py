@@ -25,7 +25,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
 from trendradar.core.source_tiers import SourceTierResolver
-from trendradar.cr.input_health import evaluate_cr_input_health
+from trendradar.cr.input_health import (
+    RECOVERY_STATE_UNTRUSTED,
+    evaluate_cr_input_health,
+)
 from trendradar.cr.scoring import (
     CRComponentScore,
     CRScoringProfile,
@@ -429,6 +432,98 @@ class TestGrowthRaw(unittest.TestCase):
         )
         result = score_growth_raw(cand)
         self.assertAlmostEqual(result.debug["new_burst"]["score"], 12.0)
+
+    def test_recovered_source_item_cannot_supply_event_new_burst(self):
+        item = _make_item(
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=8,
+            first_crawl_of_day=False,
+            observed_after_ingest_gap=True,
+        )
+        candidate = _make_candidate(
+            source_items=[item],
+            source_names=["weibo"],
+            source_ids=["weibo"],
+            has_hotlist=True,
+        )
+        result = score_growth_raw(candidate)
+        self.assertEqual(result.debug["new_burst"]["score"], 0.0)
+        self.assertEqual(
+            result.debug["new_burst"]["rule"],
+            "ingest_recovery_not_event_new",
+        )
+
+    def test_healthy_source_can_supply_new_burst_beside_recovery_item(self):
+        recovered = _make_item(
+            source_id="recovered",
+            source_name="recovered",
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=2,
+            first_crawl_of_day=False,
+            observed_after_ingest_gap=True,
+        )
+        healthy = _make_item(
+            source_id="healthy",
+            source_name="healthy",
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=8,
+            first_crawl_of_day=False,
+        )
+        candidate = _make_candidate(
+            source_items=[recovered, healthy],
+            source_names=["recovered", "healthy"],
+            source_ids=["recovered", "healthy"],
+            has_hotlist=True,
+        )
+        result = score_growth_raw(candidate)
+        self.assertEqual(result.debug["new_burst"]["score"], 12.0)
+        self.assertEqual(
+            result.debug["new_burst"]["max_item"]["source_id"],
+            "healthy",
+        )
+        self.assertEqual(
+            result.debug["new_burst_gates"],
+            [
+                {
+                    "title": recovered.title,
+                    "source_id": "recovered",
+                    "feed_id": None,
+                    "rule": "ingest_recovery_not_event_new",
+                }
+            ],
+        )
+
+    def test_untrusted_recovery_state_disables_new_burst_only(self):
+        item = _make_item(
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=8,
+            first_crawl_of_day=False,
+            has_reliable_rank_timeline=True,
+            previous_observation_exists=True,
+            previous_observation_visible=True,
+            previous_visible_rank=20,
+            rank_delta=12,
+        )
+        candidate = _make_candidate(
+            source_items=[item],
+            source_names=["weibo"],
+            source_ids=["weibo"],
+            has_hotlist=True,
+        )
+        health = evaluate_cr_input_health(
+            recovery_state_status=RECOVERY_STATE_UNTRUSTED,
+        )
+        result = score_growth_raw(candidate, input_health=health)
+        self.assertEqual(result.debug["new_burst"]["score"], 0.0)
+        self.assertEqual(
+            result.debug["new_burst"]["rule"],
+            "ingest_recovery_state_untrusted",
+        )
+        self.assertGreater(result.debug["rank_movement"]["score"], 0.0)
 
     def test_new_burst_low_base_dampening(self):
         """New + rank > 50 with single source → dampened by 0.8."""

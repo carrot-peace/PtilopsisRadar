@@ -108,6 +108,8 @@ _SOURCE_ITEM_FIELDS: list[tuple[str, str]] = [
     ("normalized_rank", "Normalized Rank"),
     ("is_new", "Is New"),
     ("is_new_semantics", "Is New Semantics"),
+    ("observed_in_current_run", "Observed In Current Run"),
+    ("observed_after_ingest_gap", "Observed After Ingest Gap"),
     ("first_time", "First Time"),
     ("last_time", "Last Time"),
     ("published_at", "Published At"),
@@ -693,6 +695,15 @@ def render_cr_html_audit(
             "      <p><strong>Source ratios:</strong> hotlist="
             f"{_escape_html_text(hotlist_ratio if hotlist_ratio is not None else 'unknown')}; rss="
             f"{_escape_html_text(rss_ratio if rss_ratio is not None else 'unknown')}</p>"
+        )
+        recovery = health["recovery"]
+        recovered_hotlist = ", ".join(health["hotlist"]["recovered_ids"]) or "none"
+        recovered_rss = ", ".join(health["rss"]["recovered_ids"]) or "none"
+        lines.append(
+            "      <p><strong>Recovery:</strong> state="
+            f"{_escape_html_text(recovery['state_status'])}; "
+            f"hotlist={_escape_html_text(recovered_hotlist)}; "
+            f"rss={_escape_html_text(recovered_rss)}</p>"
         )
         lines.append(f"      <p><strong>Warnings:</strong> {_escape_html_text(warnings)}</p>")
         lines.append("    </section>")
