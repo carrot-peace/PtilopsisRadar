@@ -162,6 +162,6 @@ def format_rank_display(
             rank_str = f"[{min_rank} - {max_rank}]"
 
     trend = calculate_rank_trend(rank_timeline, ranks)
-    trend_arrow = {"up": "📈", "down": "📉"}.get(trend, "")
+    trend_arrow = {"up": "[上升]", "down": "[下降]"}.get(trend, "")
 
     return f"{rank_str} {trend_arrow}" if trend_arrow else rank_str

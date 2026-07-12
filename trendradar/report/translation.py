@@ -106,7 +106,7 @@ def translate_report_content(
             print(f"[翻译][DEBUG] === 响应结束 ===")
         expected = len(titles_to_translate)
         if result.parsed_count != expected:
-            print(f"[翻译][DEBUG] ⚠️ 行数不匹配：期望 {expected} 条，AI 返回 {result.parsed_count} 条")
+            print(f"[翻译][DEBUG] [警告] 行数不匹配：期望 {expected} 条，AI 返回 {result.parsed_count} 条")
         unchanged_count = 0
         for i, res in enumerate(result.results):
             if not res.success and res.error:

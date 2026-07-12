@@ -413,9 +413,8 @@ class TestWriteTextArtifact(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / "f.txt"
             write_text_artifact(target, content)
-            self.assertEqual(
-                target.read_text(encoding="utf-8", newline=""), content
-            )
+            with target.open("r", encoding="utf-8", newline="") as handle:
+                self.assertEqual(handle.read(), content)
 
     def test_uses_utf8_by_default(self):
         content = "热点新闻"

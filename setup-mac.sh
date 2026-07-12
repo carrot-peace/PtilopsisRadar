@@ -16,12 +16,12 @@ echo ""
 # 获取项目根目录
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-echo -e "📍 项目目录: ${BLUE}${PROJECT_ROOT}${NC}"
+echo -e " 项目目录: ${BLUE}${PROJECT_ROOT}${NC}"
 echo ""
 
 # 检查 UV 是否已安装
 if ! command -v uv &> /dev/null; then
-    echo -e "${YELLOW}[1/3] 🔧 UV 未安装，正在自动安装...${NC}"
+    echo -e "${YELLOW}[1/3]  UV 未安装，正在自动安装...${NC}"
     echo "提示: UV 是一个快速的 Python 包管理器，只需安装一次"
     echo ""
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -35,7 +35,7 @@ if ! command -v uv &> /dev/null; then
 
     # 验证 UV 是否真正可用
     if ! command -v uv &> /dev/null; then
-        echo -e "${RED}❌ [错误] UV 安装失败${NC}"
+        echo -e "${RED}[失败] UV 安装失败${NC}"
         echo ""
         echo "可能的原因："
         echo "  1. 网络连接问题，无法下载安装脚本"
@@ -49,16 +49,16 @@ if ! command -v uv &> /dev/null; then
         exit 1
     fi
 
-    echo -e "${GREEN}✅ [成功] UV 已安装${NC}"
-    echo -e "${YELLOW}⚠️  请重新运行此脚本以继续${NC}"
+    echo -e "${GREEN}[成功] UV 已安装${NC}"
+    echo -e "${YELLOW}[警告]  请重新运行此脚本以继续${NC}"
     exit 0
 else
-    echo -e "${GREEN}[1/3] ✅ UV 已安装${NC}"
+    echo -e "${GREEN}[1/3] [成功] UV 已安装${NC}"
     uv --version
 fi
 
 echo ""
-echo "[2/3] 📦 安装项目依赖..."
+echo "[2/3]  安装项目依赖..."
 echo "提示: 这可能需要 1-2 分钟，请耐心等待"
 echo ""
 
@@ -67,18 +67,18 @@ uv sync
 
 if [ $? -ne 0 ]; then
     echo ""
-    echo -e "${RED}❌ [错误] 依赖安装失败${NC}"
+    echo -e "${RED}[失败] 依赖安装失败${NC}"
     echo "请检查网络连接后重试"
     exit 1
 fi
 
 echo ""
-echo -e "${GREEN}[3/3] ✅ 检查配置文件...${NC}"
+echo -e "${GREEN}[3/3] [成功] 检查配置文件...${NC}"
 echo ""
 
 # 检查配置文件
 if [ ! -f "config/config.yaml" ]; then
-    echo -e "${YELLOW}⚠️  [警告] 未找到配置文件: config/config.yaml${NC}"
+    echo -e "${YELLOW}[警告] 未找到配置文件: config/config.yaml${NC}"
     echo "请确保配置文件存在"
     echo ""
 fi
@@ -94,11 +94,11 @@ echo -e "${BOLD}╔════════════════════�
 echo -e "${BOLD}║           部署完成！                   ║${NC}"
 echo -e "${BOLD}╚════════════════════════════════════════╝${NC}"
 echo ""
-echo "📋 下一步操作:"
+echo " 下一步操作:"
 echo ""
-echo "  1️⃣  打开 Cherry Studio"
-echo "  2️⃣  进入 设置 > MCP Servers > 添加服务器"
-echo "  3️⃣  填入以下配置:"
+echo "  1  打开 Cherry Studio"
+echo "  2  进入 设置 > MCP Servers > 添加服务器"
+echo "  3  填入以下配置:"
 echo ""
 echo "      名称: TrendRadar"
 echo "      描述: 新闻热点聚合工具"
@@ -112,7 +112,7 @@ echo -e "        ${BLUE}python${NC}"
 echo -e "        ${BLUE}-m${NC}"
 echo -e "        ${BLUE}mcp_server.server${NC}"
 echo ""
-echo "  4️⃣  保存并启用 MCP 开关"
+echo "  4  保存并启用 MCP 开关"
 echo ""
-echo "📖 详细教程请查看: README-Cherry-Studio.md，本窗口别关，待会儿用于填入参数"
+echo " 详细教程请查看: README-Cherry-Studio.md，本窗口别关，待会儿用于填入参数"
 echo ""
