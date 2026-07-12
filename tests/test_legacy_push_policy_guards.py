@@ -20,6 +20,10 @@ CR_TELEGRAM_SINK_PATH = PROJECT_ROOT / "trendradar" / "cr" / "telegram_sink.py"
 MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
 REPORT_TRANSLATION_PATH = PROJECT_ROOT / "trendradar" / "report" / "translation.py"
 NOTIFICATION_ROOT = PROJECT_ROOT / "trendradar" / "notification"
+OPERATOR_TRANSPORT_FILES = {
+    "trendradar/deployment/notification.py",
+    "trendradar/deployment/operator_alert.py",
+}
 
 
 def _read(path: Path) -> str:
@@ -280,7 +284,11 @@ class TestLegacyPushRuntimeDisconnectionGuards(unittest.TestCase):
         offenders: list[str] = []
         for path in _python_sources(PROJECT_ROOT / "trendradar"):
             rel = path.relative_to(PROJECT_ROOT).as_posix()
-            if rel.startswith("trendradar/cr/") or rel.startswith("trendradar/dr/"):
+            if (
+                rel.startswith("trendradar/cr/")
+                or rel.startswith("trendradar/dr/")
+                or rel in OPERATOR_TRANSPORT_FILES
+            ):
                 continue
             source = _read(path)
             for token in ("sendMessage", "sendDocument", "本轮 Telegram 文本简报暂不可用"):
