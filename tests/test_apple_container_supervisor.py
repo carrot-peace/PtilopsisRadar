@@ -194,7 +194,9 @@ class SupervisorFixture:
                     }
                 ),
                 "TREND_RADAR_ALERT_REPEAT": "3600",
-                "TREND_RADAR_READINESS_TIMEOUT": "1",
+                # Normal create/start checks need room for several subprocesses
+                # on slower macOS runners. Failure tests override this budget.
+                "TREND_RADAR_READINESS_TIMEOUT": "5",
                 "TREND_RADAR_READINESS_INTERVAL": "1",
                 "TREND_RADAR_COMMAND_TIMEOUT": "2",
                 "PYTHONPATH": str(ROOT),
@@ -281,6 +283,7 @@ class TestAppleContainerSupervisor(unittest.TestCase):
             result = fixture.run(
                 FAKE_CONTAINER_MISSING="1",
                 FAKE_CURL_STATUS="22",
+                TREND_RADAR_READINESS_TIMEOUT="1",
             )
             self.assertEqual(result.returncode, 69)
             self.assertIn("container_not_ready", fixture.supervisor_log())
@@ -292,6 +295,7 @@ class TestAppleContainerSupervisor(unittest.TestCase):
                 FAKE_CONTAINER_MISSING="1",
                 FAKE_INSPECT_SLEEP="10",
                 TREND_RADAR_COMMAND_TIMEOUT="1",
+                TREND_RADAR_READINESS_TIMEOUT="2",
             )
             elapsed = time.monotonic() - started
             self.assertEqual(result.returncode, 69)
@@ -306,6 +310,7 @@ class TestAppleContainerSupervisor(unittest.TestCase):
             result = fixture.run(
                 FAKE_INSPECT_JSON=json.dumps(fixture.inspect_json),
                 FAKE_AFTER_INSPECT_JSON=json.dumps(after),
+                TREND_RADAR_READINESS_TIMEOUT="1",
             )
             self.assertEqual(result.returncode, 69)
             self.assertIn("container_not_ready", fixture.supervisor_log())
