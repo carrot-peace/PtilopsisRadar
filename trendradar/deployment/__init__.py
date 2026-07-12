@@ -1,2 +1,1 @@
 """Deployment-time operator utilities."""
-
