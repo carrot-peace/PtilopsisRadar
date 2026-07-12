@@ -261,7 +261,7 @@ def report(res, word_groups, total_input, args):
     print_group_counts(bg_labels, counts, total_input, tops, args)
     bg_total = sum(counts.get(lbl, 0) for lbl in bg_labels)
     print(f"\n背景表命中合计: {bg_total}"
-          + ("   ⚠️ 背景表占比偏高，留意是否抢主屏" if total_input and bg_total / total_input > 0.25 else ""))
+          + ("   [警告] 背景表占比偏高，留意是否抢主屏" if total_input and bg_total / total_input > 0.25 else ""))
 
     hr("3. 疑似过宽组")
     pct = args.over_broad_pct / 100.0
@@ -334,7 +334,7 @@ def report(res, word_groups, total_input, args):
     if bg_steal:
         for title, rank, winner, matched in bg_steal[: args.top]:
             others = [m for m in matched[1:] if not is_background(m)]
-            print(f"    ⚠️ [{winner}] {title}  也命中: {others}")
+            print(f"    [警告] [{winner}] {title}  也命中: {others}")
     else:
         print("    （0，符合预期：背景表在主表之后，抢不到主表已接走的标题）")
 
@@ -366,7 +366,7 @@ def print_targeted_swallow(res, title, winner_set, swallowed_set, args):
     print(f"    命中数: {len(hits)}")
     for t, rank, winner, matched in hits[: args.top]:
         swallowed = [m for m in matched[1:] if m in swallowed_set]
-        print(f"    ⚠️ [{winner}] {t}  本应也可进: {swallowed}")
+        print(f"    [警告] [{winner}] {t}  本应也可进: {swallowed}")
 
 
 def write_csv(assignments, path):

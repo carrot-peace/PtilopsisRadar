@@ -12,21 +12,21 @@ set "PROJECT_ROOT=%~dp0"
 REM 移除末尾的反斜杠
 if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
 
-echo 📍 项目目录: %PROJECT_ROOT%
+echo  项目目录: %PROJECT_ROOT%
 echo.
 
 REM 切换到项目目录
 cd /d "%PROJECT_ROOT%"
 if %errorlevel% neq 0 (
-    echo ❌ 无法访问项目目录
+    echo [失败] 无法访问项目目录
     pause
     exit /b 1
 )
 
 REM 验证项目结构
-echo [0/4] 🔍 验证项目结构...
+echo [0/4]  验证项目结构...
 if not exist "pyproject.toml" (
-    echo ❌ 未找到 pyproject.toml 文件: %PROJECT_ROOT%
+    echo [失败] 未找到 pyproject.toml 文件: %PROJECT_ROOT%
     echo.
     echo 请检查:
     echo   1. setup-windows.bat 是否在项目根目录?
@@ -38,23 +38,23 @@ if not exist "pyproject.toml" (
     pause
     exit /b 1
 )
-echo ✅ pyproject.toml 已找到
+echo [成功] pyproject.toml 已找到
 echo.
 
 REM 检查 Python
-echo [1/4] 🐍 检查 Python...
+echo [1/4]  检查 Python...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo ❌ 未检测到 Python，请先安装 Python 3.10+
+    echo [失败] 未检测到 Python，请先安装 Python 3.10+
     echo 下载地址: https://www.python.org/downloads/
     pause
     exit /b 1
 )
-for /f "tokens=*" %%i in ('python --version') do echo ✅ %%i
+for /f "tokens=*" %%i in ('python --version') do echo [成功] %%i
 echo.
 
 REM 检查 UV
-echo [2/4] 🔧 检查 UV...
+echo [2/4]  检查 UV...
 where uv >nul 2>&1
 if %errorlevel% neq 0 (
     echo UV 未安装，正在自动安装...
@@ -70,7 +70,7 @@ if %errorlevel% neq 0 (
         
         if %errorlevel% neq 0 (
             echo.
-            echo ❌ 自动安装失败
+            echo [失败] 自动安装失败
             echo.
             echo 请手动安装 UV，可选方法:
             echo.
@@ -90,9 +90,9 @@ if %errorlevel% neq 0 (
     )
     
     echo.
-    echo ✅ UV 安装完成！
+    echo [成功] UV 安装完成！
     echo.
-    echo ⚠️  重要: 请按照以下步骤操作:
+    echo [警告]  重要: 请按照以下步骤操作:
     echo   1. 关闭此窗口
     echo   2. 重新打开命令提示符（或 PowerShell）
     echo   3. 回到项目目录: %PROJECT_ROOT%
@@ -101,11 +101,11 @@ if %errorlevel% neq 0 (
     pause
     exit /b 0
 ) else (
-    for /f "tokens=*" %%i in ('uv --version') do echo ✅ %%i
+    for /f "tokens=*" %%i in ('uv --version') do echo [成功] %%i
 )
 echo.
 
-echo [3/4] 📦 安装项目依赖...
+echo [3/4]  安装项目依赖...
 echo 工作目录: %PROJECT_ROOT%
 echo.
 
@@ -114,7 +114,7 @@ cd /d "%PROJECT_ROOT%"
 uv sync
 if %errorlevel% neq 0 (
     echo.
-    echo ❌ 依赖安装失败
+    echo [失败] 依赖安装失败
     echo.
     echo 可能的原因:
     echo   1. 网络连接问题
@@ -132,12 +132,12 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo.
-echo ✅ 依赖安装成功
+echo [成功] 依赖安装成功
 echo.
 
-echo [4/4] ⚙️  检查配置文件...
+echo [4/4]   检查配置文件...
 if not exist "config\config.yaml" (
-    echo ⚠️  配置文件不存在: config\config.yaml
+    echo [警告]  配置文件不存在: config\config.yaml
     if exist "config\config.example.yaml" (
         echo.
         echo 创建配置文件:
@@ -147,7 +147,7 @@ if not exist "config\config.yaml" (
     )
     echo.
 ) else (
-    echo ✅ config\config.yaml 已存在
+    echo [成功] config\config.yaml 已存在
 )
 echo.
 
@@ -162,7 +162,7 @@ echo ==========================================
 echo            部署完成！
 echo ==========================================
 echo.
-echo 📋 MCP 服务器配置信息（用于 Claude Desktop）:
+echo  MCP 服务器配置信息（用于 Claude Desktop）:
 echo.
 echo   命令: %UV_PATH%
 echo   工作目录: %PROJECT_ROOT%
@@ -175,7 +175,7 @@ echo     python
 echo     -m
 echo     mcp_server.server
 echo.
-echo 📖 详细教程: README-Cherry-Studio.md
+echo  详细教程: README-Cherry-Studio.md
 echo.
 echo.
 pause

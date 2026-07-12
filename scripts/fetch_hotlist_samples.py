@@ -139,7 +139,7 @@ def main():
     )
 
     if failed_ids:
-        print(f"⚠️ 失败/丢弃的平台：{', '.join(failed_ids)}")
+        print(f"[警告] 失败/丢弃的平台：{', '.join(failed_ids)}")
 
     # 汇总：标题去重（保留最优 rank）；同时保留每平台 (title, rank) 入库
     title_best_rank = {}

@@ -86,7 +86,7 @@ def validate_paired_configs(
     unique_lengths = set(lengths.values())
 
     if len(unique_lengths) > 1:
-        print(f"❌ {channel_name} 配置错误：配对配置数量不一致，将跳过该渠道推送")
+        print(f"[失败] {channel_name} 配置错误：配对配置数量不一致，将跳过该渠道推送")
         for key, length in lengths.items():
             print(f"   - {key}: {length} 个")
         return False, 0
@@ -115,12 +115,12 @@ def limit_accounts(
 
     Examples:
         >>> limit_accounts(["a1", "a2", "a3"], 2, "飞书")
-        ⚠️ 飞书 配置了 3 个账号，超过最大限制 2，只使用前 2 个
+        [警告] 飞书 配置了 3 个账号，超过最大限制 2，只使用前 2 个
         ['a1', 'a2']
     """
     if len(accounts) > max_count:
-        print(f"⚠️ {channel_name} 配置了 {len(accounts)} 个账号，超过最大限制 {max_count}，只使用前 {max_count} 个")
-        print(f"   ⚠️ 警告：如果你是 fork 用户，过多账号可能导致 GitHub Actions 运行时间过长，存在账号风险")
+        print(f"[警告] {channel_name} 配置了 {len(accounts)} 个账号，超过最大限制 {max_count}，只使用前 {max_count} 个")
+        print(f"   [警告] 如果你是 fork 用户，过多账号可能导致 GitHub Actions 运行时间过长，存在账号风险")
         return accounts[:max_count]
     return accounts
 

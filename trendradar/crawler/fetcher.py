@@ -195,7 +195,7 @@ class DataFetcher:
                     if expected_domain:
                         bad_reason = self._check_domain_safety(items, expected_domain)
                         if bad_reason:
-                            print(f"⚠️ 安全警告: {name}({id_value}) 返回数据未通过域名安全校验！")
+                            print(f"[警告] {name}({id_value}) 返回数据未通过域名安全校验！")
                             print(f"   预期域名: https://*.{expected_domain}")
                             print(f"   异常来源: {bad_reason}")
                             print(f"   当前 API 地址: {self.api_url}")

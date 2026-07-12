@@ -63,7 +63,7 @@ def format_title_for_platform(
         else:
             formatted_title = cleaned_title
 
-        title_prefix = "🆕 " if title_data.get("is_new") else ""
+        title_prefix = "[新增] " if title_data.get("is_new") else ""
 
         if show_source:
             result = f"<font color='grey'>[{title_data['source_name']}]</font> {title_prefix}{formatted_title}"
@@ -87,7 +87,7 @@ def format_title_for_platform(
         else:
             formatted_title = cleaned_title
 
-        title_prefix = "🆕 " if title_data.get("is_new") else ""
+        title_prefix = "[新增] " if title_data.get("is_new") else ""
 
         if show_source:
             result = f"[{title_data['source_name']}] {title_prefix}{formatted_title}"
@@ -112,7 +112,7 @@ def format_title_for_platform(
         else:
             formatted_title = cleaned_title
 
-        title_prefix = "🆕 " if title_data.get("is_new") else ""
+        title_prefix = "[新增] " if title_data.get("is_new") else ""
 
         if show_source:
             result = f"[{title_data['source_name']}] {title_prefix}{formatted_title}"
@@ -136,7 +136,7 @@ def format_title_for_platform(
         else:
             formatted_title = cleaned_title
 
-        title_prefix = "🆕 " if title_data.get("is_new") else ""
+        title_prefix = "[新增] " if title_data.get("is_new") else ""
 
         if show_source:
             result = f"[{title_data['source_name']}] {title_prefix}{formatted_title}"
@@ -160,7 +160,7 @@ def format_title_for_platform(
         else:
             formatted_title = cleaned_title
 
-        title_prefix = "🆕 " if title_data.get("is_new") else ""
+        title_prefix = "[新增] " if title_data.get("is_new") else ""
 
         if show_source:
             result = f"[{title_data['source_name']}] {title_prefix}{formatted_title}"
@@ -186,7 +186,7 @@ def format_title_for_platform(
         else:
             formatted_title = cleaned_title
 
-        title_prefix = "🆕 " if title_data.get("is_new") else ""
+        title_prefix = "[新增] " if title_data.get("is_new") else ""
 
         if show_source:
             result = f"[{title_data['source_name']}] {title_prefix}{formatted_title}"
@@ -244,7 +244,7 @@ def format_title_for_platform(
             formatted_title += f" <font color='green'>({title_data['count']}次)</font>"
 
         if title_data.get("is_new"):
-            formatted_title = f"<div class='new-title'>🆕 {formatted_title}</div>"
+            formatted_title = f"<div class='new-title'>[新增] {formatted_title}</div>"
 
         return formatted_title
 
