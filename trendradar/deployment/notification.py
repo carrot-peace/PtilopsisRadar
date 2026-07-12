@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import fcntl
 import hashlib
 import json
 import logging
@@ -12,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import IO, Mapping, Protocol
 
 from trendradar.telegram_bot.access import build_telegram_access_config
 
@@ -21,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_STATE_PATH = Path("output/meta/deployment_notification.json")
 DEFAULT_API_BASE_URL = "https://api.telegram.org"
+STATE_SCHEMA_V1 = "deployment-notification-v1"
+STATE_SCHEMA_V2 = "deployment-notification-v2"
 
 
 @dataclass(frozen=True)
@@ -150,29 +154,84 @@ def _owner_hash(chat_id: str) -> str:
     return hashlib.sha256(chat_id.encode("utf-8")).hexdigest()
 
 
-def _load_state(path: Path, identity_key: str) -> set[str]:
+class InvalidDeploymentState(ValueError):
+    """Raised when persisted notification state cannot be trusted."""
+
+
+def _is_sha256_hex(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 64:
+        return False
+    try:
+        int(value, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def _hashes(values: object) -> set[str]:
+    if not isinstance(values, list) or not all(
+        _is_sha256_hex(value) for value in values
+    ):
+        raise InvalidDeploymentState("invalid delivered owner hashes")
+    return set(values)
+
+
+def _load_state(path: Path) -> tuple[dict[str, set[str]], bool]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, ValueError, TypeError):
-        return set()
-    if not isinstance(data, dict) or data.get("identity_key") != identity_key:
-        return set()
-    values = data.get("delivered_owner_hashes") or []
-    return {str(value) for value in values if str(value)}
+    except FileNotFoundError:
+        return {}, False
+    except (OSError, ValueError, TypeError) as exc:
+        raise InvalidDeploymentState(type(exc).__name__) from exc
+
+    if not isinstance(data, dict):
+        raise InvalidDeploymentState("state root is not an object")
+
+    schema = data.get("schema_version")
+    if schema == STATE_SCHEMA_V1:
+        identity_key = data.get("identity_key")
+        if not _is_sha256_hex(identity_key):
+            raise InvalidDeploymentState("v1 identity key is missing")
+        return {
+            identity_key: _hashes(data.get("delivered_owner_hashes"))
+        }, True
+
+    if schema != STATE_SCHEMA_V2:
+        raise InvalidDeploymentState("unsupported state schema")
+    raw_identities = data.get("identities")
+    if not isinstance(raw_identities, dict):
+        raise InvalidDeploymentState("v2 identities are missing")
+
+    identities: dict[str, set[str]] = {}
+    for identity_key, entry in raw_identities.items():
+        if not _is_sha256_hex(identity_key):
+            raise InvalidDeploymentState("invalid identity key")
+        if not isinstance(entry, dict):
+            raise InvalidDeploymentState("invalid identity entry")
+        identities[identity_key] = _hashes(
+            entry.get("delivered_owner_hashes")
+        )
+    return identities, False
 
 
 def _write_state(
     path: Path,
     *,
-    identity_key: str,
-    delivered_owner_hashes: set[str],
+    identities: Mapping[str, set[str]],
     updated_at: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "schema_version": "deployment-notification-v1",
-        "identity_key": identity_key,
-        "delivered_owner_hashes": sorted(delivered_owner_hashes),
+        "schema_version": STATE_SCHEMA_V2,
+        "identities": {
+            identity_key: {
+                "delivered_owner_hashes": sorted(delivered_owner_hashes),
+                "updated_at": updated_at,
+            }
+            for identity_key, delivered_owner_hashes in sorted(
+                identities.items()
+            )
+        },
         "updated_at": updated_at,
     }
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -181,6 +240,14 @@ def _write_state(
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def _lock_state(path: Path) -> IO[str]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_file = lock_path.open("a+", encoding="utf-8")
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    return lock_file
 
 
 def render_deployment_message(
@@ -210,11 +277,17 @@ def render_deployment_message(
 def notify_deployment(
     env: Mapping[str, str],
     *,
+    health: str,
     state_path: str | Path = DEFAULT_STATE_PATH,
     sender: DeploymentTelegramSender | None = None,
     now: datetime | None = None,
 ) -> DeploymentNotificationResult:
     """Notify each configured owner once for the current deployment identity."""
+    health_text = str(health or "").strip()
+    if not health_text:
+        logger.error("Deployment notification failed: explicit health is required")
+        return DeploymentNotificationResult(status="failed_missing_health")
+
     identity = identity_from_env(env)
     if not identity.stable:
         logger.warning(
@@ -244,16 +317,6 @@ def notify_deployment(
             failed_owner_count=len(owners),
         )
 
-    state = Path(state_path)
-    delivered = _load_state(state, identity.key)
-    pending = [owner for owner in owners if _owner_hash(owner) not in delivered]
-    if not pending:
-        return DeploymentNotificationResult(
-            status="already_notified",
-            identity_key=identity.key,
-            delivered_owner_count=len(owners),
-        )
-
     effective_now = now or datetime.now(timezone.utc)
     if effective_now.tzinfo is None:
         effective_now = effective_now.replace(tzinfo=timezone.utc)
@@ -261,10 +324,7 @@ def notify_deployment(
     message = render_deployment_message(
         identity,
         started_at=started_at,
-        health=_clean(
-            env.get("PTILOPSIS_DEPLOYMENT_HEALTH"),
-            "startup checks passed",
-        ),
+        health=health_text,
     )
     transport = sender or UrllibDeploymentTelegramSender()
     api_base_url = _clean(
@@ -277,46 +337,112 @@ def notify_deployment(
     except (TypeError, ValueError):
         timeout = 10.0
 
+    state = Path(state_path)
+    try:
+        lock_file = _lock_state(state)
+    except OSError as exc:
+        logger.error(
+            "Deployment notification state lock failed: %s", type(exc).__name__
+        )
+        return DeploymentNotificationResult(
+            status="failed_state_access",
+            identity_key=identity.key,
+            failed_owner_count=len(owners),
+        )
+
     succeeded = 0
     failed = 0
     details: list[str] = []
-    for owner in pending:
+    with lock_file:
         try:
-            result = transport.send(
-                bot_token=bot_token,
-                chat_id=owner,
-                text=message,
-                api_base_url=api_base_url,
-                timeout_seconds=timeout,
-            )
-        except Exception as exc:  # noqa: BLE001 - deployment notification is non-fatal
+            identities, migrated = _load_state(state)
+        except InvalidDeploymentState as exc:
             logger.error(
-                "Deployment notification transport failed for owner hash %s: %s",
-                _owner_hash(owner)[:12],
-                type(exc).__name__,
+                "Deployment notification state is invalid; refusing to send: %s",
+                str(exc),
             )
-            failed += 1
-            details.append(f"transport_error:{type(exc).__name__}")
-            continue
-
-        details.append(result.detail)
-        if not result.ok:
-            failed += 1
-            logger.error(
-                "Deployment notification rejected for owner hash %s: %s",
-                _owner_hash(owner)[:12],
-                result.detail,
+            return DeploymentNotificationResult(
+                status="failed_invalid_state",
+                identity_key=identity.key,
+                failed_owner_count=len(owners),
+                details=("invalid_state",),
             )
-            continue
 
-        succeeded += 1
-        delivered.add(_owner_hash(owner))
-        _write_state(
-            state,
-            identity_key=identity.key,
-            delivered_owner_hashes=delivered,
-            updated_at=effective_now.isoformat(),
-        )
+        delivered = identities.setdefault(identity.key, set())
+        pending = [
+            owner for owner in owners if _owner_hash(owner) not in delivered
+        ]
+        if not pending:
+            if migrated:
+                try:
+                    _write_state(
+                        state,
+                        identities=identities,
+                        updated_at=effective_now.isoformat(),
+                    )
+                except OSError as exc:
+                    logger.error(
+                        "Deployment notification state migration failed: %s",
+                        type(exc).__name__,
+                    )
+                    return DeploymentNotificationResult(
+                        status="failed_state_write",
+                        identity_key=identity.key,
+                        failed_owner_count=len(owners),
+                    )
+            return DeploymentNotificationResult(
+                status="already_notified",
+                identity_key=identity.key,
+                delivered_owner_count=len(owners),
+            )
+
+        for owner in pending:
+            try:
+                result = transport.send(
+                    bot_token=bot_token,
+                    chat_id=owner,
+                    text=message,
+                    api_base_url=api_base_url,
+                    timeout_seconds=timeout,
+                )
+            except Exception as exc:  # noqa: BLE001 - notification is non-fatal
+                logger.error(
+                    "Deployment notification transport failed for owner hash %s: %s",
+                    _owner_hash(owner)[:12],
+                    type(exc).__name__,
+                )
+                failed += 1
+                details.append(f"transport_error:{type(exc).__name__}")
+                continue
+
+            details.append(result.detail)
+            if not result.ok:
+                failed += 1
+                logger.error(
+                    "Deployment notification rejected for owner hash %s: %s",
+                    _owner_hash(owner)[:12],
+                    result.detail,
+                )
+                continue
+
+            delivered.add(_owner_hash(owner))
+            try:
+                _write_state(
+                    state,
+                    identities=identities,
+                    updated_at=effective_now.isoformat(),
+                )
+            except OSError as exc:
+                logger.error(
+                    "Deployment notification state write failed after delivery to "
+                    "owner hash %s: %s",
+                    _owner_hash(owner)[:12],
+                    type(exc).__name__,
+                )
+                failed += 1
+                details.append(f"state_write_error:{type(exc).__name__}")
+                break
+            succeeded += 1
 
     status = "sent" if failed == 0 else "partial_failure"
     return DeploymentNotificationResult(
@@ -331,7 +457,16 @@ def notify_deployment(
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    result = notify_deployment(os.environ)
+    parser = argparse.ArgumentParser(
+        description="Notify configured owners after verified deployment startup"
+    )
+    parser.add_argument(
+        "--health",
+        required=True,
+        help="Explicit summary of startup checks that have already passed",
+    )
+    args = parser.parse_args()
+    result = notify_deployment(os.environ, health=args.health)
     logger.info(
         "Deployment notification result: status=%s attempted=%d delivered=%d failed=%d",
         result.status,
@@ -339,7 +474,10 @@ def main() -> int:
         result.delivered_owner_count,
         result.failed_owner_count,
     )
-    return 1 if result.failed_owner_count else 0
+    failed = bool(
+        result.failed_owner_count or result.status.startswith("failed_")
+    )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -200,7 +200,7 @@ Requires macOS 26+ with [Apple container](https://github.com/apple/container) v1
 
 ```bash
 # Build image
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 
 # Prepare .env
 cp docker/.env.example docker/.env
@@ -231,6 +231,9 @@ See [`docs/deployment/apple-container-cutover.md`](docs/deployment/apple-contain
 ### Docker Deployment
 
 ```bash
+# Optional: build the crawler image locally with a unique deployment identity
+scripts/docker/build-image.sh wantcat/trendradar:latest
+
 cd docker
 cp .env.example .env
 # Edit .env to configure environment variables

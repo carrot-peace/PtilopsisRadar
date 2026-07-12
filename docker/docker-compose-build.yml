@@ -3,6 +3,14 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        # Defaults keep the unrelated MCP service independently buildable.
+        # The crawler Dockerfile rejects these sentinel values, so supported
+        # crawler builds must still go through scripts/docker/build-image.sh.
+        PTILOPSIS_BUILD_COMMIT: ${PTILOPSIS_BUILD_COMMIT:-unknown}
+        PTILOPSIS_BUILD_ID: ${PTILOPSIS_BUILD_ID:-unknown}
+        PTILOPSIS_DEPLOYMENT_IMAGE_NAME: ${PTILOPSIS_DEPLOYMENT_IMAGE_NAME:-unknown}
+    image: ${PTILOPSIS_DEPLOYMENT_IMAGE_NAME:-wantcat/trendradar:latest}
     container_name: trendradar
     restart: unless-stopped
 
