@@ -20,10 +20,14 @@ buzzing-baking-moon (Rule 4, V3b).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Set
+
+
+logger = logging.getLogger(__name__)
 
 # NOTE: yaml is imported lazily inside the loader so this module (and the
 # clustering import chain) does not hard-depend on PyYAML at import time.
@@ -60,7 +64,7 @@ def load_entity_resources(config_dir: str = "config") -> EntityResources:
     """Load entity resources from ``<config_dir>/cr_entity_dictionary.yaml``.
 
     Mirrors ``core.loader._load_source_tiers_data``: missing file, malformed
-    YAML, or null fields all degrade gracefully to empty resources (prints a
+    YAML, or null fields all degrade gracefully to empty resources (logs a
     warning, never raises).  Result is cached per resolved path.
     """
     path = Path(config_dir) / DEFAULT_DICTIONARY_FILENAME
@@ -75,20 +79,20 @@ def load_entity_resources(config_dir: str = "config") -> EntityResources:
 
 def _load_entity_resources_uncached(path: Path) -> EntityResources:
     if not path.exists():
-        print(f"[实体词典] 未找到: {path}，跨语言实体匹配按空词典降级")
+        logger.warning("[实体词典] 未找到: %s，跨语言实体匹配按空词典降级", path)
         return _EMPTY_RESOURCES
 
     try:
         import yaml
     except ImportError:
-        print("[实体词典] PyYAML 不可用，跨语言实体匹配按空词典降级")
+        logger.warning("[实体词典] PyYAML 不可用，跨语言实体匹配按空词典降级")
         return _EMPTY_RESOURCES
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
     except Exception as e:  # noqa: BLE001 - any parse error degrades gracefully
-        print(f"[实体词典] 解析失败 ({e})，跨语言实体匹配按空词典降级")
+        logger.warning("[实体词典] 解析失败 (%s)，跨语言实体匹配按空词典降级", e)
         return _EMPTY_RESOURCES
 
     if not isinstance(data, dict):
@@ -111,7 +115,12 @@ def _load_entity_resources_uncached(path: Path) -> EntityResources:
 
     # Log counts on success too: a 0/0 load (e.g. wrong cwd) would otherwise make
     # cross-language matching silently ineffective.
-    print(f"[实体词典] 加载成功: {path}（dictionary {len(dictionary)} 条, stoplist {len(stoplist)} 条）")
+    logger.info(
+        "[实体词典] 加载成功: %s（dictionary %d 条, stoplist %d 条）",
+        path,
+        len(dictionary),
+        len(stoplist),
+    )
     return EntityResources(dictionary=dictionary, stoplist=stoplist)
 
 
