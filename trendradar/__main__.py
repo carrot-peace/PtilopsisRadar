@@ -931,10 +931,14 @@ class NewsAnalyzer:
             _cr_rss_stats = rss_items
             from trendradar.cr.models import CRClusterConfig
             from trendradar.cr.pipeline import CRPipelineConfig
-            from trendradar.cr.scoring import CRScoringProfile
+            from trendradar.cr.scoring import (
+                CRScoringProfile,
+                TIERED_CR_SCORING_PROFILE_VERSION,
+            )
 
             _pipeline_cluster_cfg = CRClusterConfig()
             _pipeline_scoring_cfg = CRScoringProfile(
+                profile_version=TIERED_CR_SCORING_PROFILE_VERSION,
                 source_tier_resolver=self.ctx.source_tier_resolver,
             )
             try:

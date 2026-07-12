@@ -142,6 +142,10 @@ def _compute_evidence_multiplier(
 # ---------------------------------------------------------------------------
 
 
+LEGACY_CR_SCORING_PROFILE_VERSION = "cr-score-v1.1"
+TIERED_CR_SCORING_PROFILE_VERSION = "cr-score-v1.2-tiered"
+
+
 @dataclass(frozen=True)
 class CRScoringProfile:
     """Scoring profile with caps and thresholds.
@@ -150,7 +154,7 @@ class CRScoringProfile:
     the project runtime config (config.yaml).
     """
 
-    profile_version: str = "cr-score-v1.1"
+    profile_version: str = LEGACY_CR_SCORING_PROFILE_VERSION
 
     alert_threshold: float = 60.0
     urgent_threshold: float = 80.0
