@@ -382,22 +382,43 @@ class TestSelectedCandidate(unittest.TestCase):
             decision_level=DECISION_URGENT,
             total_score=90.0,
         )
-        expected_event_key = stable_event_key_for_candidate(base)
-        for pc in (base, cluster_only, candidate_id_only, url_only):
-            pipeline = _make_pipeline(
-                cr_a_candidates=(pc,),
-                presented_candidates=(pc,),
-                cr_a_text="body",
-            )
-            plan = build_cr_a_dispatch_plan(pipeline)
-            d = cr_dispatch_plan_to_json_dict(
-                plan,
-                dispatch_mode="artifact",
-                presented_candidates=(pc,),
-                cr_a_candidates=(pc,),
-            )
-            self.assertEqual(stable_event_key_for_candidate(pc), expected_event_key)
-            self.assertEqual(d["selected_event_key"], expected_event_key)
+        variants = {
+            "base": base,
+            "cluster_key": cluster_only,
+            "candidate_id": candidate_id_only,
+            "representative_url": url_only,
+        }
+        selected_event_keys = []
+
+        for variant_name, pc in variants.items():
+            with self.subTest(variant=variant_name):
+                pipeline = _make_pipeline(
+                    cr_a_candidates=(pc,),
+                    presented_candidates=(pc,),
+                    cr_a_text="body",
+                )
+                plan = build_cr_a_dispatch_plan(pipeline)
+                d = cr_dispatch_plan_to_json_dict(
+                    plan,
+                    dispatch_mode="artifact",
+                    presented_candidates=(pc,),
+                    cr_a_candidates=(pc,),
+                )
+
+                selected_event_key = d["selected_event_key"]
+                self.assertTrue(plan.should_dispatch)
+                self.assertEqual(d["selected_candidate_id"], pc.candidate_id)
+                self.assertIsNotNone(selected_event_key)
+                self.assertTrue(selected_event_key.startswith("cr-event-v1:"))
+                self.assertNotEqual(selected_event_key, pc.candidate_id)
+                self.assertNotEqual(selected_event_key, pc.cluster_key)
+                selected_event_keys.append(selected_event_key)
+
+        self.assertEqual(
+            len(set(selected_event_keys)),
+            1,
+            f"selected_event_key differs across variants: {selected_event_keys}",
+        )
 
     def test_selected_fields_when_dispatching(self):
         presented = (
