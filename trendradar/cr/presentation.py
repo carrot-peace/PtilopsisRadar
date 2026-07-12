@@ -24,6 +24,7 @@ from trendradar.cr.decision import (
     DECISION_SUPPRESS,
     DECISION_URGENT,
     DECISION_WATCH,
+    count_high_score_suppressed,
 )
 from trendradar.cr.models import CRCandidate
 from trendradar.cr.scoring import CRScoreResult
@@ -387,6 +388,10 @@ def render_cr_a_text(
     lines.append(_format_run_datetime(run.run_label))
     eligible_count = run.total_eligible_count if run.total_eligible_count > 0 else len(candidates)
     lines.append(f"Candidates: {eligible_count}")
+    if run.high_score_suppressed_count > 0:
+        lines.append(
+            f"Suppressed (high-score): {run.high_score_suppressed_count}"
+        )
     lines.append("")
 
     if not candidates:
@@ -439,6 +444,7 @@ def render_cr_a_text_from_parts(
     run = CRPresentationRun(
         run_label=run_label,
         candidates=selected,
+        high_score_suppressed_count=count_high_score_suppressed(decisions),
         total_eligible_count=eligible_total,
     )
     return render_cr_a_text(run, config=config)

@@ -609,6 +609,22 @@ class TestRenderCRAText(unittest.TestCase):
         text = render_cr_a_text(run)
         self.assertIn("Candidates: 1", text)
 
+    def test_high_score_suppressed_count_shown_when_positive(self):
+        """Suppressed high-score candidates are visible in the header."""
+        run = CRPresentationRun(
+            run_label="T",
+            candidates=[],
+            high_score_suppressed_count=2,
+        )
+        text = render_cr_a_text(run)
+        self.assertIn("Suppressed (high-score): 2", text)
+
+    def test_high_score_suppressed_count_omitted_when_zero(self):
+        """The header stays compact when no high-score candidate was suppressed."""
+        run = CRPresentationRun(run_label="T", candidates=[])
+        text = render_cr_a_text(run)
+        self.assertNotIn("Suppressed (high-score):", text)
+
     def test_no_summary_line(self):
         """No Summary line fabricated."""
         pc = self._make_pc(push_eligible=True)
