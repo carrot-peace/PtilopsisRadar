@@ -1,0 +1,87 @@
+name: Apple Supervisor (PR)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/apple-container/**'
+      - 'trendradar/deployment/**'
+      - 'trendradar/__main__.py'
+      - 'docker/entrypoint.sh'
+      - 'docker/manage.py'
+      - 'tests/test_apple_container_supervisor.py'
+      - 'tests/test_deployment_notification.py'
+      - 'tests/test_docker_manage_webserver.py'
+      - 'tests/test_operator_alert.py'
+      - 'tests/test_main_exit_status.py'
+      - 'tests/test_supervisor_state.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/apple-supervisor.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'scripts/apple-container/**'
+      - 'trendradar/deployment/**'
+      - 'trendradar/__main__.py'
+      - 'docker/entrypoint.sh'
+      - 'docker/manage.py'
+      - 'tests/test_apple_container_supervisor.py'
+      - 'tests/test_deployment_notification.py'
+      - 'tests/test_docker_manage_webserver.py'
+      - 'tests/test_operator_alert.py'
+      - 'tests/test_main_exit_status.py'
+      - 'tests/test_supervisor_state.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/apple-supervisor.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: apple-supervisor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  supervisor:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install project dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Require Apple test tools
+        run: |
+          command -v zsh
+          command -v jq
+
+      - name: Validate shell entrypoints
+        run: |
+          zsh -n scripts/apple-container/trendradar-supervisor.zsh
+          zsh -n scripts/apple-container/build-image.zsh
+          bash -n docker/entrypoint.sh
+
+      - name: Run supervisor and deployment tests
+        run: |
+          uv run python -m unittest -v \
+            tests.test_apple_container_supervisor \
+            tests.test_operator_alert \
+            tests.test_main_exit_status \
+            tests.test_supervisor_state \
+            tests.test_deployment_notification \
+            tests.test_docker_manage_webserver

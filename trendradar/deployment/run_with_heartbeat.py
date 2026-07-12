@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -19,22 +21,36 @@ def write_heartbeat(path: str | Path = DEFAULT_HEARTBEAT_PATH) -> None:
         "schema_version": "task-heartbeat-v1",
         "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode(
+        "utf-8"
     )
-    temporary.replace(destination)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
-def main(application: Callable[[], None] | None = None) -> None:
+def main(application: Callable[[], int] | None = None) -> int:
     if application is None:
         from trendradar.__main__ import main as application_main
 
         application = application_main
-    application()
+    exit_code = application()
+    if exit_code != 0:
+        return exit_code if isinstance(exit_code, int) else 1
     write_heartbeat()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
