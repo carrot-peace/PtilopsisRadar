@@ -26,7 +26,7 @@ container image list | grep ptilopsis-radar
 # 输出示例：ptilopsis-radar  latest  501c71bfc79d  ...
 
 # 1. 构建新镜像
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 # 成功标志：最后一行包含 "ptilopsis-radar:latest"，无 error / failed
 # 耗时：仅代码变更约 5s（缓存命中）；依赖变更约 60-90s
 
@@ -92,7 +92,7 @@ container image list | grep ptilopsis-radar
 ### Step 2：构建新镜像
 
 ```fish
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 ```
 
 构建失败时**不影响正在运行的容器**，排查后重试即可。
@@ -360,7 +360,7 @@ docker compose -f docker/docker-compose.yml ps
 
 ```fish
 # 1. 用 canary 标签构建
-container build --arch arm64 --tag ptilopsis-radar:canary --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:canary
 
 # 2. 启动 canary 容器在测试端口验证
 container run -d \
@@ -382,7 +382,7 @@ container stop trendradar-canary
 container delete trendradar-canary
 
 # 4. Apple container 不支持 tag，重新 build 打 latest（缓存命中，秒完成）
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 # 然后继续场景 A 的步骤 2-8
 ```
 
