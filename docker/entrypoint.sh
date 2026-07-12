@@ -7,6 +7,12 @@ if [ ! -f "/app/config/config.yaml" ] || [ ! -f "/app/config/frequency_words.txt
     exit 1
 fi
 
+# Deployment-time owner notification. Its state lives under the mounted
+# output/meta directory and is independent from CR cooldown/lifecycle state.
+if ! python -m trendradar.deployment.notification; then
+    echo "[警告] deployment owner notification failed; continuing startup"
+fi
+
 case "${RUN_MODE:-cron}" in
 "once")
     echo "单次执行"

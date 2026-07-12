@@ -69,7 +69,7 @@
 
 ## Build 测试
 
-- **命令**：`container build --arch arm64 --tag ptilopsis-radar:preflight --file docker/Dockerfile .`
+- **命令**：`scripts/apple-container/build-image.zsh ptilopsis-radar:preflight`
 - **是否成功**：✅ 成功
 - **耗时**：约 45 秒
 - **镜像**：`ptilopsis-radar:preflight`
@@ -175,7 +175,7 @@
 docker compose -f docker/docker-compose.yml down
 
 # 2. 构建正式镜像
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 
 # 3. 创建并启动正式容器
 container run -d \
