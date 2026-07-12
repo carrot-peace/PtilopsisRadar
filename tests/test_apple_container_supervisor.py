@@ -3,6 +3,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPERVISOR = ROOT / "scripts/apple-container/trendradar-supervisor.zsh"
+ZSH = shutil.which("zsh")
 
 
 FAKE_CONTAINER = """#!/bin/sh
@@ -126,7 +128,7 @@ class SupervisorFixture:
 
     def run(self, **overrides: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["/bin/zsh", str(SUPERVISOR), "--once"],
+            [ZSH or "zsh", str(SUPERVISOR), "--once"],
             env=self.environment(**overrides),
             text=True,
             capture_output=True,
@@ -138,6 +140,7 @@ class SupervisorFixture:
         return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+@unittest.skipUnless(ZSH, "Apple Container supervisor tests require zsh")
 class TestAppleContainerSupervisor(unittest.TestCase):
     def test_healthy_once_check_covers_endpoint_and_freshness(self):
         with tempfile.TemporaryDirectory() as tmp:
