@@ -186,6 +186,49 @@ class TestBothPresent(unittest.TestCase):
             self.assertEqual(cr["selected_candidate"]["candidate_id"], "c-A")
             self.assertEqual(cr["selected_candidate"]["level"], "urgent")
 
+    def test_suppression_only_dispatch_has_no_selected_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "dispatch_plan.json"
+            receipt_path = Path(tmp) / "dispatch_receipts.json"
+            _write_plan(
+                plan_path,
+                reason="ready_suppressed_only",
+                selected_event_key=None,
+                selected_candidate_id=None,
+                selected_title=None,
+                selected_level=None,
+                selected_score=None,
+                candidate_counts={
+                    "urgent": 0,
+                    "alert": 0,
+                    "watch": 0,
+                    "suppress": 1,
+                    "push_eligible": 0,
+                },
+                message_preview="Suppressed (high-score): 1",
+                missing_fields=[],
+            )
+            _write_receipt(receipt_path)
+
+            result = read_cr_deploy_trace(
+                plan_path=plan_path, receipt_path=receipt_path
+            )
+            cr = result["cr_dispatch"]
+
+            self.assertTrue(cr["plan_should_dispatch"])
+            self.assertEqual(cr["plan_decision"], "dispatch")
+            self.assertEqual(
+                cr["selected_candidate"],
+                {
+                    "event_key": None,
+                    "candidate_id": None,
+                    "title": None,
+                    "level": None,
+                    "score": None,
+                },
+            )
+            self.assertTrue(cr["receipt_summary"]["accepted"])
+
     def test_receipt_summary_mapped(self):
         with tempfile.TemporaryDirectory() as tmp:
             plan_path = Path(tmp) / "dispatch_plan.json"

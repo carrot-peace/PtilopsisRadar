@@ -20,6 +20,7 @@ from trendradar.cr.cluster import normalize_topic_text
 from trendradar.cr.decision import (
     CRDecision,
     CRDecisionLevel,
+    DEFAULT_CR_URGENT_THRESHOLD,
     DECISION_ALERT,
     DECISION_SUPPRESS,
     DECISION_URGENT,
@@ -434,7 +435,7 @@ def render_cr_a_text_from_parts(
     *,
     run_label: str,
     config: CRTextPresentationConfig | None = None,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> str:
     """Convenience: bind → select → run → render in one call.
 

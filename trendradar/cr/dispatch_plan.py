@@ -64,6 +64,7 @@ DECISION_UNKNOWN: DispatchPlanDecision = "unknown"
 # Map plan.reason → JSON decision.
 _REASON_TO_DECISION: dict[str, DispatchPlanDecision] = {
     "ready": DECISION_DISPATCH,
+    "ready_suppressed_only": DECISION_DISPATCH,
     "no_selected_candidates": DECISION_NO_CANDIDATE,
     "empty_text": DECISION_SUPPRESSED,
     "skipped_cooldown": DECISION_COOLDOWN,
@@ -180,11 +181,13 @@ def build_cr_a_dispatch_plan(
         candidates are present.
 
     Blocked / ready semantics (evaluated in order):
-      1. ``len(cr_a_candidates) < min_candidate_count``
+      1. No selected candidates but ``high_score_suppressed_count > 0``
+         → ``should_dispatch=True``, ``reason="ready_suppressed_only"``.
+      2. ``len(cr_a_candidates) < min_candidate_count``
          → ``should_dispatch=False``, ``reason="no_selected_candidates"``.
-      2. ``cr_a_text`` is blank and ``allow_empty_text`` is ``False``
+      3. ``cr_a_text`` is blank and ``allow_empty_text`` is ``False``
          → ``should_dispatch=False``, ``reason="empty_text"``.
-      3. otherwise
+      4. otherwise
          → ``should_dispatch=True``, one message, ``reason="ready"``.
 
     Returns
@@ -196,7 +199,39 @@ def build_cr_a_dispatch_plan(
     urgent_count = _count_urgent(selected)
     high_score_suppressed_count = pipeline.high_score_suppressed_count
 
-    # 1. Not enough selected candidates.
+    # 1. A suppression-only run is operator-visible even though it has no
+    # selected event candidate.  It uses the text already rendered by the
+    # presentation layer and keeps candidate_count at zero.
+    if candidate_count == 0 and high_score_suppressed_count > 0:
+        if not allow_empty_text and not pipeline.cr_a_text.strip():
+            return CRDispatchPlan(
+                should_dispatch=False,
+                messages=(),
+                reason="empty_text",
+                run_label=pipeline.run_label,
+                candidate_count=0,
+                urgent_count=0,
+                high_score_suppressed_count=high_score_suppressed_count,
+            )
+        message = CRDispatchMessage(
+            text=pipeline.cr_a_text,
+            format=FORMAT_PLAIN_TEXT,
+            candidate_count=0,
+            run_label=pipeline.run_label,
+            urgent_count=0,
+            high_score_suppressed_count=high_score_suppressed_count,
+        )
+        return CRDispatchPlan(
+            should_dispatch=True,
+            messages=(message,),
+            reason="ready_suppressed_only",
+            run_label=pipeline.run_label,
+            candidate_count=0,
+            urgent_count=0,
+            high_score_suppressed_count=high_score_suppressed_count,
+        )
+
+    # 2. Not enough selected candidates.
     if candidate_count < min_candidate_count:
         return CRDispatchPlan(
             should_dispatch=False,
@@ -208,7 +243,7 @@ def build_cr_a_dispatch_plan(
             high_score_suppressed_count=high_score_suppressed_count,
         )
 
-    # 2. Blank text guard.
+    # 3. Blank text guard.
     if not allow_empty_text and not pipeline.cr_a_text.strip():
         return CRDispatchPlan(
             should_dispatch=False,
@@ -220,7 +255,7 @@ def build_cr_a_dispatch_plan(
             high_score_suppressed_count=high_score_suppressed_count,
         )
 
-    # 3. Ready — exactly one planned message.
+    # 4. Ready — exactly one planned message.
     message = CRDispatchMessage(
         text=pipeline.cr_a_text,
         format=FORMAT_PLAIN_TEXT,
@@ -366,7 +401,11 @@ def cr_dispatch_plan_to_json_dict(
 
     # --- Missing fields ---
     missing_fields: list[str] = []
-    if selected_event_key is None and plan.should_dispatch:
+    if (
+        selected_event_key is None
+        and plan.should_dispatch
+        and plan.candidate_count > 0
+    ):
         missing_fields.append("selected_event_key")
 
     result = {

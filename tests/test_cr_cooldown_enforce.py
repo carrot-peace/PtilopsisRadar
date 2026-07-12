@@ -105,6 +105,41 @@ def _hotlist_stats():
     ]
 
 
+def _high_score_hotlist_stats(*titles: str) -> list[dict]:
+    """Build independent three-source events that score above 70."""
+    stats: list[dict] = []
+    for position, title in enumerate(titles):
+        items = []
+        for source_id in ("weibo", "zhihu", "baidu"):
+            items.append(
+                {
+                    "title": title,
+                    "source_name": source_id,
+                    "source_id": source_id,
+                    "ranks": [1],
+                    "count": 20,
+                    "first_time": "09:30",
+                    "last_time": "12:00",
+                    "url": f"https://example.com/{source_id}/{position}",
+                    "mobileUrl": "",
+                    "is_new": True,
+                    "rank_timeline": [
+                        {"time": "09:00", "rank": 5},
+                        {"time": "12:00", "rank": 1},
+                    ],
+                }
+            )
+        stats.append(
+            {
+                "word": f"topic-{position}",
+                "titles": items,
+                "count": len(items),
+                "position": position,
+            }
+        )
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # Test Group A — New event (no prior state)
 # ---------------------------------------------------------------------------
@@ -408,6 +443,124 @@ class TestCooldownIntegration(unittest.TestCase):
             self.assertTrue(path.exists())
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertIn("receipts", data)
+
+
+class TestHighScoreSuppressionDelivery(unittest.TestCase):
+    @staticmethod
+    def _run(
+        root: Path,
+        state_path: Path,
+        stats: list[dict],
+        *,
+        label: str,
+        minute: int,
+        threshold: float,
+        sink: CRMemoryDispatchSink | None = None,
+    ):
+        effective_sink = sink if sink is not None else CRMemoryDispatchSink()
+        result = build_and_write_cr_runtime_dry_run(
+            hotlist_stats=stats,
+            run_label=label,
+            artifact_config=CRArtifactConfig(root_dir=root / "art"),
+            dispatch_mode="live",
+            dispatch_sink=effective_sink,
+            dispatch_state_path=state_path,
+            urgent_threshold=threshold,
+            now=datetime(2026, 7, 13, 1, minute, tzinfo=timezone.utc),
+        )
+        return result, effective_sink
+
+    def test_all_high_score_repeats_emit_count_only_message(self):
+        """Pipeline → cooldown → plan → fake sink delivers observability."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "dispatch_state.json"
+            stats = _high_score_hotlist_stats("Mars Mission Alpha")
+            _, first_sink = self._run(
+                root, state_path, stats,
+                label="first", minute=0, threshold=70.0,
+            )
+            self.assertEqual(len(first_sink.submitted_messages), 1)
+            state_before = state_path.read_text(encoding="utf-8")
+
+            result, repeat_sink = self._run(
+                root, state_path, stats,
+                label="repeat", minute=1, threshold=70.0,
+            )
+
+            plan = result.dispatch_plan
+            self.assertTrue(plan.should_dispatch)
+            self.assertEqual(plan.reason, "ready_suppressed_only")
+            self.assertEqual(plan.candidate_count, 0)
+            self.assertEqual(plan.high_score_suppressed_count, 1)
+            self.assertEqual(len(repeat_sink.submitted_messages), 1)
+            self.assertIn("Suppressed (high-score): 1", plan.messages[0].text)
+            self.assertIsNone(result.dispatch_state_save)
+            self.assertEqual(state_path.read_text(encoding="utf-8"), state_before)
+
+    def test_mixed_run_sends_new_candidate_and_counts_repeat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "dispatch_state.json"
+            repeated_title = "Mars Mission Alpha"
+            new_title = "Ocean Treaty Beta"
+            self._run(
+                root, state_path, _high_score_hotlist_stats(repeated_title),
+                label="seed", minute=0, threshold=70.0,
+            )
+
+            result, sink = self._run(
+                root, state_path,
+                _high_score_hotlist_stats(repeated_title, new_title),
+                label="mixed", minute=1, threshold=70.0,
+            )
+
+            plan = result.dispatch_plan
+            self.assertEqual(plan.reason, "ready")
+            self.assertEqual(plan.candidate_count, 1)
+            self.assertEqual(plan.high_score_suppressed_count, 1)
+            self.assertEqual(len(sink.submitted_messages), 1)
+            message = sink.submitted_messages[0].text
+            self.assertIn(new_title, message)
+            self.assertNotIn(repeated_title, message)
+            self.assertIn("Suppressed (high-score): 1", message)
+
+    def test_repeat_below_urgent_threshold_does_not_emit_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "dispatch_state.json"
+            stats = _high_score_hotlist_stats("Below Urgent Threshold")
+            self._run(
+                root, state_path, stats,
+                label="seed-below", minute=0, threshold=80.0,
+            )
+
+            result, sink = self._run(
+                root, state_path, stats,
+                label="repeat-below", minute=1, threshold=80.0,
+            )
+
+            plan = result.dispatch_plan
+            self.assertFalse(plan.should_dispatch)
+            self.assertIn(plan.reason, {"skipped_cooldown", "skipped_repeat"})
+            self.assertEqual(plan.high_score_suppressed_count, 0)
+            self.assertEqual(sink.submitted_messages, [])
+
+    def test_malformed_state_does_not_emit_suppression_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "dispatch_state.json"
+            state_path.write_text("{bad-json", encoding="utf-8")
+            result, sink = self._run(
+                root, state_path, _high_score_hotlist_stats("State Error"),
+                label="state-error", minute=0, threshold=70.0,
+            )
+
+            plan = result.dispatch_plan
+            self.assertFalse(plan.should_dispatch)
+            self.assertEqual(plan.reason, "skipped_state_error")
+            self.assertEqual(plan.high_score_suppressed_count, 0)
+            self.assertEqual(sink.submitted_messages, [])
 
 
 # ---------------------------------------------------------------------------

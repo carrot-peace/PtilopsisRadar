@@ -24,6 +24,7 @@ from trendradar.cr.cluster import build_cr_candidates
 from trendradar.cr.decision import (
     CRDecision,
     CRDecisionPolicy,
+    DEFAULT_CR_URGENT_THRESHOLD,
     DECISION_ALERT,
     DECISION_URGENT,
     count_high_score_suppressed,
@@ -123,7 +124,7 @@ def build_cr_pipeline_from_primitives(
     *,
     run_label: str,
     config: CRPipelineConfig | None = None,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> CRPipelineResult:
     """Build the full CR offline pipeline from primitive records.
 
@@ -276,7 +277,7 @@ def build_and_write_cr_pipeline_from_primitives(
     run_label: str,
     config: CRPipelineConfig | None = None,
     artifact_config: CRArtifactConfig | None = None,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> CRPipelineArtifactResult:
     """Build pipeline then write artifacts in one call.
 

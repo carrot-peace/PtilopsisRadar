@@ -6,9 +6,14 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from trendradar.cr.artifacts import CRArtifactConfig
-from trendradar.cr.decision import CRDecisionPolicy
+from trendradar.cr.decision import (
+    CRDecision,
+    CRDecisionPolicy,
+    DECISION_SUPPRESS,
+)
 from trendradar.cr.dispatch_executor import CRMemoryDispatchSink
 from trendradar.cr.input_health import (
     CRInputHealthPolicy,
@@ -21,9 +26,15 @@ from trendradar.cr.input_health import (
     input_item_identity,
     policy_from_env,
 )
-from trendradar.cr.models import CRRunContext
-from trendradar.cr.pipeline import CRPipelineConfig
+from trendradar.cr.models import CRCandidate, CRRunContext, CRSourceItem
+from trendradar.cr.pipeline import CRPipelineConfig, CRPipelineResult
+from trendradar.cr.presentation import (
+    CRPresentationRun,
+    CRPresentedCandidate,
+    render_cr_a_text,
+)
 from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
+from trendradar.cr.scoring import CRScoreResult
 
 NOW = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
 
@@ -66,6 +77,68 @@ def _health(
         observed_item_identities=observed,
         snapshot_generated_at=generated_at.isoformat(),
         now=NOW,
+    )
+
+
+def _suppression_pipeline(*, fresh: bool) -> CRPipelineResult:
+    candidate = CRCandidate(
+        candidate_id="suppressed-1",
+        cluster_key="suppressed-topic",
+        display_title="Suppressed Topic",
+        source_items=[
+            CRSourceItem(
+                source_type="hotlist",
+                source_id="a",
+                title="Suppressed Topic",
+                observed_in_current_run=fresh,
+            )
+        ],
+    )
+    score = CRScoreResult(
+        candidate_id=candidate.candidate_id,
+        cluster_key=candidate.cluster_key,
+        profile_version="test-score",
+        total_score=90.0,
+    )
+    decision = CRDecision(
+        candidate_id=candidate.candidate_id,
+        cluster_key=candidate.cluster_key,
+        profile_version="test-score",
+        policy_version="test-decision",
+        level=DECISION_SUPPRESS,
+        total_score=90.0,
+        push_eligible=False,
+        suppress_labels=["test_suppress"],
+    )
+    presented = CRPresentedCandidate(
+        candidate=candidate,
+        score_result=score,
+        decision=decision,
+        candidate_id=candidate.candidate_id,
+        cluster_key=candidate.cluster_key,
+        display_title=candidate.display_title,
+        representative_url=None,
+        decision_level=DECISION_SUPPRESS,
+        total_score=90.0,
+        suppress_labels=["test_suppress"],
+    )
+    run = CRPresentationRun(
+        run_label="health-run",
+        candidates=[],
+        high_score_suppressed_count=1,
+    )
+    return CRPipelineResult(
+        run_label="health-run",
+        primitives=(),
+        candidates=(candidate,),
+        score_results=(score,),
+        decisions=(decision,),
+        presented_candidates=(presented,),
+        cr_a_candidates=(),
+        cr_a_text=render_cr_a_text(run),
+        markdown_audit_text="audit",
+        html_audit_text="<p>audit</p>",
+        high_score_suppressed_count=1,
     )
 
 
@@ -177,6 +250,63 @@ class TestRuntimeGate(unittest.TestCase):
             text = sink.submitted_messages[0].text
             self.assertIn("fresh candidate", text)
             self.assertNotIn("stale candidate", text)
+
+    def test_degraded_fresh_suppression_only_is_dispatched(self) -> None:
+        health = _health(
+            configured=("a", "b", "c"),
+            successful=("a",),
+            failed=("b", "c"),
+        )
+        sink = CRMemoryDispatchSink()
+        pipeline = _suppression_pipeline(fresh=True)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            build_and_write_cr_runtime_dry_run.__globals__,
+            {
+                "build_cr_pipeline_from_primitives": Mock(
+                    return_value=pipeline
+                )
+            },
+        ):
+            result = self._run(
+                tmp, stats=[], health=health, sink=sink
+            )
+
+        self.assertEqual(health.status, STATUS_DEGRADED)
+        self.assertEqual(
+            result.dispatch_plan.reason, "ready_suppressed_only"
+        )
+        self.assertEqual(
+            result.dispatch_plan.high_score_suppressed_count, 1
+        )
+        self.assertEqual(len(sink.submitted_messages), 1)
+
+    def test_degraded_stale_suppression_only_is_blocked(self) -> None:
+        health = _health(
+            configured=("a", "b", "c"),
+            successful=("a",),
+            failed=("b", "c"),
+        )
+        sink = CRMemoryDispatchSink()
+        pipeline = _suppression_pipeline(fresh=False)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            build_and_write_cr_runtime_dry_run.__globals__,
+            {
+                "build_cr_pipeline_from_primitives": Mock(
+                    return_value=pipeline
+                )
+            },
+        ):
+            result = self._run(
+                tmp, stats=[], health=health, sink=sink
+            )
+
+        self.assertEqual(
+            result.dispatch_plan.reason, "insufficient_fresh_sources"
+        )
+        self.assertEqual(
+            result.dispatch_plan.high_score_suppressed_count, 0
+        )
+        self.assertEqual(sink.submitted_messages, [])
 
     def test_rss_all_failed_does_not_block_fresh_hotlist(self) -> None:
         fresh = _item("fresh hotlist", "a")
