@@ -320,7 +320,8 @@ container delete trendradar
 
 # ⚠️ 注意：latest 标签已被新镜像覆盖，无法直接用镜像回滚。
 # 代码回滚选项：
-#   git revert HEAD && container build ...（重建旧代码的镜像）
+#   git revert HEAD && scripts/apple-container/build-image.zsh ptilopsis-radar:latest
+#   （通过受支持的 helper 重建旧代码镜像，确保部署 identity 完整）
 #   或通过 .env 旋钮关闭新功能（无需重建镜像），见各 PR 的"回滚开关"
 ```
 

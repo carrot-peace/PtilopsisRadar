@@ -7,12 +7,6 @@ if [ ! -f "/app/config/config.yaml" ] || [ ! -f "/app/config/frequency_words.txt
     exit 1
 fi
 
-# Deployment-time owner notification. Its state lives under the mounted
-# output/meta directory and is independent from CR cooldown/lifecycle state.
-if ! python -m trendradar.deployment.notification; then
-    echo "[警告] deployment owner notification failed; continuing startup"
-fi
-
 case "${RUN_MODE:-cron}" in
 "once")
     echo "单次执行"
@@ -45,7 +39,19 @@ case "${RUN_MODE:-cron}" in
 
     # 启动 Web 服务器
     echo "启动 Web 服务器..."
-    python manage.py start_webserver
+    if ! python manage.py start_webserver; then
+        echo "[失败] Web 服务器未通过 PID/HTTP 启动验证"
+        exit 1
+    fi
+
+    # Only cron is a long-running deployment. Notify owners after all checks
+    # named in the message have actually passed. Notification state is
+    # independent from CR cooldown/lifecycle state and delivery remains
+    # non-fatal to the verified service startup.
+    if ! python -m trendradar.deployment.notification \
+        --health "config files present, cron syntax OK, web HTTP OK"; then
+        echo "[警告] deployment owner notification failed; continuing startup"
+    fi
 
     echo "启动supercronic: $CRON_EXPR"
     echo "supercronic 将作为 PID 1 运行"
