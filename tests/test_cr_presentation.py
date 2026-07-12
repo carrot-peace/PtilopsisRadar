@@ -793,6 +793,7 @@ class TestRenderCRATextFromParts(unittest.TestCase):
             [c], [s], [d], run_label="T"
         )
         self.assertIn("Candidates: 0", text)
+        self.assertIn("Suppressed (high-score): 1", text)
         self.assertNotIn("Suppressed Topic", text)
 
 
