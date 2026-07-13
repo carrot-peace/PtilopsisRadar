@@ -65,6 +65,22 @@ def _install_client_stub():
     sys.modules["trendradar.ai.client"] = client_mod
 
 
+def install_cr_dispatch_mode_stub():
+    """Install the minimal dispatch-mode module used by partial main loads.
+
+    The resolver intentionally defaults to ``off`` so tests that exercise
+    unrelated ``trendradar.__main__`` paths never enter the CR runtime hook.
+    """
+    dispatch_mode = types.ModuleType("trendradar.cr.dispatch_mode")
+    dispatch_mode.resolve_cr_dispatch_mode = lambda env: "off"
+    dispatch_mode.CR_DISPATCH_OFF = "off"
+    dispatch_mode.CR_DISPATCH_ARTIFACT = "artifact"
+    dispatch_mode.CR_DISPATCH_SHADOW = "shadow"
+    dispatch_mode.CR_DISPATCH_LIVE = "live"
+    sys.modules["trendradar.cr.dispatch_mode"] = dispatch_mode
+    return dispatch_mode
+
+
 def load_all():
     """加载并返回所有受测模块（带缓存，保证类对象单例）。"""
     global _CACHE
