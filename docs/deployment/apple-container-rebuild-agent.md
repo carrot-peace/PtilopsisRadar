@@ -149,8 +149,8 @@ container exec trendradar env PTILOPSIS_CR_LIFECYCLE_ENABLED=1 \
 # 判定：output/cr/latest/lifecycle_report.json 已生成且 mode 为 preview
 
 # 7. supervisor 已识别
-tail -n 5 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log
-# 判定：包含 "container trendradar is running"
+scripts/apple-container/trendradar-supervisor.zsh --once
+# 判定：退出码 0，日志包含 "health check passed"
 ```
 
 ### A7. 输出结果
@@ -322,7 +322,7 @@ result: 已回滚到 Docker 版 trendradar。Apple container 版已停止，laun
 |------|------|------|
 | 8080 无响应 | `lsof -nP -iTCP:8080 -sTCP:LISTEN` | 无输出 = 端口未被占用，检查容器是否 running |
 | 容器反复重启 | `container logs -n 100 trendradar` | 查找 Traceback / Error |
-| supervisor 不重建 | `tail -n 30 ~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log` | 检查是否有 "missing" 或 "not running" |
+| supervisor 诊断失败 | `scripts/apple-container/trendradar-supervisor.zsh --once` | 按 `code=` 修复；漂移诊断要求 recreate |
 | launchd 不启动 | `bash -c 'launchctl print gui/$(id -u)/com.carrot-peace.ptilopsis-radar'` | `state = running`？ |
 | 内存持续增长 | `container stats --no-stream trendradar` | > 500MiB 空闲态异常 |
 | 构建失败 | 检查 `container system start` 是否正常 | network error = 网络问题 |
@@ -342,6 +342,7 @@ result: 已回滚到 Docker 版 trendradar。Apple container 版已停止，laun
 | supervisor 脚本 | `scripts/apple-container/trendradar-supervisor.zsh` |
 | launchd plist | `~/Library/LaunchAgents/com.carrot-peace.ptilopsis-radar.plist` |
 | supervisor 日志 | `~/Library/Logs/PtilopsisRadar/trendradar-supervisor.log` |
+| container 日志快照 | `~/Library/Logs/PtilopsisRadar/trendradar-container.log` |
 | launchd stdout | `~/Library/Logs/PtilopsisRadar/launchd.out.log` |
 | launchd stderr | `~/Library/Logs/PtilopsisRadar/launchd.err.log` |
 | 迁移报告 | `docs/deployment/apple-container-cutover.md` |
