@@ -39,6 +39,9 @@ CR_DECISION_LEVEL_ORDER: dict[str, int] = {
     DECISION_URGENT: 3,
 }
 
+#: Shared default used by decision, presentation, and runtime observability
+#: paths.  Callers may still override the threshold explicitly.
+DEFAULT_CR_URGENT_THRESHOLD = 80.0
 
 # ---------------------------------------------------------------------------
 # Decision Policy
@@ -56,7 +59,7 @@ class CRDecisionPolicy:
     policy_version: str = "cr-decision-v0.1"
 
     alert_threshold: float = 60.0
-    urgent_threshold: float = 80.0
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD
 
     suppress_overrides_all: bool = True
 
@@ -224,7 +227,7 @@ def decide_cr_candidates(
 def count_high_score_suppressed(
     decisions: list[CRDecision],
     *,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> int:
     """Count suppressed decisions whose total_score >= urgent_threshold.
 

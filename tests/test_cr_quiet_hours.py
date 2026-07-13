@@ -33,7 +33,9 @@ def _env(**overrides: str) -> dict[str, str]:
     return base
 
 
-def _hotlist_stats(title: str = "AI Title") -> list[dict]:
+def _hotlist_stats(
+    title: str = "AI Title", *, event_id: str = "default"
+) -> list[dict]:
     def item(source_id: str) -> dict:
         return {
             "title": title,
@@ -43,7 +45,7 @@ def _hotlist_stats(title: str = "AI Title") -> list[dict]:
             "count": 20,
             "first_time": "09:30",
             "last_time": "12:00",
-            "url": f"https://example.com/{source_id}",
+            "url": f"https://example.com/{source_id}/{event_id}",
             "mobileUrl": "",
             "is_new": True,
             "rank_timeline": [
@@ -54,7 +56,7 @@ def _hotlist_stats(title: str = "AI Title") -> list[dict]:
 
     return [
         {
-            "word": "AI",
+            "word": f"AI-{event_id}",
             "titles": [item("weibo"), item("zhihu"), item("baidu")],
             "count": 3,
             "position": 0,
@@ -169,6 +171,175 @@ class TestQuietHoursRuntime(unittest.TestCase):
             queue = json.loads(queue_path.read_text(encoding="utf-8"))
             self.assertEqual(len(queue["entries"]), 1)
             self.assertFalse(state_path.exists())
+
+    def test_suppression_only_summary_waits_until_after_quiet_hours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            queue_path = root / "queue.json"
+            state_path = root / "state.json"
+            stats = _hotlist_stats("Quiet Repeat")
+            build_and_write_cr_runtime_dry_run(
+                hotlist_stats=stats,
+                run_label="quiet-seed",
+                artifact_config=CRArtifactConfig(root_dir=root / "art"),
+                dispatch_mode="live",
+                dispatch_sink=CRMemoryDispatchSink(),
+                dispatch_state_path=state_path,
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_env(),
+                now=_dt("2026-06-17T22:59:00+08:00"),
+                urgent_threshold=70.0,
+            )
+            state_before = state_path.read_text(encoding="utf-8")
+
+            sink = CRMemoryDispatchSink()
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=stats,
+                run_label="quiet-repeat",
+                artifact_config=CRArtifactConfig(root_dir=root / "art"),
+                dispatch_mode="live",
+                dispatch_sink=sink,
+                dispatch_state_path=state_path,
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_env(),
+                now=_dt("2026-06-17T23:30:00+08:00"),
+                urgent_threshold=70.0,
+            )
+
+            self.assertEqual(sink.submitted_messages, [])
+            self.assertFalse(result.dispatch_plan.should_dispatch)
+            self.assertEqual(
+                result.dispatch_plan.reason, "deferred_quiet_hours"
+            )
+            self.assertEqual(
+                result.dispatch_plan.high_score_suppressed_count, 1
+            )
+            self.assertEqual(
+                _latest_plan(result)["quiet_hours"]["decision"],
+                "deferred_quiet_hours",
+            )
+            self.assertEqual(
+                _latest_receipts(result)["receipts"][0]["status"],
+                "deferred_quiet_hours",
+            )
+            self.assertFalse(queue_path.exists())
+            self.assertIsNone(result.dispatch_state_save)
+            self.assertEqual(
+                state_path.read_text(encoding="utf-8"), state_before
+            )
+
+    def test_mixed_cooldown_count_survives_deferred_queue_and_flush(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "state.json"
+            queue_path = root / "queue.json"
+            repeated = "Deferred Repeat Alpha"
+            new = "Deferred New Beta"
+            common = {
+                "artifact_config": CRArtifactConfig(root_dir=root / "art"),
+                "dispatch_mode": "live",
+                "dispatch_state_path": state_path,
+                "deferred_queue_path": queue_path,
+                "quiet_hours_env": _env(),
+                "urgent_threshold": 70.0,
+            }
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                hotlist_stats=_hotlist_stats(
+                    repeated, event_id="deferred-repeat"
+                ),
+                run_label="deferred-seed",
+                dispatch_sink=CRMemoryDispatchSink(),
+                now=_dt("2026-06-17T22:59:00+08:00"),
+            )
+
+            quiet_sink = CRMemoryDispatchSink()
+            result = build_and_write_cr_runtime_dry_run(
+                **common,
+                hotlist_stats=(
+                    _hotlist_stats(repeated, event_id="deferred-repeat")
+                    + _hotlist_stats(new, event_id="deferred-new")
+                ),
+                run_label="deferred-mixed",
+                dispatch_sink=quiet_sink,
+                now=_dt("2026-06-17T23:30:00+08:00"),
+            )
+
+            self.assertEqual(quiet_sink.submitted_messages, [])
+            self.assertEqual(
+                result.dispatch_plan.high_score_suppressed_count, 1
+            )
+            queue = json.loads(queue_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(queue["entries"]), 1)
+            self.assertIn(
+                "Suppressed (high-score): 1",
+                queue["entries"][0]["message_text"],
+            )
+
+            flush_sink = CRMemoryDispatchSink()
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                hotlist_stats=[],
+                run_label="deferred-flush",
+                dispatch_sink=flush_sink,
+                now=_dt("2026-06-18T08:01:00+08:00"),
+            )
+            self.assertEqual(len(flush_sink.submitted_messages), 1)
+            self.assertIn(
+                "Suppressed (high-score): 1",
+                flush_sink.submitted_messages[0].text,
+            )
+
+    def test_mixed_cooldown_count_survives_urgent_bypass_replan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path = root / "state.json"
+            queue_path = root / "queue.json"
+            repeated = "Urgent Repeat Alpha"
+            new = "Urgent New Beta"
+            pipeline_config = _urgent_pipeline_config()
+            common = {
+                "artifact_config": CRArtifactConfig(root_dir=root / "art"),
+                "dispatch_mode": "live",
+                "dispatch_state_path": state_path,
+                "deferred_queue_path": queue_path,
+                "quiet_hours_env": _env(
+                    PTILOPSIS_CR_QUIET_HOURS_ALLOW_URGENT="1"
+                ),
+                "pipeline_config": pipeline_config,
+                "urgent_threshold": 70.0,
+            }
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                hotlist_stats=_hotlist_stats(
+                    repeated, event_id="urgent-repeat"
+                ),
+                run_label="urgent-seed",
+                dispatch_sink=CRMemoryDispatchSink(),
+                now=_dt("2026-06-17T22:59:00+08:00"),
+            )
+
+            sink = CRMemoryDispatchSink()
+            result = build_and_write_cr_runtime_dry_run(
+                **common,
+                hotlist_stats=(
+                    _hotlist_stats(repeated, event_id="urgent-repeat")
+                    + _hotlist_stats(new, event_id="urgent-new")
+                ),
+                run_label="urgent-mixed",
+                dispatch_sink=sink,
+                now=_dt("2026-06-17T23:30:00+08:00"),
+            )
+
+            self.assertEqual(len(sink.submitted_messages), 1)
+            self.assertEqual(
+                result.dispatch_plan.high_score_suppressed_count, 1
+            )
+            text = sink.submitted_messages[0].text
+            self.assertIn(new, text)
+            self.assertNotIn(repeated, text)
+            self.assertIn("Suppressed (high-score): 1", text)
+            self.assertFalse(queue_path.exists())
 
     def test_urgent_deferred_when_bypass_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:

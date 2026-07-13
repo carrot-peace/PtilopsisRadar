@@ -21,6 +21,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,6 +36,7 @@ from trendradar.cr.dispatch_executor import (
     execute_cr_dispatch_plan,
 )
 from trendradar.cr.dispatch_plan import CRDispatchMessage, CRDispatchPlan
+from trendradar.cr.pipeline import CRPipelineResult
 from trendradar.cr.runtime_dry_run import build_and_write_cr_runtime_dry_run
 
 
@@ -319,6 +321,52 @@ class TestRuntimeDryRunSink(unittest.TestCase):
             else:
                 self.assertEqual(sink.submitted_messages, [])
                 self.assertEqual(execution.receipts, ())
+
+    def test_decision_suppression_only_reaches_runtime_sink(self):
+        pipeline = CRPipelineResult(
+            run_label="suppression-only",
+            primitives=(),
+            candidates=(),
+            score_results=(),
+            decisions=(),
+            presented_candidates=(),
+            cr_a_candidates=(),
+            cr_a_text=(
+                "Ptilopsis Radar｜CR-A\nsuppression-only\nCandidates: 0\n"
+                "Suppressed (high-score): 1\n\nNo alert candidates."
+            ),
+            markdown_audit_text="audit",
+            html_audit_text="<p>audit</p>",
+            high_score_suppressed_count=1,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            sink = CRMemoryDispatchSink()
+            with patch.dict(
+                build_and_write_cr_runtime_dry_run.__globals__,
+                {
+                    "build_cr_pipeline_from_primitives": Mock(
+                        return_value=pipeline
+                    )
+                },
+            ):
+                result = build_and_write_cr_runtime_dry_run(
+                    run_label="suppression-only",
+                    artifact_config=self._artifact_config(tmp),
+                    dispatch_sink=sink,
+                    dispatch_mode="live",
+                    dispatch_state_path=Path(tmp) / "state.json",
+                )
+
+            self.assertEqual(
+                result.dispatch_plan.reason, "ready_suppressed_only"
+            )
+            self.assertEqual(len(sink.submitted_messages), 1)
+            self.assertEqual(sink.submitted_messages[0].candidate_count, 0)
+            self.assertIn(
+                "Suppressed (high-score): 1",
+                sink.submitted_messages[0].text,
+            )
+            self.assertIsNone(result.dispatch_state_save)
 
 
 # ---------------------------------------------------------------------------

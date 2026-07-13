@@ -33,6 +33,7 @@ from trendradar.cr.dispatch_plan import (
     CRDispatchMessage,
     CRDispatchPlan,
     build_cr_a_dispatch_plan,
+    cr_dispatch_plan_to_json_dict,
 )
 from trendradar.cr.models import CRCandidate
 from trendradar.cr.pipeline import (
@@ -265,6 +266,62 @@ class TestNoSelectedCandidates(unittest.TestCase):
         self.assertEqual(plan.reason, "no_selected_candidates")
         self.assertEqual(plan.messages, ())
         self.assertEqual(plan.candidate_count, 0)
+
+
+# ---------------------------------------------------------------------------
+# Test Group C2 — Suppression-only observability
+# ---------------------------------------------------------------------------
+
+
+class TestSuppressionOnly(unittest.TestCase):
+    def test_positive_suppressed_count_dispatches_without_candidates(self):
+        pipeline = _make_pipeline(
+            cr_a_candidates=(),
+            cr_a_text=(
+                "Ptilopsis Radar｜CR-A\nrun\nCandidates: 0\n"
+                "Suppressed (high-score): 2\n\nNo alert candidates."
+            ),
+            high_score_suppressed_count=2,
+        )
+
+        plan = build_cr_a_dispatch_plan(pipeline)
+
+        self.assertTrue(plan.should_dispatch)
+        self.assertEqual(plan.reason, "ready_suppressed_only")
+        self.assertEqual(plan.candidate_count, 0)
+        self.assertEqual(plan.high_score_suppressed_count, 2)
+        self.assertEqual(len(plan.messages), 1)
+        self.assertEqual(plan.messages[0].candidate_count, 0)
+        self.assertIn("Suppressed (high-score): 2", plan.messages[0].text)
+
+    def test_suppression_only_still_requires_nonblank_text(self):
+        pipeline = _make_pipeline(
+            cr_a_candidates=(),
+            cr_a_text="  \n",
+            high_score_suppressed_count=1,
+        )
+
+        plan = build_cr_a_dispatch_plan(pipeline)
+
+        self.assertFalse(plan.should_dispatch)
+        self.assertEqual(plan.reason, "empty_text")
+        self.assertEqual(plan.messages, ())
+
+    def test_suppression_only_serializes_as_dispatch(self):
+        plan = build_cr_a_dispatch_plan(
+            _make_pipeline(
+                cr_a_candidates=(),
+                cr_a_text="Suppressed (high-score): 1",
+                high_score_suppressed_count=1,
+            )
+        )
+
+        data = cr_dispatch_plan_to_json_dict(
+            plan, dispatch_mode="live"
+        )
+
+        self.assertEqual(data["decision"], "dispatch")
+        self.assertTrue(data["should_dispatch"])
 
 
 # ---------------------------------------------------------------------------

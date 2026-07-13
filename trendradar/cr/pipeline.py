@@ -24,6 +24,7 @@ from trendradar.cr.cluster import build_cr_candidates
 from trendradar.cr.decision import (
     CRDecision,
     CRDecisionPolicy,
+    DEFAULT_CR_URGENT_THRESHOLD,
     DECISION_ALERT,
     DECISION_URGENT,
     count_high_score_suppressed,
@@ -123,7 +124,7 @@ def build_cr_pipeline_from_primitives(
     *,
     run_label: str,
     config: CRPipelineConfig | None = None,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> CRPipelineResult:
     """Build the full CR offline pipeline from primitive records.
 
@@ -200,10 +201,17 @@ def build_cr_pipeline_from_primitives(
     # Count eligible before cap for truncation hint in the dispatch header.
     cr_a_eligible_count = count_cr_a_eligible(presented_sorted)
 
+    # Count high-score candidates suppressed by the decision layer so the
+    # operator-facing dispatch can distinguish filtering from no activity.
+    high_score_suppressed_count = count_high_score_suppressed(
+        decisions, urgent_threshold=urgent_threshold
+    )
+
     # 7. Render CR-A text.
     run = CRPresentationRun(
         run_label=run_label,
         candidates=list(cr_a),
+        high_score_suppressed_count=high_score_suppressed_count,
         total_eligible_count=cr_a_eligible_count,
     )
     cr_a_text = render_cr_a_text(run, config=render_cfg.text)
@@ -224,12 +232,7 @@ def build_cr_pipeline_from_primitives(
         urgent_threshold=urgent_threshold,
     )
 
-    # 10. High-score suppressed count.
-    high_score_suppressed_count = count_high_score_suppressed(
-        decisions, urgent_threshold=urgent_threshold
-    )
-
-    # 11. Return.
+    # 10. Return.
     return CRPipelineResult(
         run_label=run_label,
         primitives=primitives_tuple,
@@ -274,7 +277,7 @@ def build_and_write_cr_pipeline_from_primitives(
     run_label: str,
     config: CRPipelineConfig | None = None,
     artifact_config: CRArtifactConfig | None = None,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> CRPipelineArtifactResult:
     """Build pipeline then write artifacts in one call.
 
