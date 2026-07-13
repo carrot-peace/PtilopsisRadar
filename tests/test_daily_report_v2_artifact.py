@@ -3,7 +3,7 @@
 Daily Report v2 — artifact-only model/renderer tests (PR-D).
 
 These tests prove DR v2 is a Generation Plane artifact product only:
-- it does not import the notification package or call any legacy sender;
+- it does not import or call a transport sender;
 - it does not use the CR Telegram sink / env;
 - it applies the seven DR v2 artifact-quality rules
   (overview, item body, risk separation, noise demotion, domestic confidence,
@@ -491,11 +491,11 @@ class TestRawHotlistCapped(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────
-# Test 8: Legacy push remains fail-closed (DR adds no push surface)
+# Test 8: DR adds no transport surface
 # ─────────────────────────────────────────────────────────────
 
 
-class TestLegacyPushRemainsFailClosed(unittest.TestCase):
+class TestDRTransportBoundary(unittest.TestCase):
     def test_dr_v2_module_defines_no_send_surface(self):
         src = (PROJECT_ROOT / "trendradar" / "report" / "daily_v2.py").read_text(
             encoding="utf-8"
@@ -503,13 +503,9 @@ class TestLegacyPushRemainsFailClosed(unittest.TestCase):
         for token in ("def send", "requests.post", "sendMessage", "sendDocument"):
             self.assertNotIn(token, src, token)
 
-    def test_legacy_guard_suites_present(self):
-        # DR v2 must not weaken the PR-A / PR-C1 guard suites.
+    def test_transport_boundary_guard_suite_present(self):
         self.assertTrue(
-            (PROJECT_ROOT / "tests" / "test_legacy_push_policy_guards.py").exists()
-        )
-        self.assertTrue(
-            (PROJECT_ROOT / "tests" / "test_legacy_push_runtime_disconnect.py").exists()
+            (PROJECT_ROOT / "tests" / "test_transport_boundaries.py").exists()
         )
 
 

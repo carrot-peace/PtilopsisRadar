@@ -741,7 +741,7 @@ class SQLiteStorageMixin:
         Args:
             date_str: 日期字符串 YYYY-MM-DD
             period_key: 时间段 key
-            action: 动作类型 (analyze / push)
+            action: 动作标识（当前为 analyze）
 
         Returns:
             是否已执行
@@ -776,7 +776,7 @@ class SQLiteStorageMixin:
         Args:
             date_str: 日期字符串 YYYY-MM-DD
             period_key: 时间段 key
-            action: 动作类型 (analyze / push)
+            action: 动作标识（当前为 analyze）
 
         Returns:
             是否记录成功

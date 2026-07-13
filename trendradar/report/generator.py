@@ -34,7 +34,6 @@ def prepare_report_data(
     id_to_name: Optional[Dict] = None,
     mode: str = "daily",
     rank_threshold: int = 3,
-    show_new_section: bool = True,
 ) -> Dict:
     """
     准备报告数据
@@ -46,7 +45,6 @@ def prepare_report_data(
         id_to_name: ID 到名称的映射
         mode: 报告模式 (daily/incremental/current)
         rank_threshold: 排名阈值
-        show_new_section: 是否显示新增热点区域
 
     Returns:
         Dict: 准备好的报告数据
@@ -75,11 +73,11 @@ def prepare_report_data(
         if original_new_count > 0:
             print(f"新增热点过滤后：{filtered_new_count} 条保留（原始 {original_new_count} 条）")
 
-    # 在增量模式下或配置关闭时隐藏新增新闻区域（但计数已完成）
+    # 在增量模式下隐藏新增新闻区域（但计数已完成）
     # 当全部热榜条目都是新增时（首次运行），也隐藏以避免与主区域完全重复
     all_new_titles = {title for titles in filtered_new_titles.values() for title in titles}
     all_are_new = bool(all_new_titles) and all_new_titles == stats_title_set
-    hide_new_section = mode == "incremental" or not show_new_section or all_are_new
+    hide_new_section = mode == "incremental" or all_are_new
 
     if not hide_new_section and filtered_new_titles and id_to_name:
         for source_id, titles_data in filtered_new_titles.items():
@@ -176,7 +174,7 @@ def generate_html_report(
     每次生成 HTML 后会：
     1. 保存时间戳快照到 output/html/日期/时间.html（历史记录）
     2. 复制到 output/html/latest/{mode}.html（最新报告）
-    3. 复制到 output/index.html 和根目录 index.html（入口）
+    3. 写入 output/public/{group}/full.html 和 output/index.html（发布入口）
 
     Args:
         stats: 统计结果列表
@@ -253,7 +251,7 @@ def generate_html_report(
 
     # 4. output/index.html 改为指向 public/ 的轻量跳转页（不再被完整报告覆盖）。
     #    真正入口由 generate_dashboard 写到 output/public/index.html。
-    #    注意：不再写仓库根 index.html（保留该文件，但不自动覆盖）。
+    #    仓库根目录不承载运行时报告，也不会写入 index.html。
     output_index = Path(output_dir) / "index.html"
     with open(output_index, "w", encoding="utf-8") as f:
         f.write(_OUTPUT_INDEX_REDIRECT_HTML)

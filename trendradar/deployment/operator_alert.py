@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Mapping, Protocol, Sequence
 
-from trendradar.telegram_bot.access import build_telegram_access_config
+from trendradar.deployment.telegram_owner import resolve_telegram_owner_chat_ids
 
 
 logger = logging.getLogger(__name__)
@@ -126,8 +126,7 @@ def send_owner_alert(
     owner_chat_ids: Sequence[str] | None = None,
 ) -> OwnerAlertResult:
     """Send text only to configured owners, optionally narrowed to a subset."""
-    access = build_telegram_access_config(dict(env))
-    configured = list(access.get("owner_chat_ids") or [])
+    configured = resolve_telegram_owner_chat_ids(env)
     if owner_chat_ids is None:
         owners = configured
     else:
@@ -303,8 +302,7 @@ def send_stateful_owner_alert(
     if not diagnostic_code or repeat_seconds <= 0:
         return StatefulOwnerAlertResult(status="failed_invalid_arguments")
 
-    access = build_telegram_access_config(dict(env))
-    owners = list(access.get("owner_chat_ids") or [])
+    owners = resolve_telegram_owner_chat_ids(env)
     if not owners:
         return StatefulOwnerAlertResult(status="skipped_no_owner")
 

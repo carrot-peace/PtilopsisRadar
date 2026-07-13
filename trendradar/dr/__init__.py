@@ -1,8 +1,7 @@
 # coding=utf-8
 """Daily Report dispatch pipeline.
 
-This package owns the DR push path.  It is intentionally separate from
-Legacy Push and from the CR dispatch/Telegram modules.
+This package owns DR delivery and is independent from the CR dispatch pipeline.
 """
 
 from trendradar.dr.dispatch_plan import (

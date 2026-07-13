@@ -42,7 +42,6 @@ def _env(**overrides):
         "PTILOPSIS_BUILD_COMMIT": "abc123",
         "TELEGRAM_BOT_TOKEN": "secret-token",
         "TELEGRAM_OWNER_CHAT_IDS": "111",
-        "TELEGRAM_RECEIVER_CHAT_IDS": "999",
     }
     values.update(overrides)
     return values
@@ -63,7 +62,6 @@ class TestDeploymentNotification(unittest.TestCase):
 
             self.assertEqual(result.status, "sent")
             self.assertEqual([call["chat_id"] for call in sender.calls], ["111"])
-            self.assertNotIn("999", [call["chat_id"] for call in sender.calls])
             self.assertNotIn("secret-token", sender.calls[0]["text"])
             state_text = state.read_text(encoding="utf-8")
             self.assertNotIn("secret-token", state_text)
@@ -126,7 +124,7 @@ class TestDeploymentNotification(unittest.TestCase):
             self.assertEqual(data["schema_version"], "deployment-notification-v2")
             self.assertEqual(len(data["identities"]), 2)
 
-    def test_receiver_only_configuration_never_receives_fallback(self):
+    def test_missing_owner_configuration_skips(self):
         sender = FakeSender()
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state.json"

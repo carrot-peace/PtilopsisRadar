@@ -89,19 +89,38 @@ class TestSourceTiersYaml(unittest.TestCase):
 class TestConfigYaml(unittest.TestCase):
     def setUp(self):
         self.text = read("config/config.yaml")
+        import yaml
+        self.config = yaml.safe_load(self.text)
 
-    def test_report_style_default_environment(self):
-        self.assertIn("report_style:", self.text)
-        self.assertIn('report_style: "environment"', self.text)
+    def test_dead_top_level_sections_are_absent(self):
+        for section in ("display", "notification", "alert", "telegram_attachments"):
+            with self.subTest(section=section):
+                self.assertNotIn(section, self.config)
+
+    def test_display_mode_and_standalone_translation_scope_are_absent(self):
+        self.assertNotIn("display_mode", self.config["report"])
+        self.assertNotIn("standalone", self.config["ai_translation"]["scope"])
 
     def test_environment_prompt_file_configured(self):
         self.assertIn("environment_prompt_file:", self.text)
         self.assertIn("ai_environment_report_prompt.txt", self.text)
 
-    def test_alert_state_ttl_documented(self):
-        self.assertIn("state_ttl_days: 14", self.text)
-        self.assertIn("缺省/非法=14", self.text)
-        self.assertIn("0 或负数=禁用 TTL 清理", self.text)
+    def test_classic_analysis_fields_are_absent(self):
+        analysis = self.config["ai_analysis"]
+        for field in ("report_style", "prompt_file", "include_standalone"):
+            with self.subTest(field=field):
+                self.assertNotIn(field, analysis)
+
+    def test_advanced_notification_fields_are_absent(self):
+        advanced = self.config["advanced"]
+        for field in (
+            "max_accounts_per_channel",
+            "batch_size",
+            "batch_send_interval",
+            "feishu_message_separator",
+        ):
+            with self.subTest(field=field):
+                self.assertNotIn(field, advanced)
 
     def test_anthropic_feeds_use_official_html_fallback(self):
         self.assertIn('id: "anthropic-news-openrss"', self.text)
@@ -120,13 +139,12 @@ class TestConfigYaml(unittest.TestCase):
         self.assertIn('link_prefixes: ["/research/", "/news/"]', research_block)
 
 
-class TestAlertConfigLoader(unittest.TestCase):
+class TestConfigLoader(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _bootstrap._ensure_pkg("trendradar")
         _bootstrap._ensure_pkg("trendradar.core")
         _bootstrap._ensure_pkg("trendradar.utils")
-        load_file("trendradar.core.config", "trendradar/core/config.py")
         if "trendradar.utils.time" not in sys.modules:
             time_mod = types.ModuleType("trendradar.utils.time")
             time_mod.DEFAULT_TIMEZONE = "Asia/Shanghai"
@@ -137,39 +155,33 @@ class TestAlertConfigLoader(unittest.TestCase):
             sys.modules["yaml"] = yaml_mod
         cls.loader = load_file("trendradar.core.loader", "trendradar/core/loader.py")
 
-    def test_state_ttl_default_is_14(self):
-        cfg = self.loader._load_alert_config({})
-        self.assertEqual(cfg["STATE_TTL_DAYS"], 14)
+    def test_ai_analysis_loader_has_no_classic_fields(self):
+        cfg = self.loader._load_ai_analysis_config(
+            {
+                "ai_analysis": {
+                    "report_style": "classic",
+                    "prompt_file": "legacy.txt",
+                    "include_standalone": True,
+                }
+            }
+        )
+        self.assertNotIn("REPORT_STYLE", cfg)
+        self.assertNotIn("PROMPT_FILE", cfg)
+        self.assertNotIn("INCLUDE_STANDALONE", cfg)
+        self.assertEqual(
+            cfg["ENVIRONMENT_PROMPT_FILE"],
+            "ai_environment_report_prompt.txt",
+        )
 
-    def test_state_ttl_positive_integer_loaded(self):
-        cfg = self.loader._load_alert_config({"alert": {"state_ttl_days": 30}})
-        self.assertEqual(cfg["STATE_TTL_DAYS"], 30)
-
-    def test_state_ttl_invalid_falls_back_to_14(self):
-        cfg = self.loader._load_alert_config({"alert": {"state_ttl_days": "bad"}})
-        self.assertEqual(cfg["STATE_TTL_DAYS"], 14)
-
-    def test_state_ttl_zero_and_negative_disable_ttl(self):
-        zero = self.loader._load_alert_config({"alert": {"state_ttl_days": 0}})
-        negative = self.loader._load_alert_config({"alert": {"state_ttl_days": -3}})
-        self.assertEqual(zero["STATE_TTL_DAYS"], 0)
-        self.assertEqual(negative["STATE_TTL_DAYS"], 0)
-
-    def test_cooldown_minutes_default_is_180(self):
-        cfg = self.loader._load_alert_config({})
-        self.assertEqual(cfg["COOLDOWN_MINUTES"], 180)
-
-    def test_cooldown_minutes_positive_integer_loaded(self):
-        cfg = self.loader._load_alert_config({"alert": {"cooldown_minutes": 60}})
-        self.assertEqual(cfg["COOLDOWN_MINUTES"], 60)
-
-    def test_cooldown_minutes_invalid_falls_back_to_180(self):
-        cfg = self.loader._load_alert_config({"alert": {"cooldown_minutes": "bad"}})
-        self.assertEqual(cfg["COOLDOWN_MINUTES"], 180)
-
-    def test_cooldown_minutes_negative_disables(self):
-        cfg = self.loader._load_alert_config({"alert": {"cooldown_minutes": -5}})
-        self.assertEqual(cfg["COOLDOWN_MINUTES"], 0)
+    def test_report_and_translation_loaders_have_no_display_compatibility(self):
+        report = self.loader._load_report_config(
+            {"report": {"display_mode": "platform"}}
+        )
+        translation = self.loader._load_ai_translation_config(
+            {"ai_translation": {"scope": {"standalone": True}}}
+        )
+        self.assertNotIn("DISPLAY_MODE", report)
+        self.assertNotIn("STANDALONE", translation["SCOPE"])
 
     def test_rss_max_retries_defaults_to_two(self):
         cfg = self.loader._load_rss_config({})

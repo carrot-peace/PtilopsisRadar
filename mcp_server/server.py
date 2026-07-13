@@ -758,7 +758,6 @@ async def get_current_config(
         section: 配置节，可选值：
             - "all": 所有配置（默认）
             - "crawler": 爬虫配置
-            - "push": 推送配置
             - "keywords": 关键词配置
             - "weights": 权重配置
 

@@ -27,7 +27,6 @@ def translate_report_content(
     rss_items: Optional[List[Dict[str, Any]]] = None,
     rss_new_items: Optional[List[Dict[str, Any]]] = None,
     translator: Optional[ArtifactTranslator] = None,
-    display_regions: Optional[Dict[str, Any]] = None,
     skip_rss: bool = False,
     debug: bool = False,
 ) -> tuple[Dict[str, Any], Optional[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]]:
@@ -38,7 +37,6 @@ def translate_report_content(
     print(f"[翻译] 开始翻译内容到 {translator.target_language}...")
 
     scope = translator.scope
-    display_regions = display_regions or {}
 
     report_data = copy.deepcopy(report_data)
     rss_items = copy.deepcopy(rss_items) if rss_items else None
@@ -47,7 +45,7 @@ def translate_report_content(
     titles_to_translate: list[str] = []
     title_locations: list[tuple[str, int, int]] = []
 
-    if scope.get("HOTLIST", True) and display_regions.get("HOTLIST", True):
+    if scope.get("HOTLIST", True):
         for stat_idx, stat in enumerate(report_data.get("stats", [])):
             for title_idx, title_data in enumerate(stat.get("titles", [])):
                 titles_to_translate.append(title_data.get("title", ""))
@@ -62,7 +60,6 @@ def translate_report_content(
         not skip_rss
         and rss_items
         and scope.get("RSS", True)
-        and display_regions.get("RSS", True)
     ):
         for stat_idx, stat in enumerate(rss_items):
             for title_idx, title_data in enumerate(stat.get("titles", [])):
@@ -73,8 +70,6 @@ def translate_report_content(
         not skip_rss
         and rss_new_items
         and scope.get("RSS", True)
-        and display_regions.get("RSS", True)
-        and display_regions.get("NEW_ITEMS", True)
     ):
         for stat_idx, stat in enumerate(rss_new_items):
             for title_idx, title_data in enumerate(stat.get("titles", [])):

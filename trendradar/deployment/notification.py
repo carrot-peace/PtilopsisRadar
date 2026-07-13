@@ -19,6 +19,7 @@ from trendradar.deployment.operator_alert import (
     TelegramSendResult,
     send_owner_alert,
 )
+from trendradar.deployment.telegram_owner import resolve_telegram_owner_chat_ids
 
 
 logger = logging.getLogger(__name__)
@@ -229,10 +230,7 @@ def notify_deployment(
         )
         return DeploymentNotificationResult(status="skipped_no_identity")
 
-    from trendradar.telegram_bot.access import build_telegram_access_config
-
-    access = build_telegram_access_config(dict(env))
-    owners = list(access.get("owner_chat_ids") or [])
+    owners = resolve_telegram_owner_chat_ids(env)
     if not owners:
         logger.warning(
             "Deployment notification skipped: no Telegram owner chat ids configured"

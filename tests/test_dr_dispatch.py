@@ -106,6 +106,12 @@ class TestDRFormatter(unittest.TestCase):
         text = render_dr_telegram_text(failed, date="2026-06-18")
         self.assertIn(DR_FALLBACK_TEXT, text)
 
+    def test_non_environment_ai_fallback(self) -> None:
+        unsupported = _ai_result(report_style="unsupported")
+        text = render_dr_telegram_text(unsupported, date="2026-06-18")
+        self.assertIn(DR_FALLBACK_TEXT, text)
+        self.assertEqual(select_dr_digest_topics(unsupported), [])
+
     def test_text_omits_urls_and_decision(self) -> None:
         text = render_dr_telegram_text(_ai_result(), date="2026-06-18")
         self.assertNotIn("https://", text)

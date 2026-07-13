@@ -122,10 +122,10 @@ AI（可选，需配置 API Key）的唯一任务是基于程序生成的 eviden
 
 ### 报告与推送
 
-生成信息环境异常监测日报（HTML 报告）。Legacy notification push 已从正常运行时移除，旧 notification package 已删除。
-
-Legacy notification push 不应被视为未来推送路径。详见
-[`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md)。
+生成信息环境异常监测日报（HTML 报告）。报告发送只经过各自显式门控的 CR 或 DR
+dispatch；部署通知与 supervisor 告警是独立的 owner-only 运维通道。旧多渠道
+notification、fallback 和兼容 facade 已完整移除。详见
+[`docs/transport_boundaries.md`](docs/transport_boundaries.md)。
 
 ---
 
@@ -237,7 +237,7 @@ docker compose up -d
 ### GitHub Actions 部署
 
 1. Fork 本仓库
-2. 在仓库 Settings → Secrets 中配置所需环境变量（推送 Webhook、AI API Key 等）
+2. 在仓库 Settings → Secrets 中配置所需环境变量（AI API Key、远程存储等）
 3. 启用 `.github/workflows/crawler.yml` 中的定时任务
 
 > 该部署方式需要远程存储、Secrets 和 workflow 配置，当前建议有经验用户使用。
@@ -256,18 +256,11 @@ ai:
 
 支持的模型包括 DeepSeek、OpenAI、Gemini、Claude、Ollama 等，详见 [LiteLLM 文档](https://docs.litellm.ai/docs/providers)。
 
-### Legacy Push 渠道
-
-Legacy notification push 已移除。旧 `trendradar.notification` package、dispatcher、sender、fallback 和兼容 facade 均不再可用。现有 legacy notification 配置仅是历史 inert config，不是可用运行时路径，也不是未来推送路径。
-
 ### 诊断命令
 
 ```bash
 # 环境体检
 uv run python -m trendradar --doctor
-
-# Legacy Push 已移除；该命令只输出移除提示，不发送任何内容
-uv run python -m trendradar --test-notification
 
 # 查看当前调度状态
 uv run python -m trendradar --show-schedule
@@ -279,15 +272,13 @@ uv run python -m trendradar --show-schedule
 
 | 文件 | 用途 |
 |------|------|
-| `config/config.yaml` | 主配置：数据源、报告模式、通知渠道、AI 模型、存储、调度等 |
+| `config/config.yaml` | 主配置：数据源、报告模式、AI 模型、存储、调度等 |
 | `config/source_tiers.yaml` | 来源分层：平台 / RSS feed 到 A / B / C / D 层级的映射 |
 | `config/frequency_words.txt` | 关键词 / 主题组：用于关键词匹配模式（`filter.method: keyword`） |
 | `config/ai_interests.txt` | AI 筛选兴趣描述：用于 AI 智能筛选模式（`filter.method: ai`） |
 | `config/ai_environment_report_prompt.txt` | 信息环境异常监测日报的 AI 提示词模板 |
 | `config/timeline.yaml` | 调度策略：时间段定义、日计划、周映射 |
-| `config/ai_analysis_prompt.txt` | 经典热点分析风格的 AI 提示词模板（`report_style: classic`） |
-
-配置文件内有详细注释。可视化配置编辑器：https://sansan0.github.io/TrendRadar/
+配置文件内有详细注释。
 
 ---
 
@@ -298,7 +289,6 @@ trendradar/
 ├── __main__.py          # 主入口：NewsAnalyzer 编排 采集→分析→artifact 流程
 ├── context.py           # AppContext：依赖注入容器，封装配置相关操作
 ├── core/                # 核心逻辑
-│   ├── config.py        #   配置解析、多账号管理
 │   ├── loader.py        #   配置文件加载
 │   ├── frequency.py     #   关键词匹配
 │   ├── analyzer.py      #   频率统计、权重计算
@@ -320,12 +310,14 @@ trendradar/
 │   ├── evidence.py      #   证据摘要构建与程序化分栏
 │   ├── filter.py        #   AI 智能筛选
 │   ├── translator.py    #   AI 翻译
-│   ├── formatter.py     #   AI 分析结果格式化
+│   ├── prompt_loader.py #   AI 提示词模板加载
 │   └── client.py        #   LiteLLM 客户端
 ├── report/              # 报告生成
-│   ├── html.py          #   HTML 报告渲染
 │   ├── generator.py     #   报告生成器
-│   └── formatter.py     #   标题格式化
+│   ├── newsletter.py    #   current/incremental 完整报告渲染
+│   ├── dashboard.py     #   当前盘面与发布安全摘要
+│   ├── daily_v2.py      #   daily artifact 模型与渲染
+│   └── translation.py   #   artifact 报告翻译
 └── utils/               # 工具函数
     ├── time.py          #   时间处理
     └── url.py           #   URL 处理

@@ -24,12 +24,9 @@ Thumbs.db
 
 docker/.env
 
-_image/
-
 .github/
 
 *.log
 .env.local
 .env.*.local
 version
-index.html

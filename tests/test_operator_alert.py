@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import trendradar.deployment.run_with_heartbeat as heartbeat_runtime
 from trendradar.deployment.operator_alert import (
     TelegramSendResult,
     clear_operator_alert_state,
@@ -36,13 +37,12 @@ class FakeSender:
 
 
 class TestOperatorAlert(unittest.TestCase):
-    def test_sends_to_owners_without_receiver_fallback(self):
+    def test_sends_to_explicit_owners(self):
         sender = FakeSender()
         result = send_owner_alert(
             {
                 "TELEGRAM_BOT_TOKEN": "secret-token",
                 "TELEGRAM_OWNER_CHAT_IDS": "111,222",
-                "TELEGRAM_RECEIVER_CHAT_IDS": "999",
             },
             "safe diagnostic",
             sender=sender,
@@ -51,8 +51,6 @@ class TestOperatorAlert(unittest.TestCase):
         self.assertEqual(
             [call["chat_id"] for call in sender.calls], ["111", "222"]
         )
-        self.assertNotIn("999", [call["chat_id"] for call in sender.calls])
-
     def test_requested_subset_cannot_expand_beyond_configured_owners(self):
         sender = FakeSender()
         result = send_owner_alert(
@@ -232,19 +230,19 @@ class TestTaskHeartbeat(unittest.TestCase):
         self.assertIn("completed_at", payload)
         self.assertEqual(set(payload), {"schema_version", "completed_at"})
 
-    @patch("trendradar.deployment.run_with_heartbeat.write_heartbeat")
+    @patch.object(heartbeat_runtime, "write_heartbeat")
     def test_wrapper_records_completion_after_application(self, heartbeat):
         app = Mock(return_value=0)
         self.assertEqual(run_with_heartbeat(app), 0)
         app.assert_called_once_with()
         heartbeat.assert_called_once_with()
 
-    @patch("trendradar.deployment.run_with_heartbeat.write_heartbeat")
+    @patch.object(heartbeat_runtime, "write_heartbeat")
     def test_wrapper_does_not_record_failed_application(self, heartbeat):
         self.assertEqual(run_with_heartbeat(Mock(return_value=7)), 7)
         heartbeat.assert_not_called()
 
-    @patch("trendradar.deployment.run_with_heartbeat.write_heartbeat")
+    @patch.object(heartbeat_runtime, "write_heartbeat")
     def test_wrapper_does_not_record_application_exception(self, heartbeat):
         with self.assertRaises(RuntimeError):
             run_with_heartbeat(Mock(side_effect=RuntimeError("failure")))
