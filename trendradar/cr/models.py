@@ -144,6 +144,9 @@ class CRSourceItem:
     summary: Optional[str] = None
     author: Optional[str] = None
     cross_evidence_admitted: bool = False
+    # Entity extraction cached by cross-evidence admission for Rule 4 reuse.
+    # None means clustering must extract from the title; an empty set is valid.
+    precomputed_entities: Optional[frozenset[str]] = None
     observed_in_current_run: bool = False
     # True only for an item observed in the current run from a source that
     # failed in the immediately preceding recorded run and has now recovered.

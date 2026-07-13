@@ -133,6 +133,7 @@ class TestAdmission(unittest.TestCase):
         self.assertEqual(item.summary, "Production has started")
         self.assertEqual(item.author, "Reporter")
         self.assertTrue(item.cross_evidence_admitted)
+        self.assertEqual(item.precomputed_entities, frozenset({"hynix", "hbm4e"}))
 
     def test_merge_preserves_keyword_rss_and_deduplicates_admitted(self):
         keyword_item = {
@@ -143,6 +144,7 @@ class TestAdmission(unittest.TestCase):
         admitted_duplicate = {
             **keyword_item,
             "cross_evidence_admitted": True,
+            "precomputed_entities": ["entity-a"],
         }
         admitted_new = {
             "title": "English corroboration",
@@ -156,7 +158,10 @@ class TestAdmission(unittest.TestCase):
         merged = merge_rss_stats(keyword, admitted)
 
         self.assertEqual([g["word"] for g in merged], ["关键词", None])
-        self.assertEqual(merged[0]["titles"], [keyword_item])
+        self.assertEqual(
+            merged[0]["titles"][0]["precomputed_entities"],
+            ["entity-a"],
+        )
         self.assertEqual(merged[1]["titles"], [admitted_new])
         self.assertEqual(keyword[0]["titles"], [keyword_item])
 

@@ -16,6 +16,7 @@ Covers:
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -41,6 +42,7 @@ from trendradar.cr.entity_match import (
     load_entity_resources,
 )
 from trendradar.cr.scoring import score_cr_candidate, score_cross_layer_raw
+import trendradar.cr.cluster as cluster_module
 
 try:
     import yaml as _yaml  # noqa: F401
@@ -1160,6 +1162,47 @@ class TestRule4Gating(unittest.TestCase):
         cands = build_cr_candidates([_primitive_record(source_items=[a, x, b])], config=cfg)
         self.assertEqual(len(cands), 2)
         self.assertEqual(sorted(len(c.source_items) for c in cands), [1, 2])
+
+
+class TestRule4PrecomputedEntities(unittest.TestCase):
+    def test_admitted_rss_reuses_precomputed_entities(self):
+        hotlist = _hotlist_item(
+            title="SK海力士HBM4E量产",
+            url="https://hl.example.com/precomputed",
+        )
+        rss = _rss_item(
+            title="SK Hynix starts HBM4E mass production",
+            url="https://rss.example.com/precomputed",
+        )
+        rss.precomputed_entities = frozenset({"hynix", "hbm4e"})
+        record = _primitive_record(source_items=[hotlist, rss])
+
+        with patch.object(
+            cluster_module,
+            "extract_entities",
+            wraps=cluster_module.extract_entities,
+        ) as extract:
+            candidates = build_cr_candidates(
+                [record], config=_entity_config()
+            )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(extract.call_count, 1)
+        self.assertEqual(extract.call_args.args[0], hotlist.title)
+
+    def test_legacy_rss_without_cache_still_extracts_entities(self):
+        hotlist = _hotlist_item(title="SK海力士HBM4E量产")
+        rss = _rss_item(title="SK Hynix starts HBM4E mass production")
+        record = _primitive_record(source_items=[hotlist, rss])
+
+        with patch.object(
+            cluster_module,
+            "extract_entities",
+            wraps=cluster_module.extract_entities,
+        ) as extract:
+            build_cr_candidates([record], config=_entity_config())
+
+        self.assertEqual(extract.call_count, 2)
 
 
 class TestCanonicalClusterKey(unittest.TestCase):
