@@ -60,7 +60,11 @@ from trendradar.cr.dispatch_receipt import (
     STATUS_SKIPPED_DEFERRED_QUEUE_UPSERT,
     build_dispatch_receipts_json,
 )
-from trendradar.cr.decision import DECISION_URGENT
+from trendradar.cr.decision import (
+    DECISION_SUPPRESS,
+    DECISION_URGENT,
+    DEFAULT_CR_URGENT_THRESHOLD,
+)
 from trendradar.cr.deferred_queue import (
     CRDeferredDispatchEntry,
     CRDeferredDispatchQueue,
@@ -337,16 +341,22 @@ def _plan_for_candidates(
     *,
     text_config: object = None,
     total_eligible_count: int | None = None,
+    high_score_suppressed_count: int | None = None,
 ) -> CRDispatchPlan:
     from trendradar.cr.presentation import CRPresentationRun, render_cr_a_text
 
+    suppressed_count = (
+        pipeline_result.high_score_suppressed_count
+        if high_score_suppressed_count is None
+        else high_score_suppressed_count
+    )
     run = CRPresentationRun(
         run_label=pipeline_result.run_label,
         candidates=list(candidates),
         total_eligible_count=(
             len(candidates) if total_eligible_count is None else total_eligible_count
         ),
-        high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+        high_score_suppressed_count=suppressed_count,
     )
     filtered = CRPipelineResult(
         run_label=pipeline_result.run_label,
@@ -359,9 +369,41 @@ def _plan_for_candidates(
         cr_a_text=render_cr_a_text(run, config=text_config),
         markdown_audit_text=pipeline_result.markdown_audit_text,
         html_audit_text=pipeline_result.html_audit_text,
-        high_score_suppressed_count=pipeline_result.high_score_suppressed_count,
+        high_score_suppressed_count=suppressed_count,
     )
     return build_cr_a_dispatch_plan(filtered)
+
+
+def _count_high_score_cooldown_suppressed(
+    candidates: tuple,
+    eligible_candidates: tuple,
+    *,
+    urgent_threshold: float,
+) -> int:
+    """Count urgent-score candidates removed by cooldown/repeat enforcement."""
+    eligible_event_keys = {
+        stable_event_key_for_candidate(pc) for pc in eligible_candidates
+    }
+    return sum(
+        1
+        for pc in candidates
+        if stable_event_key_for_candidate(pc) not in eligible_event_keys
+        and pc.total_score >= urgent_threshold
+    )
+
+
+def _count_fresh_high_score_suppressed(
+    presented_candidates: list,
+    *,
+    urgent_threshold: float,
+) -> int:
+    """Count decision-layer suppressions backed by current-run evidence."""
+    return sum(
+        1
+        for pc in presented_candidates
+        if pc.decision_level == DECISION_SUPPRESS
+        and pc.total_score >= urgent_threshold
+    )
 
 
 def _single_candidate_message(
@@ -634,7 +676,7 @@ def build_and_write_cr_runtime_dry_run(
     run_context: CRRunContext | None = None,
     pipeline_config: CRPipelineConfig | None = None,
     artifact_config: CRArtifactConfig | None = None,
-    urgent_threshold: float = 80.0,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
     dispatch_sink: CRDispatchSink | None = None,
     dispatch_mode: str | None = None,
     dispatch_state_path: str | Path | None = None,
@@ -820,6 +862,11 @@ def build_and_write_cr_runtime_dry_run(
         config=effective_pipeline_config,
         urgent_threshold=urgent_threshold,
     )
+    effective_text_config = (
+        effective_pipeline_config.render.text
+        if effective_pipeline_config is not None
+        else None
+    )
 
     # 4b. Assemble the audit-only cooldown context (PR10e) from the presented
     #     candidates.  The optional prior snapshot is explicit (in memory or
@@ -873,6 +920,9 @@ def build_and_write_cr_runtime_dry_run(
 
     # 6. Plan CR-A dispatch (pure — nothing is sent).
     dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
+    effective_high_score_suppressed_count = (
+        pipeline_result.high_score_suppressed_count
+    )
     effective_dispatch_mode = dispatch_mode or "artifact"
     effective_now = now if now is not None else datetime.now(timezone.utc)
     if effective_now.tzinfo is None:
@@ -894,22 +944,29 @@ def build_and_write_cr_runtime_dry_run(
             pc for pc in pipeline_result.presented_candidates
             if candidate_has_fresh_input(pc)
         ]
-        text_config = effective_pipeline_config.render.text
         fresh_selected = tuple(
-            select_cr_a_candidates(fresh_presented, config=text_config)
+            select_cr_a_candidates(
+                fresh_presented, config=effective_text_config
+            )
         )
+        fresh_suppressed_count = _count_fresh_high_score_suppressed(
+            fresh_presented,
+            urgent_threshold=urgent_threshold,
+        )
+        effective_high_score_suppressed_count = fresh_suppressed_count
         if input_health.fail_closed:
             health_blocked = True
-        elif not fresh_selected:
-            health_blocked = True
-        else:
+        elif fresh_selected or fresh_suppressed_count > 0:
             eligible_cr_a_candidates = fresh_selected
             dispatch_plan = _plan_for_candidates(
                 pipeline_result,
                 fresh_selected,
-                text_config=text_config,
+                text_config=effective_text_config,
                 total_eligible_count=count_cr_a_eligible(fresh_presented),
+                high_score_suppressed_count=fresh_suppressed_count,
             )
+        else:
+            health_blocked = True
         if health_blocked:
             dispatch_plan = CRDispatchPlan(
                 should_dispatch=False,
@@ -918,7 +975,9 @@ def build_and_write_cr_runtime_dry_run(
                 run_label=dispatch_plan.run_label,
                 candidate_count=dispatch_plan.candidate_count,
                 urgent_count=dispatch_plan.urgent_count,
-                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+                high_score_suppressed_count=(
+                    effective_high_score_suppressed_count
+                ),
             )
     quiet_hours = evaluate_cr_quiet_hours(
         quiet_hours_env,
@@ -1051,28 +1110,58 @@ def build_and_write_cr_runtime_dry_run(
             policy=cooldown_policy,
             now=effective_now,
         )
+        candidates_before_cooldown = eligible_cr_a_candidates
         # Blocker 5: use per-candidate eligible set.
         eligible_cr_a_candidates = cooldown_enforcement.eligible_candidates
-        if not cooldown_enforcement.should_dispatch:
-            cooldown_override_reason = cooldown_enforcement.override_reason
-            dispatch_plan = CRDispatchPlan(
-                should_dispatch=False,
-                messages=(),
-                reason=cooldown_override_reason or "skipped_cooldown",
-                run_label=dispatch_plan.run_label,
-                candidate_count=dispatch_plan.candidate_count,
-                urgent_count=dispatch_plan.urgent_count,
-                high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
+        cooldown_suppressed_count = 0
+        if cooldown_enforcement.state_error is None:
+            cooldown_suppressed_count = _count_high_score_cooldown_suppressed(
+                candidates_before_cooldown,
+                eligible_cr_a_candidates,
+                urgent_threshold=urgent_threshold,
             )
-        elif eligible_cr_a_candidates != pipeline_result.cr_a_candidates:
+        combined_suppressed_count = (
+            effective_high_score_suppressed_count
+            + cooldown_suppressed_count
+        )
+        effective_high_score_suppressed_count = combined_suppressed_count
+        if not cooldown_enforcement.should_dispatch:
+            if (
+                combined_suppressed_count > 0
+                and cooldown_enforcement.state_error is None
+            ):
+                dispatch_plan = _plan_for_candidates(
+                    pipeline_result,
+                    (),
+                    text_config=effective_text_config,
+                    high_score_suppressed_count=combined_suppressed_count,
+                )
+            else:
+                cooldown_override_reason = cooldown_enforcement.override_reason
+                dispatch_plan = CRDispatchPlan(
+                    should_dispatch=False,
+                    messages=(),
+                    reason=cooldown_override_reason or "skipped_cooldown",
+                    run_label=dispatch_plan.run_label,
+                    candidate_count=dispatch_plan.candidate_count,
+                    urgent_count=dispatch_plan.urgent_count,
+                    high_score_suppressed_count=combined_suppressed_count,
+                )
+        elif (
+            eligible_cr_a_candidates != pipeline_result.cr_a_candidates
+            or combined_suppressed_count
+            != dispatch_plan.high_score_suppressed_count
+        ):
             dispatch_plan = _plan_for_candidates(
                 pipeline_result,
                 eligible_cr_a_candidates,
-                text_config=effective_pipeline_config.render.text,
+                text_config=effective_text_config,
+                high_score_suppressed_count=combined_suppressed_count,
             )
 
     # 6c. Apply quiet-hours live policy after cooldown eligibility.
     quiet_bypass_applied = False
+    quiet_suppression_summary_deferred = False
     quiet_deferred_candidates: tuple = ()
     quiet_receipts: list[dict[str, object]] = []
     quiet_upsert_outcomes: dict[str, CRDeferredQueueUpsertResult] = {}
@@ -1102,6 +1191,25 @@ def build_and_write_cr_runtime_dry_run(
             "exception_type": None,
             "exception_message": None,
         }]
+    elif (
+        effective_dispatch_mode == "live"
+        and not health_blocked
+        and quiet_hours.enabled
+        and quiet_hours.in_quiet_hours
+        and queue_error_reason is None
+        and cooldown_override_reason is None
+        and dispatch_plan.reason == "ready_suppressed_only"
+    ):
+        # A count-only observability message has no candidate payload to queue
+        # and never bypasses quiet hours.  A later non-quiet run may emit a new
+        # summary if suppression is still observed then.
+        quiet_suppression_summary_deferred = True
+        dispatch_plan = replace(
+            dispatch_plan,
+            should_dispatch=False,
+            messages=(),
+            reason="deferred_quiet_hours",
+        )
     elif (
         effective_dispatch_mode == "live"
         and not health_blocked
@@ -1148,7 +1256,12 @@ def build_and_write_cr_runtime_dry_run(
             )
             if bypass_candidates:
                 dispatch_plan = _plan_for_candidates(
-                    pipeline_result, bypass_candidates
+                    pipeline_result,
+                    bypass_candidates,
+                    text_config=effective_text_config,
+                    high_score_suppressed_count=(
+                        effective_high_score_suppressed_count
+                    ),
                 )
                 quiet_bypass_applied = True
                 execution_state_candidates = bypass_candidates
@@ -1208,7 +1321,7 @@ def build_and_write_cr_runtime_dry_run(
                     deferred_until=deferred_until,
                     run_label=run_label,
                     high_score_suppressed_count=(
-                        pipeline_result.high_score_suppressed_count
+                        effective_high_score_suppressed_count
                     ),
                 )
                 queue_changed = (
@@ -1275,7 +1388,9 @@ def build_and_write_cr_runtime_dry_run(
                 "allowed_by_escalation": e.is_escalation and is_eligible,
                 "suppressed_by_cooldown": not is_eligible,
                 "decision": e.cooldown_action if is_eligible else (
-                    cooldown_override_reason or "skipped_cooldown"
+                    cooldown_enforcement.override_reason
+                    or cooldown_override_reason
+                    or "skipped_cooldown"
                 ),
             })
         cooldown_context = {
@@ -1323,6 +1438,9 @@ def build_and_write_cr_runtime_dry_run(
     elif queue_error_reason is not None:
         quiet_decision = "skipped_deferred_queue_error"
         quiet_reason = "deferred_queue_error"
+    elif quiet_suppression_summary_deferred:
+        quiet_decision = "deferred_quiet_hours"
+        quiet_reason = "quiet_hours_active"
     elif deferred_event_keys:
         quiet_decision = "deferred_quiet_hours"
         quiet_reason = "quiet_hours_active"

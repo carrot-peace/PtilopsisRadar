@@ -609,6 +609,22 @@ class TestRenderCRAText(unittest.TestCase):
         text = render_cr_a_text(run)
         self.assertIn("Candidates: 1", text)
 
+    def test_high_score_suppressed_count_shown_when_positive(self):
+        """Suppressed high-score candidates are visible in the header."""
+        run = CRPresentationRun(
+            run_label="T",
+            candidates=[],
+            high_score_suppressed_count=2,
+        )
+        text = render_cr_a_text(run)
+        self.assertIn("Suppressed (high-score): 2", text)
+
+    def test_high_score_suppressed_count_omitted_when_zero(self):
+        """The header stays compact when no high-score candidate was suppressed."""
+        run = CRPresentationRun(run_label="T", candidates=[])
+        text = render_cr_a_text(run)
+        self.assertNotIn("Suppressed (high-score):", text)
+
     def test_no_summary_line(self):
         """No Summary line fabricated."""
         pc = self._make_pc(push_eligible=True)
@@ -777,7 +793,25 @@ class TestRenderCRATextFromParts(unittest.TestCase):
             [c], [s], [d], run_label="T"
         )
         self.assertIn("Candidates: 0", text)
+        self.assertIn("Suppressed (high-score): 1", text)
         self.assertNotIn("Suppressed Topic", text)
+
+    def test_custom_urgent_threshold_controls_suppressed_count(self):
+        c = _make_candidate("c1", "k1", "Suppressed Topic")
+        s = _make_score("c1", "k1", 75.0)
+        d = _make_decision(
+            "c1", "k1", DECISION_SUPPRESS, 75.0, push_eligible=False
+        )
+
+        default_text = render_cr_a_text_from_parts(
+            [c], [s], [d], run_label="T"
+        )
+        custom_text = render_cr_a_text_from_parts(
+            [c], [s], [d], run_label="T", urgent_threshold=70.0
+        )
+
+        self.assertNotIn("Suppressed (high-score):", default_text)
+        self.assertIn("Suppressed (high-score): 1", custom_text)
 
 
 # ===========================================================================

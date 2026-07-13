@@ -532,6 +532,24 @@ class TestMissingFields(unittest.TestCase):
         d = cr_dispatch_plan_to_json_dict(plan, dispatch_mode="artifact")
         self.assertEqual(d["missing_fields"], [])
 
+    def test_suppression_only_dispatch_needs_no_selected_event(self):
+        pipeline = _make_pipeline(
+            cr_a_candidates=(),
+            cr_a_text="Suppressed (high-score): 1",
+            high_score_suppressed_count=1,
+        )
+        plan = build_cr_a_dispatch_plan(pipeline)
+
+        data = cr_dispatch_plan_to_json_dict(
+            plan, dispatch_mode="live"
+        )
+
+        self.assertTrue(data["should_dispatch"])
+        self.assertEqual(data["reason"], "ready_suppressed_only")
+        self.assertIsNone(data["selected_event_key"])
+        self.assertIsNone(data["selected_candidate_id"])
+        self.assertEqual(data["missing_fields"], [])
+
 
 # ---------------------------------------------------------------------------
 # Test Group G — Serialization: candidate_summary

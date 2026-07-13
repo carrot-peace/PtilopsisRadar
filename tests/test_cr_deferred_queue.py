@@ -364,7 +364,12 @@ class TestDeferredQueueRuntime(unittest.TestCase):
 
             self.assertEqual(
                 len(sink.submitted_messages),
-                submitted_after_escalation,
+                submitted_after_escalation + 1,
+            )
+            repeat_summary = sink.submitted_messages[-1]
+            self.assertEqual(repeat_summary.candidate_count, 0)
+            self.assertIn(
+                "Suppressed (high-score): 1", repeat_summary.text
             )
 
     def test_flush_not_configured_and_failed_retain_queue(self):

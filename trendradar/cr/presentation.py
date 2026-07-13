@@ -20,10 +20,12 @@ from trendradar.cr.cluster import normalize_topic_text
 from trendradar.cr.decision import (
     CRDecision,
     CRDecisionLevel,
+    DEFAULT_CR_URGENT_THRESHOLD,
     DECISION_ALERT,
     DECISION_SUPPRESS,
     DECISION_URGENT,
     DECISION_WATCH,
+    count_high_score_suppressed,
 )
 from trendradar.cr.models import CRCandidate
 from trendradar.cr.scoring import CRScoreResult
@@ -81,6 +83,9 @@ class CRPresentationRun:
     candidates before the max_candidates cap was applied.  When it exceeds
     ``len(candidates)`` the difference signals that candidates were truncated.
     Defaults to 0, which the renderer treats as "use len(candidates)".
+
+    ``high_score_suppressed_count`` defaults to 0 for callers that do not run
+    decision-layer suppression; dispatch paths should pass the observed count.
     """
 
     run_label: str
@@ -387,6 +392,10 @@ def render_cr_a_text(
     lines.append(_format_run_datetime(run.run_label))
     eligible_count = run.total_eligible_count if run.total_eligible_count > 0 else len(candidates)
     lines.append(f"Candidates: {eligible_count}")
+    if run.high_score_suppressed_count > 0:
+        lines.append(
+            f"Suppressed (high-score): {run.high_score_suppressed_count}"
+        )
     lines.append("")
 
     if not candidates:
@@ -426,6 +435,7 @@ def render_cr_a_text_from_parts(
     *,
     run_label: str,
     config: CRTextPresentationConfig | None = None,
+    urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
 ) -> str:
     """Convenience: bind → select → run → render in one call.
 
@@ -439,6 +449,9 @@ def render_cr_a_text_from_parts(
     run = CRPresentationRun(
         run_label=run_label,
         candidates=selected,
+        high_score_suppressed_count=count_high_score_suppressed(
+            decisions, urgent_threshold=urgent_threshold
+        ),
         total_eligible_count=eligible_total,
     )
     return render_cr_a_text(run, config=config)
