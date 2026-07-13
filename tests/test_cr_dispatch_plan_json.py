@@ -14,6 +14,7 @@ Covers:
 Pure tests only — no network, no Telegram, no real output directories.
 """
 
+import ast
 import json
 import os
 import sys
@@ -42,6 +43,7 @@ from trendradar.cr.dispatch_plan import (
     count_by_level,
     cr_dispatch_plan_to_json_dict,
 )
+from tests.cr_main_ast import load_cr_dispatch_hook
 from trendradar.cr.event_identity import stable_event_key_for_candidate
 from trendradar.cr.models import CRCandidate
 from trendradar.cr.pipeline import CRPipelineResult, build_cr_pipeline_from_primitives
@@ -804,17 +806,11 @@ class TestModeBehavior(unittest.TestCase):
 
     def test_off_mode_not_called(self):
         """When mode is off, build_and_write_cr_runtime_dry_run is never
-        called from __main__.py — verified by source inspection, not by
+        called from __main__.py — verified by AST structure, not by
         invoking with off mode (the function always writes plan JSON).
         """
-        main_path = (
-            Path(__file__).resolve().parent.parent
-            / "trendradar"
-            / "__main__.py"
-        )
-        source = main_path.read_text(encoding="utf-8")
-        self.assertIn("CR_DISPATCH_OFF", source)
-        self.assertIn("_cr_mode != CR_DISPATCH_OFF", source)
+        hook = load_cr_dispatch_hook()
+        self.assertIn(hook.runtime_call, list(ast.walk(hook.off_gate)))
 
     def test_dispatch_mode_defaults_to_artifact_when_none(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,8 +6,8 @@ PR-CR-A1 replaces the PTILOPSIS_CR_DRY_RUN gate with
 ``resolve_cr_dispatch_mode`` in ``trendradar/__main__.py``.  The Telegram
 sink factory is now reachable only through the ``live`` dispatch mode path.
 
-These tests inspect the source by path (no import of ``trendradar.__main__``,
-which requires third-party runtime deps) and assert:
+These tests inspect the parsed syntax tree (without importing
+``trendradar.__main__``, which requires third-party runtime deps) and assert:
 
   Group A — the wiring tokens are present;
   Group B — the factory import stays lazy, inside the dispatch-mode gate,
@@ -24,54 +24,15 @@ from __future__ import annotations
 
 import ast
 import unittest
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
+from tests.cr_main_ast import (
+    calls,
+    import_from_nodes,
+    load_cr_dispatch_hook,
+)
 
-MODE_RESOLVE_TOKEN = "resolve_cr_dispatch_mode"
-MODE_GATE_TOKEN = "_cr_mode != CR_DISPATCH_OFF"
-LIVE_GATE_TOKEN = "_cr_mode == CR_DISPATCH_LIVE"
+
 FACTORY_NAME = "build_cr_telegram_sink_from_env"
-FACTORY_IMPORT = "from trendradar.cr.telegram_env import"
-
-
-def _main_source() -> str:
-    return MAIN_PATH.read_text(encoding="utf-8")
-
-
-def _hook_region(source: str) -> str:
-    """Extract the CR-A dispatch hook region from __main__.py.
-
-    The region is the ``if _cr_mode != CR_DISPATCH_OFF:`` block plus the
-    contiguous comment lines and the ``resolve_cr_dispatch_mode`` call above
-    it.  Extraction is indentation-based.
-    """
-    lines = source.splitlines()
-    gate_idx = next(i for i, line in enumerate(lines) if MODE_GATE_TOKEN in line)
-    gate_indent = len(lines[gate_idx]) - len(lines[gate_idx].lstrip())
-
-    # Walk backwards to include the resolve call and comments above the gate.
-    start = gate_idx
-    while start > 0 and (
-        lines[start - 1].strip().startswith("#")
-        or MODE_RESOLVE_TOKEN in lines[start - 1]
-        or not lines[start - 1].strip()
-    ):
-        start -= 1
-
-    end = gate_idx + 1
-    while end < len(lines):
-        line = lines[end]
-        if not line.strip():
-            end += 1
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent <= gate_indent:
-            break
-        end += 1
-
-    return "\n".join(lines[start:end])
 
 
 # ---------------------------------------------------------------------------
@@ -80,30 +41,35 @@ def _hook_region(source: str) -> str:
 
 
 class TestSourceWiring(unittest.TestCase):
-    """Group A: required wiring tokens are present in __main__.py."""
+    """Group A: resolver, mode gates, and runtime call are structurally wired."""
 
-    REQUIRED_TOKENS = (
-        "resolve_cr_dispatch_mode",
-        "CR_DISPATCH_OFF",
-        "CR_DISPATCH_LIVE",
-        "build_and_write_cr_runtime_dry_run",
-    )
-
-    def test_required_tokens_present(self) -> None:
-        source = _main_source()
-        for token in self.REQUIRED_TOKENS:
-            self.assertIn(
-                token, source, f"required wiring token {token!r} missing"
-            )
+    def test_dispatch_mode_is_resolved_from_environment(self) -> None:
+        hook = load_cr_dispatch_hook()
+        call = hook.resolve_assignment.value
+        self.assertIsInstance(call, ast.Call)
+        self.assertEqual(len(call.args), 1)
+        argument = call.args[0]
+        self.assertIsInstance(argument, ast.Attribute)
+        self.assertEqual(argument.attr, "environ")
+        self.assertIsInstance(argument.value, ast.Name)
+        self.assertEqual(argument.value.id, "os")
 
     def test_dispatch_sink_conditionally_built_for_live(self) -> None:
-        source = _main_source()
-        self.assertIn("_cr_mode == CR_DISPATCH_LIVE", source)
+        hook = load_cr_dispatch_hook()
+        self.assertEqual(len(calls(hook.live_gate, FACTORY_NAME)), 1)
 
     def test_sink_passed_into_dry_run_call(self) -> None:
-        region = _hook_region(_main_source())
-        self.assertIn("build_and_write_cr_runtime_dry_run(", region)
-        self.assertIn("dispatch_sink=_dispatch_sink", region)
+        hook = load_cr_dispatch_hook()
+        dispatch_sink = next(
+            (
+                keyword.value
+                for keyword in hook.runtime_call.keywords
+                if keyword.arg == "dispatch_sink"
+            ),
+            None,
+        )
+        self.assertIsInstance(dispatch_sink, ast.Name)
+        self.assertEqual(dispatch_sink.id, "_dispatch_sink")
 
 
 # ---------------------------------------------------------------------------
@@ -114,18 +80,16 @@ class TestSourceWiring(unittest.TestCase):
 class TestLazyImportBoundary(unittest.TestCase):
     """Group B: factory import stays lazy, inside the dispatch-mode gate."""
 
-    def test_factory_import_present_and_after_gate(self) -> None:
-        source = _main_source()
-        self.assertIn(FACTORY_IMPORT, source)
-        gate_pos = source.index(MODE_GATE_TOKEN)
-        self.assertGreater(
-            source.index(FACTORY_NAME),
-            gate_pos,
-            "factory must first appear after the dispatch-mode gate",
+    def test_factory_import_inside_live_gate(self) -> None:
+        hook = load_cr_dispatch_hook()
+        imports = import_from_nodes(
+            hook.live_gate, "trendradar.cr.telegram_env"
         )
+        self.assertEqual(len(imports), 1)
+        self.assertIn(FACTORY_NAME, [alias.name for alias in imports[0].names])
 
     def test_no_top_level_telegram_import_via_ast(self) -> None:
-        tree = ast.parse(_main_source())
+        tree = load_cr_dispatch_hook().tree
         for node in tree.body:  # module-level statements only
             if isinstance(node, ast.ImportFrom):
                 module = node.module or ""
@@ -136,17 +100,18 @@ class TestLazyImportBoundary(unittest.TestCase):
                     self.assertNotIn("telegram_env", alias.name)
                     self.assertNotIn("telegram_sink", alias.name)
 
-    def test_every_telegram_env_reference_is_indented(self) -> None:
-        for line in _main_source().splitlines():
-            if "telegram_env" in line:
-                self.assertTrue(
-                    line.startswith(" "),
-                    f"telegram_env referenced at top level: {line!r}",
-                )
-
-    def test_factory_import_inside_gated_block(self) -> None:
-        region = _hook_region(_main_source())
-        self.assertIn(FACTORY_IMPORT, region)
+    def test_factory_references_exist_only_inside_live_gate(self) -> None:
+        hook = load_cr_dispatch_hook()
+        all_calls = calls(hook.tree, FACTORY_NAME)
+        live_calls = calls(hook.live_gate, FACTORY_NAME)
+        all_imports = import_from_nodes(
+            hook.tree, "trendradar.cr.telegram_env"
+        )
+        live_imports = import_from_nodes(
+            hook.live_gate, "trendradar.cr.telegram_env"
+        )
+        self.assertEqual(all_calls, live_calls)
+        self.assertEqual(all_imports, live_imports)
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +126,7 @@ class TestNoIndependentTelegramPath(unittest.TestCase):
         # The send gate is checked inside the PR9o factory, never in
         # __main__.py code — so no separate runtime branch can exist on it.
         # Comments and docstrings are allowed as documentation.
-        import ast
-        tree = ast.parse(_main_source())
+        tree = load_cr_dispatch_hook().tree
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
@@ -189,15 +153,12 @@ class TestNoIndependentTelegramPath(unittest.TestCase):
                 self.fail("PTILOPSIS_CR_TELEGRAM_SEND read via os.environ[]")
 
     def test_factory_only_referenced_inside_hook_region(self) -> None:
-        source = _main_source()
-        region = _hook_region(source)
+        hook = load_cr_dispatch_hook()
+        self.assertEqual(len(calls(hook.tree, FACTORY_NAME)), 1)
         self.assertEqual(
-            source.count(FACTORY_NAME),
-            region.count(FACTORY_NAME),
-            "factory referenced outside the CR dispatch hook region",
+            len(import_from_nodes(hook.tree, "trendradar.cr.telegram_env")),
+            1,
         )
-        # Exactly two references: the lazy import and the single call.
-        self.assertEqual(region.count(FACTORY_NAME), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +188,7 @@ class TestHookRegionBoundary(unittest.TestCase):
     )
 
     def test_no_forbidden_tokens_in_hook_region(self) -> None:
-        region = _hook_region(_main_source())
+        region = ast.unparse(load_cr_dispatch_hook().off_gate)
         for token in self.FORBIDDEN:
             self.assertNotIn(
                 token,
@@ -236,15 +197,19 @@ class TestHookRegionBoundary(unittest.TestCase):
             )
 
     def test_hook_region_imports_only_cr_modules(self) -> None:
-        region = _hook_region(_main_source())
-        for line in region.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(("from ", "import ")):
-                self.assertIn(
-                    "trendradar.cr.",
-                    stripped,
-                    f"hook region import outside trendradar.cr: {stripped!r}",
+        hook = load_cr_dispatch_hook()
+        for node in ast.walk(hook.off_gate):
+            if isinstance(node, ast.ImportFrom):
+                self.assertTrue(
+                    (node.module or "").startswith("trendradar.cr."),
+                    f"hook import outside trendradar.cr: {node.module!r}",
                 )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertTrue(
+                        alias.name.startswith("trendradar.cr."),
+                        f"hook import outside trendradar.cr: {alias.name!r}",
+                    )
 
 
 if __name__ == "__main__":

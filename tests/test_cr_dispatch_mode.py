@@ -12,6 +12,7 @@ No real network calls.  No real tokens.  No environment mutation.
 
 from __future__ import annotations
 
+import ast
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,12 @@ from trendradar.cr.dispatch_mode import (
     CR_DISPATCH_OFF,
     CR_DISPATCH_SHADOW,
     resolve_cr_dispatch_mode,
+)
+from tests.cr_main_ast import (
+    assigned_name,
+    calls,
+    import_from_nodes,
+    load_cr_dispatch_hook,
 )
 
 
@@ -179,37 +186,29 @@ class TestPrecedence(unittest.TestCase):
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MAIN_PATH = PROJECT_ROOT / "trendradar" / "__main__.py"
-
-
-def _main_source() -> str:
-    return MAIN_PATH.read_text(encoding="utf-8")
-
-
 class TestRuntimeBehavior(unittest.TestCase):
-    """Group B: source-level checks for dispatch mode wiring."""
+    """Group B: AST checks for dispatch mode wiring."""
 
     def test_main_uses_resolve_cr_dispatch_mode(self) -> None:
-        source = _main_source()
-        self.assertIn("resolve_cr_dispatch_mode", source)
+        hook = load_cr_dispatch_hook()
+        self.assertEqual(len(calls(hook.resolve_assignment, "resolve_cr_dispatch_mode")), 1)
 
     def test_main_checks_off_mode(self) -> None:
-        source = _main_source()
-        self.assertIn("CR_DISPATCH_OFF", source)
-        self.assertIn("_cr_mode != CR_DISPATCH_OFF", source)
+        self.assertIsInstance(load_cr_dispatch_hook().off_gate, ast.If)
 
     def test_main_checks_live_mode_for_sink(self) -> None:
-        source = _main_source()
-        self.assertIn("CR_DISPATCH_LIVE", source)
-        self.assertIn("_cr_mode == CR_DISPATCH_LIVE", source)
+        self.assertIsInstance(load_cr_dispatch_hook().live_gate, ast.If)
 
     def test_main_does_not_use_dry_run_as_gate(self) -> None:
         """The old PTILOPSIS_CR_DRY_RUN gate is replaced by dispatch mode."""
-        source = _main_source()
-        # The old pattern: if os.environ.get("PTILOPSIS_CR_DRY_RUN") == "1":
+        hook = load_cr_dispatch_hook()
         self.assertNotIn(
-            'os.environ.get("PTILOPSIS_CR_DRY_RUN") == "1"',
-            source,
+            "PTILOPSIS_CR_DRY_RUN",
+            {
+                node.value
+                for node in ast.walk(hook.function)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            },
         )
 
     def test_dry_run_still_referenced_in_dispatch_mode_module(self) -> None:
@@ -220,17 +219,30 @@ class TestRuntimeBehavior(unittest.TestCase):
 
     def test_artifact_and_shadow_do_not_build_sink(self) -> None:
         """In __main__.py, the sink is only built inside the live check."""
-        source = _main_source()
-        # Find the live-mode block
-        live_pos = source.index("_cr_mode == CR_DISPATCH_LIVE")
-        sink_build_pos = source.index("build_cr_telegram_sink_from_env", live_pos)
-        # The sink build must be after the live check
-        self.assertGreater(sink_build_pos, live_pos)
+        hook = load_cr_dispatch_hook()
+        self.assertEqual(
+            calls(hook.tree, "build_cr_telegram_sink_from_env"),
+            calls(hook.live_gate, "build_cr_telegram_sink_from_env"),
+        )
+        self.assertEqual(
+            import_from_nodes(hook.tree, "trendradar.cr.telegram_env"),
+            import_from_nodes(hook.live_gate, "trendradar.cr.telegram_env"),
+        )
 
     def test_dispatch_sink_default_is_none(self) -> None:
         """_dispatch_sink defaults to None before the live check."""
-        source = _main_source()
-        self.assertIn("_dispatch_sink = None", source)
+        hook = load_cr_dispatch_hook()
+        live_index = hook.off_gate.body.index(hook.live_gate)
+        sink_defaults = [
+            index
+            for index, statement in enumerate(hook.off_gate.body)
+            if assigned_name(statement) == "_dispatch_sink"
+            and isinstance(statement, ast.Assign)
+            and isinstance(statement.value, ast.Constant)
+            and statement.value.value is None
+        ]
+        self.assertEqual(len(sink_defaults), 1)
+        self.assertLess(sink_defaults[0], live_index)
 
 
 # ---------------------------------------------------------------------------
@@ -243,24 +255,7 @@ class TestSourceBoundary(unittest.TestCase):
 
     def test_no_legacy_push_tokens_in_dispatch_hook(self) -> None:
         """The dispatch hook region must not reference legacy push."""
-        source = _main_source()
-        lines = source.splitlines()
-        # Find the dispatch hook block
-        gate_idx = next(
-            i for i, line in enumerate(lines) if "_cr_mode != CR_DISPATCH_OFF" in line
-        )
-        gate_indent = len(lines[gate_idx]) - len(lines[gate_idx].lstrip())
-        end = gate_idx + 1
-        while end < len(lines):
-            line = lines[end]
-            if not line.strip():
-                end += 1
-                continue
-            indent = len(line) - len(line.lstrip())
-            if indent <= gate_indent:
-                break
-            end += 1
-        region = "\n".join(lines[gate_idx:end])
+        region = ast.unparse(load_cr_dispatch_hook().off_gate)
 
         forbidden = (
             "_send_notification_if_needed",
@@ -282,8 +277,7 @@ class TestSourceBoundary(unittest.TestCase):
         Documentation strings may mention the env var; the runtime must still
         leave this gate inside trendradar.cr.telegram_env.
         """
-        import ast
-        tree = ast.parse(_main_source())
+        tree = load_cr_dispatch_hook().tree
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
