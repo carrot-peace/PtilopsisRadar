@@ -325,7 +325,12 @@ class NewsAnalyzer:
         self._cr_rss_configured_ids = {
             str(feed.get("id", ""))
             for feed in self.ctx.rss_feeds
-            if feed.get("id") and feed.get("enabled", True)
+            if (
+                self.ctx.rss_enabled
+                and feed.get("id")
+                and feed.get("url")
+                and feed.get("enabled", True)
+            )
         }
         self._cr_rss_successful_ids: set[str] = set()
         self._cr_rss_failed_ids: set[str] = set()
@@ -906,8 +911,19 @@ class NewsAnalyzer:
         if _cr_mode != CR_DISPATCH_OFF:
             from trendradar.cr.models import CRRunContext
             from trendradar.cr.input_health import (
+                RECOVERY_STATE_BASELINE,
+                RECOVERY_STATE_TRACKED,
+                RECOVERY_STATE_UNTRUSTED,
                 evaluate_cr_input_health,
                 policy_from_env,
+            )
+            from trendradar.cr.input_health_state import (
+                CRInputHealthState,
+                DEFAULT_CR_INPUT_HEALTH_STATE_PATH,
+                load_cr_input_health_state,
+                quarantine_invalid_cr_input_health_state,
+                recovered_source_ids,
+                save_cr_input_health_state,
             )
             from trendradar.cr.runtime_dry_run import (
                 build_and_write_cr_runtime_dry_run,
@@ -987,6 +1003,57 @@ class NewsAnalyzer:
 
             _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
             _health_policy, _health_warnings = policy_from_env(os.environ)
+            _health_state_path = os.environ.get(
+                "PTILOPSIS_CR_INPUT_HEALTH_STATE_PATH",
+                str(DEFAULT_CR_INPUT_HEALTH_STATE_PATH),
+            ) or str(DEFAULT_CR_INPUT_HEALTH_STATE_PATH)
+            _health_state_load = load_cr_input_health_state(_health_state_path)
+            _hotlist_recovered_ids: tuple[str, ...] = ()
+            _rss_recovered_ids: tuple[str, ...] = ()
+            _recovery_state_status = RECOVERY_STATE_BASELINE
+            _state_can_be_saved = True
+            if _health_state_load.loaded and _health_state_load.state is not None:
+                _recovery_state_status = RECOVERY_STATE_TRACKED
+                _hotlist_recovered_ids = recovered_source_ids(
+                    _health_state_load.state.hotlist_failed_ids,
+                    self._cr_hotlist_successful_ids,
+                )
+                _rss_recovered_ids = recovered_source_ids(
+                    _health_state_load.state.rss_failed_ids,
+                    self._cr_rss_successful_ids,
+                )
+            elif _health_state_load.error is not None:
+                _recovery_state_status = RECOVERY_STATE_UNTRUSTED
+                _health_warnings += (_health_state_load.error,)
+                _state_can_be_saved = quarantine_invalid_cr_input_health_state(
+                    _health_state_path,
+                    suffix=self.ctx.get_time().strftime("%Y%m%dT%H%M%S"),
+                )
+                if not _state_can_be_saved:
+                    _health_warnings += (
+                        "unable to quarantine invalid input health state",
+                    )
+
+            if _state_can_be_saved:
+                _health_state_save = save_cr_input_health_state(
+                    CRInputHealthState(
+                        recorded_at=self.ctx.get_time().isoformat(),
+                        hotlist_successful_ids=tuple(
+                            self._cr_hotlist_successful_ids
+                        ),
+                        hotlist_failed_ids=tuple(self._cr_hotlist_failed_ids),
+                        rss_successful_ids=tuple(self._cr_rss_successful_ids),
+                        rss_failed_ids=tuple(self._cr_rss_failed_ids),
+                    ),
+                    _health_state_path,
+                )
+                if not _health_state_save.saved:
+                    _recovery_state_status = RECOVERY_STATE_UNTRUSTED
+                    _health_warnings += (
+                        _health_state_save.error
+                        or "unable to save input health state",
+                    )
+
             _input_health = evaluate_cr_input_health(
                 hotlist_configured_ids=self._cr_hotlist_configured_ids,
                 hotlist_successful_ids=self._cr_hotlist_successful_ids,
@@ -994,10 +1061,13 @@ class NewsAnalyzer:
                 rss_configured_ids=self._cr_rss_configured_ids,
                 rss_successful_ids=self._cr_rss_successful_ids,
                 rss_failed_ids=self._cr_rss_failed_ids,
+                hotlist_recovered_ids=_hotlist_recovered_ids,
+                rss_recovered_ids=_rss_recovered_ids,
                 observed_item_identities=self._cr_observed_item_identities,
                 snapshot_generated_at=self._cr_input_snapshot_generated_at,
                 now=self.ctx.get_time(),
                 historical_data_reused=self._cr_historical_data_reused,
+                recovery_state_status=_recovery_state_status,
                 policy=_health_policy,
                 warnings=_health_warnings,
             )
@@ -1170,9 +1240,13 @@ class NewsAnalyzer:
         )
         from trendradar.cr.input_health import input_item_identity
 
-        self._cr_hotlist_successful_ids = set(results)
         self._cr_hotlist_failed_ids = {str(v) for v in failed_ids}
+        self._cr_hotlist_successful_ids = {
+            str(v) for v in results
+        } - self._cr_hotlist_failed_ids
         for source_id, titles in results.items():
+            if str(source_id) not in self._cr_hotlist_successful_ids:
+                continue
             for title in titles:
                 self._cr_observed_item_identities.add(input_item_identity(
                     source_type="hotlist", source_id=str(source_id), title=str(title),
@@ -1284,11 +1358,15 @@ class NewsAnalyzer:
 
             self._rss_source_total = len(feeds)
             self._rss_source_failed = len(rss_data.failed_ids)
-            self._cr_rss_successful_ids = set(rss_data.items)
             self._cr_rss_failed_ids = {str(v) for v in rss_data.failed_ids}
+            self._cr_rss_successful_ids = {
+                str(v) for v in rss_data.items
+            } - self._cr_rss_failed_ids
             from trendradar.cr.input_health import input_item_identity
 
             for feed_id, items in rss_data.items.items():
+                if str(feed_id) not in self._cr_rss_successful_ids:
+                    continue
                 for item in items:
                     self._cr_observed_item_identities.add(input_item_identity(
                         source_type="rss",

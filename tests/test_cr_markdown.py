@@ -54,6 +54,8 @@ def _make_source_item(
     first_time: str | None = None,
     last_time: str | None = None,
     published_at: str | None = None,
+    observed_in_current_run: bool = False,
+    observed_after_ingest_gap: bool = False,
 ) -> CRSourceItem:
     return CRSourceItem(
         title=title,
@@ -69,6 +71,8 @@ def _make_source_item(
         first_time=first_time,
         last_time=last_time,
         published_at=published_at,
+        observed_in_current_run=observed_in_current_run,
+        observed_after_ingest_gap=observed_after_ingest_gap,
     )
 
 
@@ -441,6 +445,18 @@ class TestSourceItems(unittest.TestCase):
         self.assertIn("Source ID: weibo", text)
         self.assertIn("Current Rank: 3", text)
         self.assertIn("Normalized Rank: 1", text)
+
+    def test_ingest_recovery_marker_is_auditable(self):
+        si = _make_source_item(
+            observed_in_current_run=True,
+            observed_after_ingest_gap=True,
+        )
+        text = render_cr_markdown_audit(
+            [_make_presented(source_items=[si])],
+            run_label="T",
+        )
+        self.assertIn("Observed In Current Run: True", text)
+        self.assertIn("Observed After Ingest Gap: True", text)
 
     def test_none_fields_skipped(self):
         """None / empty fields skipped."""

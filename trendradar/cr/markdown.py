@@ -105,6 +105,8 @@ _SOURCE_ITEM_FIELDS: list[tuple[str, str]] = [
     ("normalized_rank", "Normalized Rank"),
     ("is_new", "Is New"),
     ("is_new_semantics", "Is New Semantics"),
+    ("observed_in_current_run", "Observed In Current Run"),
+    ("observed_after_ingest_gap", "Observed After Ingest Gap"),
     ("first_time", "First Time"),
     ("last_time", "Last Time"),
     ("published_at", "Published At"),
@@ -440,6 +442,18 @@ def render_cr_markdown_audit(
         lines.append(f"- Snapshot Generated At: `{generated_at}`")
         lines.append(f"- Snapshot Age Minutes: `{age_minutes}`")
         lines.append(f"- Historical Data Reused: `{snapshot['historical_data_reused']}`")
+        recovery = health["recovery"]
+        lines.append(
+            f"- Recovery State: `{_escape_markdown_text(str(recovery['state_status']))}`"
+        )
+        lines.append(
+            "- Recovered Hotlist Sources: "
+            + (_escape_markdown_text(", ".join(health["hotlist"]["recovered_ids"])) or "none")
+        )
+        lines.append(
+            "- Recovered RSS Sources: "
+            + (_escape_markdown_text(", ".join(health["rss"]["recovered_ids"])) or "none")
+        )
         hotlist_ratio = health["hotlist"]["success_ratio"]
         rss_ratio = health["rss"]["success_ratio"]
         lines.append(f"- Hotlist Success Ratio: `{hotlist_ratio if hotlist_ratio is not None else 'unknown'}`")

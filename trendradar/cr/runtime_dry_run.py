@@ -353,6 +353,7 @@ def _plan_for_candidates(
     run = CRPresentationRun(
         run_label=pipeline_result.run_label,
         candidates=list(candidates),
+        coverage_warning=pipeline_result.coverage_warning,
         total_eligible_count=(
             len(candidates) if total_eligible_count is None else total_eligible_count
         ),
@@ -370,6 +371,7 @@ def _plan_for_candidates(
         markdown_audit_text=pipeline_result.markdown_audit_text,
         html_audit_text=pipeline_result.html_audit_text,
         high_score_suppressed_count=suppressed_count,
+        coverage_warning=pipeline_result.coverage_warning,
     )
     return build_cr_a_dispatch_plan(filtered)
 
@@ -411,6 +413,7 @@ def _single_candidate_message(
     *,
     run_label: str,
     high_score_suppressed_count: int,
+    coverage_warning: str | None = None,
 ) -> CRDispatchMessage:
     from trendradar.cr.presentation import CRPresentationRun, render_cr_a_text
 
@@ -418,6 +421,7 @@ def _single_candidate_message(
         run_label=run_label,
         candidates=[pc],
         high_score_suppressed_count=high_score_suppressed_count,
+        coverage_warning=coverage_warning,
     )
     level = getattr(pc, "decision_level", None)
     return CRDispatchMessage(
@@ -450,12 +454,14 @@ def _deferred_entry_for_candidate(
     deferred_until: str,
     run_label: str,
     high_score_suppressed_count: int,
+    coverage_warning: str | None = None,
 ) -> CRDeferredDispatchEntry:
     event_key = stable_event_key_for_candidate(pc)
     message = _single_candidate_message(
         pc,
         run_label=run_label,
         high_score_suppressed_count=high_score_suppressed_count,
+        coverage_warning=coverage_warning,
     )
     return CRDeferredDispatchEntry(
         entry_id=stable_deferred_entry_id(event_key),
@@ -481,6 +487,7 @@ def _queue_with_candidates(
     deferred_until: str,
     run_label: str,
     high_score_suppressed_count: int,
+    coverage_warning: str | None = None,
 ) -> tuple[CRDeferredDispatchQueue, tuple[CRDeferredQueueUpsertResult, ...]]:
     updated = queue
     outcomes: list[CRDeferredQueueUpsertResult] = []
@@ -491,6 +498,7 @@ def _queue_with_candidates(
             deferred_until=deferred_until,
             run_label=run_label,
             high_score_suppressed_count=high_score_suppressed_count,
+            coverage_warning=coverage_warning,
         )
         result = upsert_deferred_entry(updated, entry)
         updated = result.queue
@@ -861,6 +869,7 @@ def build_and_write_cr_runtime_dry_run(
         run_label=run_label,
         config=effective_pipeline_config,
         urgent_threshold=urgent_threshold,
+        input_health=input_health,
     )
     effective_text_config = (
         effective_pipeline_config.render.text
@@ -1323,6 +1332,7 @@ def build_and_write_cr_runtime_dry_run(
                     high_score_suppressed_count=(
                         effective_high_score_suppressed_count
                     ),
+                    coverage_warning=pipeline_result.coverage_warning,
                 )
                 queue_changed = (
                     updated_queue.entries != deferred_queue_load.queue.entries

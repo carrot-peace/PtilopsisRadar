@@ -145,6 +145,9 @@ class CRSourceItem:
     author: Optional[str] = None
     cross_evidence_admitted: bool = False
     observed_in_current_run: bool = False
+    # True only for an item observed in the current run from a source that
+    # failed in the immediately preceding recorded run and has now recovered.
+    observed_after_ingest_gap: bool = False
 
 
 # ---------------------------------------------------------------------------

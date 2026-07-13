@@ -90,6 +90,7 @@ class CRPresentationRun:
 
     run_label: str
     candidates: list[CRPresentedCandidate]
+    coverage_warning: str | None = None
     high_score_suppressed_count: int = 0
     total_eligible_count: int = 0
 
@@ -396,6 +397,8 @@ def render_cr_a_text(
         lines.append(
             f"Suppressed (high-score): {run.high_score_suppressed_count}"
         )
+    if run.coverage_warning:
+        lines.append(run.coverage_warning)
     lines.append("")
 
     if not candidates:
