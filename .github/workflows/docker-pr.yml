@@ -38,6 +38,10 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: false
+          build-args: |
+            PTILOPSIS_BUILD_COMMIT=${{ github.event.pull_request.head.sha }}
+            PTILOPSIS_BUILD_ID=${{ github.run_id }}-${{ github.run_attempt }}
+            PTILOPSIS_DEPLOYMENT_IMAGE_NAME=ptilopsis-radar:pr-${{ github.event.number }}
           cache-from: type=gha,scope=crawler
           cache-to: type=gha,scope=crawler,mode=max
 

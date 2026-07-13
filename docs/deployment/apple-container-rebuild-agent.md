@@ -56,7 +56,7 @@ container image list | grep ptilopsis-radar
 ### A2. 构建新镜像
 
 ```fish
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile . 2>&1
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest 2>&1
 ```
 
 **成功判定**：输出包含 `ptilopsis-radar:latest`，无 `error`/`failed`。

@@ -77,6 +77,21 @@ RUN sed -i 's/\r$//' /entrypoint.sh.tmp && \
     chmod +x manage.py && \
     mkdir -p /app/config /app/output
 
+# Keep per-build identity in a final metadata layer so a unique build id does
+# not invalidate dependency installation and application build caches.
+ARG PTILOPSIS_BUILD_COMMIT=unknown
+ARG PTILOPSIS_BUILD_ID=unknown
+ARG PTILOPSIS_DEPLOYMENT_IMAGE_NAME=unknown
+RUN test -n "${PTILOPSIS_BUILD_COMMIT}" \
+    && test "${PTILOPSIS_BUILD_COMMIT}" != "unknown" \
+    && test -n "${PTILOPSIS_BUILD_ID}" \
+    && test "${PTILOPSIS_BUILD_ID}" != "unknown" \
+    && test -n "${PTILOPSIS_DEPLOYMENT_IMAGE_NAME}" \
+    && test "${PTILOPSIS_DEPLOYMENT_IMAGE_NAME}" != "unknown"
+ENV PTILOPSIS_BUILD_COMMIT=${PTILOPSIS_BUILD_COMMIT} \
+    PTILOPSIS_BUILD_ID=${PTILOPSIS_BUILD_ID} \
+    PTILOPSIS_DEPLOYMENT_IMAGE_NAME=${PTILOPSIS_DEPLOYMENT_IMAGE_NAME}
+
 ENV PYTHONUNBUFFERED=1 \
     CONFIG_PATH=/app/config/config.yaml \
     FREQUENCY_WORDS_PATH=/app/config/frequency_words.txt
