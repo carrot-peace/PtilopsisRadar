@@ -26,17 +26,16 @@ AppContext.render_html() 的 renderer routing 测试。
   8. non-daily + usable environment AI     → newsletter
 """
 
-import importlib.util
 import os
 import shutil
 import sys
 import tempfile
-import types
 import unittest
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 import _bootstrap  # noqa: E402
+import report_test_bootstrap  # noqa: E402
 
 ROOT = _bootstrap.ROOT
 
@@ -48,61 +47,10 @@ FALLBACK_NOTICE = (
 )
 
 
-def _attach_getattr(mod):
-    """让 stub 模块对任意名字返回占位类（兼容 `from mod import Name` 与注解/Optional[]）。"""
-
-    def __getattr__(name):  # PEP 562 module-level __getattr__
-        obj = type(name, (), {})  # 动态类：可用于注解、Optional[...]、默认值
-        setattr(mod, name, obj)  # 缓存，保证多次访问身份一致
-        return obj
-
-    mod.__getattr__ = __getattr__
-    return mod
-
-
-def _stub_pkg(name):
-    mod = sys.modules.get(name)
-    if mod is None:
-        mod = types.ModuleType(name)
-        mod.__path__ = []
-        sys.modules[name] = mod
-    return _attach_getattr(mod)
-
-
-def _load_real(name, relpath):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, relpath))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _load_context_module():
-    """在 stub 掉重依赖后加载真实 trendradar.context，返回模块对象。"""
-    # 真实 report pieces：context imports generator from the package and
-    # renderers from submodules.
-    report_pkg = _stub_pkg("trendradar.report")
-    gen = _load_real("trendradar.report.generator", "trendradar/report/generator.py")
-    report_pkg.prepare_report_data = gen.prepare_report_data
-    report_pkg.generate_html_report = gen.generate_html_report
-    _load_real("trendradar.report.dashboard", "trendradar/report/dashboard.py")
-    _load_real("trendradar.report.daily_v2", "trendradar/report/daily_v2.py")
-    _load_real("trendradar.report.newsletter", "trendradar/report/newsletter.py")
-
-    # context.py 的其余 import 目标：纯 stub 即可（routing 不会真正调用）
-    _stub_pkg("trendradar.utils")
-    _stub_pkg("trendradar.utils.time")
-    _stub_pkg("trendradar.core")  # _bootstrap 已建为普通模块，这里补 __getattr__
-    _stub_pkg("trendradar.ai")  # 同上，补 __getattr__ 以解析 AITranslator
-    _stub_pkg("trendradar.ai.filter")
-    _stub_pkg("trendradar.storage")
-
-    return _load_real("trendradar.context", "trendradar/context.py")
-
-
-_CTX = _load_context_module()
+_REPORT_BOOTSTRAP = report_test_bootstrap.load_report_context()
+_CTX = _REPORT_BOOTSTRAP.context
 AppContext = _CTX.AppContext
-DV2 = sys.modules["trendradar.report.daily_v2"]
+DV2 = _REPORT_BOOTSTRAP.daily_v2
 
 
 def _report_data():
