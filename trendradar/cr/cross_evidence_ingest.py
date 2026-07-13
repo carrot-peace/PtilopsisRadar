@@ -143,11 +143,14 @@ def merge_rss_stats(
 ) -> List[dict]:
     """Append unique admitted RSS items while preserving keyword groups."""
     merged = [
-        {**group, "titles": list(group.get("titles", []))}
+        {
+            **group,
+            "titles": [dict(item) for item in group.get("titles", [])],
+        }
         for group in (keyword_rss_stats or [])
     ]
     seen = {
-        _rss_item_identity(item)
+        _rss_item_identity(item): item
         for group in merged
         for item in group.get("titles", [])
     }
@@ -156,9 +159,18 @@ def merge_rss_stats(
         for item in group.get("titles", []):
             identity = _rss_item_identity(item)
             if identity in seen:
+                existing = seen[identity]
+                if (
+                    existing.get("precomputed_entities") is None
+                    and item.get("precomputed_entities") is not None
+                ):
+                    existing["precomputed_entities"] = list(
+                        item["precomputed_entities"]
+                    )
                 continue
-            seen.add(identity)
-            admitted_unique.append(item)
+            copied = dict(item)
+            seen[identity] = copied
+            admitted_unique.append(copied)
 
     if admitted_unique:
         merged.append({"word": None, "titles": admitted_unique})
@@ -239,7 +251,9 @@ def select_cross_evidence_rss(
             if ov > best_overlap:
                 best_overlap, best_topic = ov, ti
 
-        admitted.append((best_topic, best_overlap, _to_title_item(item)))
+        admitted.append(
+            (best_topic, best_overlap, _to_title_item(item, ents))
+        )
 
     if max_per_topic is not None and admitted:
         admitted = _cap_per_topic(admitted, max_per_topic)
@@ -250,7 +264,7 @@ def select_cross_evidence_rss(
     return [{"word": None, "titles": titles}]
 
 
-def _to_title_item(item: dict) -> dict:
+def _to_title_item(item: dict, entities: Set[str]) -> dict:
     """Map a raw RSS dict to the title-item shape adapt_rss_stats consumes.
 
     Note ``feed_name`` -> ``source_name`` (the key _adapt_rss_title_item reads).
@@ -264,6 +278,7 @@ def _to_title_item(item: dict) -> dict:
         "summary": item.get("summary"),
         "author": item.get("author"),
         "cross_evidence_admitted": True,
+        "precomputed_entities": sorted(entities),
         "ranks": [],
         "count": 1,
         "is_new": None,

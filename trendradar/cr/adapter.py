@@ -459,6 +459,14 @@ def _adapt_rss_title_item(
     observed_in_current_run = (
         observed_identity in context.observed_item_identities
     )
+    raw_precomputed_entities = title_item.get("precomputed_entities")
+    precomputed_entities = None
+    if isinstance(raw_precomputed_entities, (list, tuple, set, frozenset)):
+        precomputed_entities = frozenset(
+            entity
+            for entity in raw_precomputed_entities
+            if isinstance(entity, str)
+        )
     return CRSourceItem(
         source_type="rss",
         source_id=None,
@@ -503,6 +511,7 @@ def _adapt_rss_title_item(
             source_id=title_item.get("feed_id"),
             observed_in_current_run=observed_in_current_run,
         ),
+        precomputed_entities=precomputed_entities,
     )
 
 
