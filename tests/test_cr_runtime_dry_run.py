@@ -13,6 +13,7 @@ Covers:
 No network, no real crawlers, no Telegram, no real output directories.
 """
 
+import ast
 import copy
 import os
 import sys
@@ -36,6 +37,7 @@ from trendradar.cr.state_snapshot import (
     CREventStateSnapshot,
 )
 from trendradar.cr.state_store import load_cr_event_state_snapshot
+from tests.cr_main_ast import calls, load_cr_dispatch_hook
 
 
 # ---------------------------------------------------------------------------
@@ -584,23 +586,12 @@ class TestSourceBoundary(unittest.TestCase):
 class TestMainHookTrigger(unittest.TestCase):
     """__main__ CR dispatch hook is gated by resolve_cr_dispatch_mode."""
 
-    def _main_source(self) -> str:
-        # Read by path (no import) so the check does not depend on the runtime's
-        # third-party deps being installed.
-        main_path = (
-            Path(__file__).resolve().parent.parent
-            / "trendradar"
-            / "__main__.py"
-        )
-        return main_path.read_text(encoding="utf-8")
-
     def test_dispatch_mode_resolution_used(self):
-        source = self._main_source()
-        self.assertIn("resolve_cr_dispatch_mode", source)
+        hook = load_cr_dispatch_hook()
+        self.assertEqual(len(calls(hook.resolve_assignment, "resolve_cr_dispatch_mode")), 1)
 
     def test_dispatch_mode_off_gate_present(self):
-        source = self._main_source()
-        self.assertIn("_cr_mode != CR_DISPATCH_OFF", source)
+        self.assertIsInstance(load_cr_dispatch_hook().off_gate, ast.If)
 
     def test_dry_run_compat_alias_still_referenced_in_dispatch_mode_module(self):
         """The dispatch_mode module references PTILOPSIS_CR_DRY_RUN as compat."""
@@ -614,8 +605,7 @@ class TestMainHookTrigger(unittest.TestCase):
         self.assertIn("PTILOPSIS_CR_DRY_RUN", source)
 
     def test_build_and_write_cr_runtime_dry_run_called(self):
-        source = self._main_source()
-        self.assertIn("build_and_write_cr_runtime_dry_run", source)
+        self.assertIsInstance(load_cr_dispatch_hook().runtime_call, ast.Call)
 
 
 if __name__ == "__main__":
