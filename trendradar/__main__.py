@@ -1888,8 +1888,10 @@ class NewsAnalyzer:
 
         except Exception as e:
             print(f"分析流程执行出错: {e}")
-            if self.ctx.config.get("DEBUG", False):
-                raise
+            # The process entrypoint owns the user-facing exit policy.  Do not
+            # turn an incomplete analysis into a successful process (and, in
+            # scheduled runs, a successful task heartbeat).
+            raise
         finally:
             # 清理资源（包括过期数据清理和数据库连接关闭）
             self.ctx.cleanup()
@@ -2180,7 +2182,7 @@ def _run_test_notification(config: Dict) -> bool:
     return False
 
 
-def main():
+def main() -> int:
     """主程序入口"""
     # 解析命令行参数
     parser = argparse.ArgumentParser(
@@ -2223,9 +2225,7 @@ def main():
         # 处理 doctor 命令（不依赖完整运行流程）
         if args.doctor:
             ok = _run_doctor()
-            if not ok:
-                raise SystemExit(1)
-            return
+            return 0 if ok else 1
 
         # 先加载配置
         config = load_config()
@@ -2233,14 +2233,12 @@ def main():
         # 处理状态查看命令
         if args.show_schedule:
             _handle_status_commands(config)
-            return
+            return 0
 
         # 处理通知测试命令
         if args.test_notification:
             ok = _run_test_notification(config)
-            if not ok:
-                raise SystemExit(1)
-            return
+            return 0 if ok else 1
 
         version_url = config.get("VERSION_CHECK_URL", "")
         configs_version_url = config.get("CONFIGS_VERSION_CHECK_URL", "")
@@ -2264,16 +2262,19 @@ def main():
         # 获取 debug 配置
         debug_mode = analyzer.ctx.config.get("DEBUG", False)
         analyzer.run()
+        return 0
     except FileNotFoundError as e:
         print(f"[失败] 配置文件错误: {e}")
         print("\n请确保以下文件存在:")
         print("  • config/config.yaml")
         print("  • config/frequency_words.txt")
         print("\n参考项目文档进行正确配置")
+        return 1
     except Exception as e:
         print(f"[失败] 程序运行错误: {e}")
         if debug_mode:
             raise
+        return 1
 
 
 def _handle_status_commands(config: Dict) -> None:
@@ -2334,4 +2335,4 @@ def _handle_status_commands(config: Dict) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

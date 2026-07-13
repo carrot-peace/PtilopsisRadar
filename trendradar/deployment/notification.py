@@ -9,20 +9,21 @@ import hashlib
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Mapping, Protocol
+from typing import IO, Mapping
 
-from trendradar.telegram_bot.access import build_telegram_access_config
+from trendradar.deployment.operator_alert import (
+    OperatorTelegramSender as DeploymentTelegramSender,
+    TelegramSendResult,
+    send_owner_alert,
+)
 
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_STATE_PATH = Path("output/meta/deployment_notification.json")
-DEFAULT_API_BASE_URL = "https://api.telegram.org"
 STATE_SCHEMA_V1 = "deployment-notification-v1"
 STATE_SCHEMA_V2 = "deployment-notification-v2"
 
@@ -54,73 +55,6 @@ class DeploymentIdentity:
             separators=(",", ":"),
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-@dataclass(frozen=True)
-class TelegramSendResult:
-    ok: bool
-    detail: str
-
-
-class DeploymentTelegramSender(Protocol):
-    def send(
-        self,
-        *,
-        bot_token: str,
-        chat_id: str,
-        text: str,
-        api_base_url: str,
-        timeout_seconds: float,
-    ) -> TelegramSendResult:
-        ...
-
-
-@dataclass
-class UrllibDeploymentTelegramSender:
-    def send(
-        self,
-        *,
-        bot_token: str,
-        chat_id: str,
-        text: str,
-        api_base_url: str,
-        timeout_seconds: float,
-    ) -> TelegramSendResult:
-        url = f"{api_base_url.rstrip('/')}/bot{bot_token}/sendMessage"
-        payload = json.dumps(
-            {
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": True,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=timeout_seconds
-            ) as response:
-                status = int(
-                    getattr(response, "status", None) or response.getcode()
-                )
-                body = response.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            status = int(exc.code)
-            body = exc.read().decode("utf-8", errors="replace")
-
-        try:
-            decoded = json.loads(body)
-        except (TypeError, ValueError):
-            decoded = {}
-        accepted = 200 <= status < 300 and decoded.get("ok") is True
-        return TelegramSendResult(
-            ok=accepted,
-            detail="telegram_ok" if accepted else f"telegram_http_{status}",
-        )
 
 
 @dataclass(frozen=True)
@@ -295,6 +229,8 @@ def notify_deployment(
         )
         return DeploymentNotificationResult(status="skipped_no_identity")
 
+    from trendradar.telegram_bot.access import build_telegram_access_config
+
     access = build_telegram_access_config(dict(env))
     owners = list(access.get("owner_chat_ids") or [])
     if not owners:
@@ -326,17 +262,6 @@ def notify_deployment(
         started_at=started_at,
         health=health_text,
     )
-    transport = sender or UrllibDeploymentTelegramSender()
-    api_base_url = _clean(
-        env.get("TELEGRAM_API_BASE_URL"), DEFAULT_API_BASE_URL
-    )
-    try:
-        timeout = float(env.get("TELEGRAM_TIMEOUT_SECONDS", "10"))
-        if timeout <= 0:
-            raise ValueError
-    except (TypeError, ValueError):
-        timeout = 10.0
-
     state = Path(state_path)
     try:
         lock_file = _lock_state(state)
@@ -396,36 +321,23 @@ def notify_deployment(
                 delivered_owner_count=len(owners),
             )
 
-        for owner in pending:
-            try:
-                result = transport.send(
-                    bot_token=bot_token,
-                    chat_id=owner,
-                    text=message,
-                    api_base_url=api_base_url,
-                    timeout_seconds=timeout,
-                )
-            except Exception as exc:  # noqa: BLE001 - notification is non-fatal
-                logger.error(
-                    "Deployment notification transport failed for owner hash %s: %s",
-                    _owner_hash(owner)[:12],
-                    type(exc).__name__,
-                )
+        alert_result = send_owner_alert(
+            env,
+            message,
+            sender=sender,
+            owner_chat_ids=pending,
+        )
+        if not alert_result.deliveries:
+            failed = len(pending)
+            details.append(alert_result.status)
+
+        for delivery in alert_result.deliveries:
+            details.append(delivery.detail)
+            if not delivery.ok:
                 failed += 1
-                details.append(f"transport_error:{type(exc).__name__}")
                 continue
 
-            details.append(result.detail)
-            if not result.ok:
-                failed += 1
-                logger.error(
-                    "Deployment notification rejected for owner hash %s: %s",
-                    _owner_hash(owner)[:12],
-                    result.detail,
-                )
-                continue
-
-            delivered.add(_owner_hash(owner))
+            delivered.add(_owner_hash(delivery.chat_id))
             try:
                 _write_state(
                     state,
@@ -436,7 +348,7 @@ def notify_deployment(
                 logger.error(
                     "Deployment notification state write failed after delivery to "
                     "owner hash %s: %s",
-                    _owner_hash(owner)[:12],
+                    _owner_hash(delivery.chat_id)[:12],
                     type(exc).__name__,
                 )
                 failed += 1

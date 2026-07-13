@@ -10,7 +10,7 @@ fi
 case "${RUN_MODE:-cron}" in
 "once")
     echo "单次执行"
-    exec python -m trendradar
+    exec python -m trendradar.deployment.run_with_heartbeat
     ;;
 "cron")
     # 校验 CRON_SCHEDULE 格式（仅允许 cron 表达式合法字符）
@@ -21,7 +21,7 @@ case "${RUN_MODE:-cron}" in
     fi
 
     # 生成 crontab
-    echo "$CRON_EXPR cd /app && python -m trendradar" > /tmp/crontab
+    echo "$CRON_EXPR cd /app && python -m trendradar.deployment.run_with_heartbeat" > /tmp/crontab
     
     echo "生成的crontab内容:"
     cat /tmp/crontab
@@ -34,7 +34,7 @@ case "${RUN_MODE:-cron}" in
     # 立即执行一次（如果配置了）
     if [ "${IMMEDIATE_RUN:-false}" = "true" ]; then
         echo "立即执行一次"
-        python -m trendradar
+        python -m trendradar.deployment.run_with_heartbeat
     fi
 
     # 启动 Web 服务器
