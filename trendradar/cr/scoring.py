@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
+
+if TYPE_CHECKING:
+    from trendradar.core.source_tiers import SourceTierResolver
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +56,41 @@ def _distinct_source_count(candidate: CRCandidate) -> int:
     return len(identities)
 
 
+def _candidate_source_tiers(
+    candidate: CRCandidate,
+    resolver: "SourceTierResolver | None",
+) -> tuple[str, ...]:
+    """Resolve distinct known A/B/C/D tiers for a candidate."""
+    if resolver is None:
+        return ()
+    tiers: set[str] = set()
+    for item in candidate.source_items:
+        source_key = (
+            item.feed_id
+            if item.source_type == "rss"
+            else item.source_id
+        ) or item.source_name
+        tier = resolver.tier_of(source_key or "")
+        if tier == "unknown" and item.source_name != source_key:
+            tier = resolver.tier_of(item.source_name)
+        if tier in {"A", "B", "C", "D"}:
+            tiers.add(tier)
+    return tuple(sorted(tiers))
+
+
+def _tier_evidence_strength(tiers: tuple[str, ...]) -> str:
+    """Classify known tier breadth as weak, moderate, or strong."""
+    tier_set = set(tiers)
+    if (
+        tier_set & {"A", "B"}
+        and tier_set & {"C", "D"}
+    ) or len(tier_set) >= 3:
+        return "strong"
+    if len(tier_set) >= 2:
+        return "moderate"
+    return "weak"
+
+
 def _compute_evidence_multiplier(
     candidate: CRCandidate,
     profile: CRScoringProfile,
@@ -68,6 +106,27 @@ def _compute_evidence_multiplier(
       - >= 2 distinct sources → moderate (1.00)
       - otherwise → single (0.88)
     """
+    tiers = _candidate_source_tiers(
+        candidate, profile.source_tier_resolver
+    )
+    if tiers:
+        strength = _tier_evidence_strength(tiers)
+        tier_label = ",".join(tiers)
+        if strength == "strong":
+            return (
+                profile.evidence_multiplier_strong,
+                f"strong_cross_tier_evidence:{tier_label}",
+            )
+        if strength == "moderate":
+            return (
+                profile.evidence_multiplier_moderate,
+                f"moderate_cross_tier_evidence:{tier_label}",
+            )
+        return (
+            profile.evidence_multiplier_single,
+            f"same_tier_echo:{tier_label}",
+        )
+
     distinct_sources = _distinct_source_count(candidate)
     has_hotlist_rss = bool(candidate.has_hotlist and candidate.has_rss)
 
@@ -83,6 +142,10 @@ def _compute_evidence_multiplier(
 # ---------------------------------------------------------------------------
 
 
+LEGACY_CR_SCORING_PROFILE_VERSION = "cr-score-v1.1"
+TIERED_CR_SCORING_PROFILE_VERSION = "cr-score-v1.2-tiered"
+
+
 @dataclass(frozen=True)
 class CRScoringProfile:
     """Scoring profile with caps and thresholds.
@@ -91,7 +154,7 @@ class CRScoringProfile:
     the project runtime config (config.yaml).
     """
 
-    profile_version: str = "cr-score-v1.1"
+    profile_version: str = LEGACY_CR_SCORING_PROFILE_VERSION
 
     alert_threshold: float = 60.0
     urgent_threshold: float = 80.0
@@ -115,6 +178,9 @@ class CRScoringProfile:
     evidence_multiplier_strong: float = 1.10
     cross_evidence_bonus_factor: float = 0.25
     cross_evidence_bonus_cap: float = 5.0
+
+    # --- ABCD source-tier evidence (falls back to legacy when unset) ---
+    source_tier_resolver: "SourceTierResolver | None" = None
 
 
 DEFAULT_CR_SCORING_PROFILE = CRScoringProfile()
@@ -648,10 +714,8 @@ def score_cross_layer_raw(
 ) -> CRComponentScore:
     """Score Cross-Layer Raw for a candidate.
 
-    Sub-components:
-      - Hotlist + RSS Co-occurrence: 0–7
-      - Source Type Diversity: 0–4
-      - Source Count Support: 0–4
+    With a source-tier resolver, sub-components use distinct A/B/C/D tiers.
+    Without one, the legacy hotlist/RSS format proxy remains as fallback.
     Range: 0–profile.cross_layer_raw_cap (default 15).
     """
     if profile is None:
@@ -660,42 +724,81 @@ def score_cross_layer_raw(
     reasons: list[str] = []
     debug: dict[str, object] = {}
 
-    # --- Hotlist + RSS Co-occurrence (0-7) ---
-    if candidate.has_hotlist and candidate.has_rss:
-        co_score = 7.0
-        reasons.append("hotlist_rss_cooccurrence=7")
+    tiers = _candidate_source_tiers(
+        candidate, profile.source_tier_resolver
+    )
+    if tiers:
+        strength = _tier_evidence_strength(tiers)
+        tier_count = len(tiers)
+        co_score = 7.0 if strength == "strong" else (
+            4.0 if strength == "moderate" else 0.0
+        )
+        diversity_score = 4.0 if tier_count >= 2 else 0.0
+        if tier_count >= 4:
+            count_support = 4.0
+        elif tier_count == 3:
+            count_support = 2.0
+        elif tier_count == 2:
+            count_support = 1.0
+        else:
+            count_support = 0.0
+        reasons.append(
+            f"tier_corroboration={co_score:.0f}"
+            f"(strength={strength},tiers={','.join(tiers)})"
+        )
+        reasons.append(
+            f"tier_diversity={diversity_score:.0f}(n={tier_count})"
+        )
+        reasons.append(
+            f"tier_count_support={count_support:.0f}(n={tier_count})"
+        )
+        debug["tier_evidence"] = {
+            "tiers": list(tiers),
+            "strength": strength,
+            "corroboration_score": co_score,
+            "diversity_score": diversity_score,
+            "count_support": count_support,
+        }
     else:
-        co_score = 0.0
-    debug["hotlist_rss_cooccurrence"] = co_score
+        # Legacy format-based fallback for callers without tier configuration.
+        if candidate.has_hotlist and candidate.has_rss:
+            co_score = 7.0
+            reasons.append("hotlist_rss_cooccurrence=7")
+        else:
+            co_score = 0.0
+        debug["hotlist_rss_cooccurrence"] = co_score
 
-    # --- Source Type Diversity (0-4) ---
-    pst = candidate.primary_source_type
-    if pst == "mixed":
-        diversity_score = 4.0
-        reasons.append("source_diversity=4(mixed)")
-    elif pst in ("hotlist", "rss"):
-        diversity_score = 1.0
-        reasons.append(f"source_diversity=1({pst})")
-    else:
-        diversity_score = 0.0
-    debug["source_type_diversity"] = {"primary": pst, "score": diversity_score}
+        pst = candidate.primary_source_type
+        if pst == "mixed":
+            diversity_score = 4.0
+            reasons.append("source_diversity=4(mixed)")
+        elif pst in ("hotlist", "rss"):
+            diversity_score = 1.0
+            reasons.append(f"source_diversity=1({pst})")
+        else:
+            diversity_score = 0.0
+        debug["source_type_diversity"] = {
+            "primary": pst,
+            "score": diversity_score,
+        }
 
-    # --- Source Count Support (0-4) ---
-    coverage_count = _distinct_source_count(candidate)
-    if coverage_count >= 4:
-        count_support = 4.0
-    elif coverage_count == 3:
-        count_support = 2.0
-    elif coverage_count == 2:
-        count_support = 1.0
-    else:
-        count_support = 0.0
+        coverage_count = _distinct_source_count(candidate)
+        if coverage_count >= 4:
+            count_support = 4.0
+        elif coverage_count == 3:
+            count_support = 2.0
+        elif coverage_count == 2:
+            count_support = 1.0
+        else:
+            count_support = 0.0
 
-    reasons.append(f"source_count_support={count_support:.0f}(n={coverage_count})")
-    debug["source_count_support"] = {
-        "coverage_count": coverage_count,
-        "score": count_support,
-    }
+        reasons.append(
+            f"source_count_support={count_support:.0f}(n={coverage_count})"
+        )
+        debug["source_count_support"] = {
+            "coverage_count": coverage_count,
+            "score": count_support,
+        }
 
     raw = co_score + diversity_score + count_support
     debug["raw_total"] = raw
@@ -803,6 +906,9 @@ def combine_cr_scores(
                 all_reasons.append(r)
 
     # Debug: evidence multiplier observability.
+    source_tiers = _candidate_source_tiers(
+        candidate, profile.source_tier_resolver
+    )
     evidence_multiplier_debug: dict[str, object] = {
         "enabled": profile.evidence_multiplier_enabled,
         "multiplier": multiplier,
@@ -813,6 +919,12 @@ def combine_cr_scores(
         "cross_evidence_bonus_factor": profile.cross_evidence_bonus_factor,
         "cross_evidence_bonus_cap": profile.cross_evidence_bonus_cap,
         "adjusted_total_score": total_score,
+        "source_tiers": list(source_tiers),
+        "basis": (
+            "source_tiers"
+            if source_tiers
+            else "legacy_source_format"
+        ),
     }
     if profile.evidence_multiplier_enabled:
         evidence_multiplier_debug["legacy_total_score"] = clamp_score(
