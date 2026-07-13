@@ -61,57 +61,20 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join({ROOT!r}, "tests"))
 import _bootstrap
+import report_test_bootstrap
 
 ROOT = _bootstrap.ROOT
 _BOOT = _bootstrap.load_all()
 AIAnalysisResult = _BOOT.analyzer.AIAnalysisResult
+_stub_pkg = report_test_bootstrap.stub_module
+_load_real = report_test_bootstrap.load_real
 
 FALLBACK_NOTICE = {FALLBACK_NOTICE!r}
 
 
-def _attach_getattr(mod):
-    def __getattr__(name):
-        obj = type(name, (), {{}})
-        setattr(mod, name, obj)
-        return obj
-    mod.__getattr__ = __getattr__
-    return mod
-
-
-def _stub_pkg(name, is_pkg=True):
-    mod = sys.modules.get(name)
-    if mod is None:
-        mod = types.ModuleType(name)
-        sys.modules[name] = mod
-    if is_pkg and not hasattr(mod, "__path__"):
-        mod.__path__ = []
-    return _attach_getattr(mod)
-
-
-def _load_real(name, relpath):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, relpath))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-# Load real context (needs real report generator/renderers)
-report_pkg = _stub_pkg("trendradar.report")
-_GEN = _load_real("trendradar.report.generator", "trendradar/report/generator.py")
-report_pkg.prepare_report_data = _GEN.prepare_report_data
-report_pkg.generate_html_report = _GEN.generate_html_report
-_load_real("trendradar.report.dashboard", "trendradar/report/dashboard.py")
-_load_real("trendradar.report.daily_v2", "trendradar/report/daily_v2.py")
-_load_real("trendradar.report.newsletter", "trendradar/report/newsletter.py")
-_stub_pkg("trendradar.utils")
-_stub_pkg("trendradar.utils.time")
-_stub_pkg("trendradar.core")
-_stub_pkg("trendradar.ai")
-_stub_pkg("trendradar.ai.filter")
-_stub_pkg("trendradar.storage")
-
-_CTX = _load_real("trendradar.context", "trendradar/context.py")
+# Load real context through the shared lightweight report bootstrap.
+_REPORT_BOOTSTRAP = report_test_bootstrap.load_report_context()
+_CTX = _REPORT_BOOTSTRAP.context
 AppContext = _CTX.AppContext
 
 # Load real __main__ (needs additional stubs)
