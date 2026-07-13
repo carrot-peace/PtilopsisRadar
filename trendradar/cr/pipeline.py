@@ -40,6 +40,10 @@ from trendradar.cr.models import (
     CRClusterConfig,
     CRPrimitiveRecord,
 )
+from trendradar.cr.input_health import (
+    CRInputHealth,
+    collection_coverage_summary,
+)
 from trendradar.cr.presentation import (
     CRPresentedCandidate,
     CRPresentationRun,
@@ -104,6 +108,7 @@ class CRPipelineResult:
     markdown_audit_text: str
     html_audit_text: str
     high_score_suppressed_count: int
+    coverage_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +130,7 @@ def build_cr_pipeline_from_primitives(
     run_label: str,
     config: CRPipelineConfig | None = None,
     urgent_threshold: float = DEFAULT_CR_URGENT_THRESHOLD,
+    input_health: CRInputHealth | None = None,
 ) -> CRPipelineResult:
     """Build the full CR offline pipeline from primitive records.
 
@@ -179,7 +185,12 @@ def build_cr_pipeline_from_primitives(
 
     # 3. Score.
     score_results = [
-        score_cr_candidate(c, profile=config.scoring) for c in candidates
+        score_cr_candidate(
+            c,
+            profile=config.scoring,
+            input_health=input_health,
+        )
+        for c in candidates
     ]
 
     # 4. Decide.
@@ -206,12 +217,18 @@ def build_cr_pipeline_from_primitives(
     high_score_suppressed_count = count_high_score_suppressed(
         decisions, urgent_threshold=urgent_threshold
     )
+    coverage_warning = (
+        collection_coverage_summary(input_health)["warning"]
+        if input_health is not None
+        else None
+    )
 
     # 7. Render CR-A text.
     run = CRPresentationRun(
         run_label=run_label,
         candidates=list(cr_a),
         high_score_suppressed_count=high_score_suppressed_count,
+        coverage_warning=coverage_warning,
         total_eligible_count=cr_a_eligible_count,
     )
     cr_a_text = render_cr_a_text(run, config=render_cfg.text)
@@ -245,6 +262,7 @@ def build_cr_pipeline_from_primitives(
         markdown_audit_text=markdown_audit_text,
         html_audit_text=html_audit_text,
         high_score_suppressed_count=high_score_suppressed_count,
+        coverage_warning=coverage_warning,
     )
 
 

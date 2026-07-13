@@ -25,6 +25,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
 from trendradar.core.source_tiers import SourceTierResolver
+from trendradar.cr.input_health import (
+    RECOVERY_STATE_UNTRUSTED,
+    evaluate_cr_input_health,
+)
 from trendradar.cr.scoring import (
     CRComponentScore,
     CRScoringProfile,
@@ -151,6 +155,12 @@ class TestProfileDefaults(unittest.TestCase):
         self.assertAlmostEqual(p.cross_evidence_bonus_factor, 0.25)
         self.assertAlmostEqual(p.cross_evidence_bonus_cap, 5.0)
         self.assertIsNone(p.source_tier_resolver)
+
+    def test_coverage_penalty_disabled_by_default(self):
+        p = DEFAULT_CR_SCORING_PROFILE
+        self.assertFalse(p.coverage_penalty_enabled)
+        self.assertAlmostEqual(p.coverage_penalty_threshold, 0.67)
+        self.assertAlmostEqual(p.coverage_penalty_factor, 0.85)
 
     def test_frozen(self):
         with self.assertRaises(AttributeError):
@@ -422,6 +432,98 @@ class TestGrowthRaw(unittest.TestCase):
         )
         result = score_growth_raw(cand)
         self.assertAlmostEqual(result.debug["new_burst"]["score"], 12.0)
+
+    def test_recovered_source_item_cannot_supply_event_new_burst(self):
+        item = _make_item(
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=8,
+            first_crawl_of_day=False,
+            observed_after_ingest_gap=True,
+        )
+        candidate = _make_candidate(
+            source_items=[item],
+            source_names=["weibo"],
+            source_ids=["weibo"],
+            has_hotlist=True,
+        )
+        result = score_growth_raw(candidate)
+        self.assertEqual(result.debug["new_burst"]["score"], 0.0)
+        self.assertEqual(
+            result.debug["new_burst"]["rule"],
+            "ingest_recovery_not_event_new",
+        )
+
+    def test_healthy_source_can_supply_new_burst_beside_recovery_item(self):
+        recovered = _make_item(
+            source_id="recovered",
+            source_name="recovered",
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=2,
+            first_crawl_of_day=False,
+            observed_after_ingest_gap=True,
+        )
+        healthy = _make_item(
+            source_id="healthy",
+            source_name="healthy",
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=8,
+            first_crawl_of_day=False,
+        )
+        candidate = _make_candidate(
+            source_items=[recovered, healthy],
+            source_names=["recovered", "healthy"],
+            source_ids=["recovered", "healthy"],
+            has_hotlist=True,
+        )
+        result = score_growth_raw(candidate)
+        self.assertEqual(result.debug["new_burst"]["score"], 12.0)
+        self.assertEqual(
+            result.debug["new_burst"]["max_item"]["source_id"],
+            "healthy",
+        )
+        self.assertEqual(
+            result.debug["new_burst_gates"],
+            [
+                {
+                    "title": recovered.title,
+                    "source_id": "recovered",
+                    "feed_id": None,
+                    "rule": "ingest_recovery_not_event_new",
+                }
+            ],
+        )
+
+    def test_untrusted_recovery_state_disables_new_burst_only(self):
+        item = _make_item(
+            is_new=True,
+            is_new_semantics="new_titles_detection",
+            current_rank=8,
+            first_crawl_of_day=False,
+            has_reliable_rank_timeline=True,
+            previous_observation_exists=True,
+            previous_observation_visible=True,
+            previous_visible_rank=20,
+            rank_delta=12,
+        )
+        candidate = _make_candidate(
+            source_items=[item],
+            source_names=["weibo"],
+            source_ids=["weibo"],
+            has_hotlist=True,
+        )
+        health = evaluate_cr_input_health(
+            recovery_state_status=RECOVERY_STATE_UNTRUSTED,
+        )
+        result = score_growth_raw(candidate, input_health=health)
+        self.assertEqual(result.debug["new_burst"]["score"], 0.0)
+        self.assertEqual(
+            result.debug["new_burst"]["rule"],
+            "ingest_recovery_state_untrusted",
+        )
+        self.assertGreater(result.debug["rank_movement"]["score"], 0.0)
 
     def test_new_burst_low_base_dampening(self):
         """New + rank > 50 with single source → dampened by 0.8."""
@@ -1541,6 +1643,100 @@ class TestProductionTieredProfileWiring(unittest.TestCase):
         version = production_calls[0].get("profile_version")
         self.assertIsInstance(version, ast.Name)
         self.assertEqual(version.id, "TIERED_CR_SCORING_PROFILE_VERSION")
+class TestCollectionCoveragePenalty(unittest.TestCase):
+    def setUp(self):
+        self.candidate = _make_candidate(
+            source_items=[_make_item()],
+            has_hotlist=True,
+            primary_source_type="hotlist",
+        )
+        self.health = evaluate_cr_input_health(
+            hotlist_configured_ids=("a", "b", "c", "d"),
+            hotlist_successful_ids=("a",),
+            hotlist_failed_ids=("b", "c", "d"),
+        )
+
+    def _combine(self, profile):
+        return combine_cr_scores(
+            self.candidate,
+            profile=profile,
+            growth_raw=40.0,
+            current_heat_raw=30.0,
+            cross_layer_raw=10.0,
+            input_health=self.health,
+        )
+
+    def test_disabled_penalty_preserves_score_but_warns(self):
+        profile = CRScoringProfile(evidence_multiplier_enabled=False)
+        result = self._combine(profile)
+
+        self.assertAlmostEqual(result.total_score, 80.0)
+        self.assertIn("Collection coverage: 1/4", result.coverage_warning)
+        self.assertFalse(
+            result.debug["collection_coverage"]["penalty_applied"]
+        )
+
+    def test_enabled_penalty_attenuates_heat_and_cross_evidence(self):
+        profile = CRScoringProfile(
+            evidence_multiplier_enabled=False,
+            coverage_penalty_enabled=True,
+            coverage_penalty_threshold=0.75,
+            coverage_penalty_factor=0.5,
+        )
+        result = self._combine(profile)
+
+        self.assertAlmostEqual(result.heat.raw_score, 70.0)
+        self.assertAlmostEqual(result.heat.capped_score, 35.0)
+        self.assertAlmostEqual(result.cross_evidence.capped_score, 5.0)
+        self.assertAlmostEqual(result.total_score, 40.0)
+        coverage = result.heat.debug["collection_coverage"]
+        self.assertEqual(coverage["collection_coverage"], 0.25)
+        self.assertTrue(coverage["penalty_applied"])
+        self.assertEqual(coverage["penalty_factor"], 0.5)
+
+    def test_tiered_multiplier_runs_after_coverage_attenuation(self):
+        candidate = _make_candidate(
+            source_items=[
+                _make_item(source_id="weibo"),
+                _make_item(
+                    source_type="rss",
+                    source_id=None,
+                    feed_id="reuters",
+                    source_name="Reuters",
+                ),
+            ],
+            source_names=["weibo", "Reuters"],
+            source_ids=["weibo", "reuters"],
+            has_hotlist=True,
+            has_rss=True,
+            primary_source_type="mixed",
+        )
+        profile = CRScoringProfile(
+            profile_version=TIERED_CR_SCORING_PROFILE_VERSION,
+            source_tier_resolver=_TIER_RESOLVER,
+            coverage_penalty_enabled=True,
+            coverage_penalty_threshold=0.75,
+            coverage_penalty_factor=0.5,
+        )
+
+        result = combine_cr_scores(
+            candidate,
+            profile=profile,
+            growth_raw=40.0,
+            current_heat_raw=30.0,
+            cross_layer_raw=10.0,
+            input_health=self.health,
+        )
+
+        evidence = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(evidence["heat_score"], 35.0)
+        self.assertAlmostEqual(evidence["cross_evidence_score"], 5.0)
+        self.assertEqual(evidence["reason"], "strong_cross_tier_evidence:B,D")
+        self.assertAlmostEqual(result.total_score, 39.75)
+        self.assertEqual(
+            result.profile_version,
+            TIERED_CR_SCORING_PROFILE_VERSION,
+        )
 
 
 class TestB2LiteScenarios(unittest.TestCase):

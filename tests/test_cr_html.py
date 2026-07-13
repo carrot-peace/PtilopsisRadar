@@ -48,6 +48,8 @@ def _make_source_item(
     current_rank: int | None = 3,
     normalized_rank: int | None = 1,
     is_new: bool | None = True,
+    observed_in_current_run: bool = False,
+    observed_after_ingest_gap: bool = False,
 ) -> CRSourceItem:
     return CRSourceItem(
         title=title,
@@ -59,6 +61,8 @@ def _make_source_item(
         current_rank=current_rank,
         normalized_rank=normalized_rank,
         is_new=is_new,
+        observed_in_current_run=observed_in_current_run,
+        observed_after_ingest_gap=observed_after_ingest_gap,
     )
 
 
@@ -391,6 +395,22 @@ class TestSourceItems(unittest.TestCase):
         html = render_cr_html_audit([pc], run_label="T")
         self.assertIn("<dt>Source Name</dt><dd>weibo</dd>", html)
         self.assertIn("<dt>Source Type</dt><dd>hotlist</dd>", html)
+
+    def test_ingest_recovery_marker_is_auditable(self):
+        si = _make_source_item(
+            observed_in_current_run=True,
+            observed_after_ingest_gap=True,
+        )
+        html = render_cr_html_audit(
+            [_make_presented(source_items=[si])],
+            run_label="T",
+        )
+        self.assertIn(
+            "<dt>Observed In Current Run</dt><dd>True</dd>", html
+        )
+        self.assertIn(
+            "<dt>Observed After Ingest Gap</dt><dd>True</dd>", html
+        )
 
     def test_none_empty_fields_skipped(self):
         si = _make_source_item(feed_id=None, current_rank=None, normalized_rank=None)

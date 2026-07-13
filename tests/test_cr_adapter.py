@@ -38,6 +38,10 @@ from trendradar.cr.adapter import (
     _count_visible_observations,
     _latest_observation_rank,
 )
+from trendradar.cr.input_health import (
+    evaluate_cr_input_health,
+    input_item_identity,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -864,6 +868,75 @@ class TestEdgeCases(unittest.TestCase):
         stats = [{"word": "g", "titles": [_make_rss_item()], "count": 1, "position": 0}]
         item = adapt_rss_stats(stats, context=_ctx())[0].source_items[0]
         self.assertIsNone(item.source_id)
+
+    def test_current_hotlist_item_from_recovered_source_is_marked(self):
+        raw = _make_hotlist_item(
+            title="Recovered event",
+            source_id="weibo",
+            is_new=True,
+        )
+        identity = input_item_identity(
+            source_type="hotlist",
+            source_id="weibo",
+            title="Recovered event",
+        )
+        health = evaluate_cr_input_health(
+            hotlist_successful_ids=("weibo",),
+            hotlist_recovered_ids=("weibo",),
+            recovery_state_status="tracked",
+        )
+        context = CRRunContext(
+            mode="current",
+            first_crawl_of_day=False,
+            observed_item_identities=frozenset((identity,)),
+            input_health=health,
+        )
+        item = adapt_hotlist_stats(
+            [{"word": "g", "titles": [raw]}],
+            context=context,
+        )[0].source_items[0]
+        self.assertTrue(item.observed_in_current_run)
+        self.assertTrue(item.observed_after_ingest_gap)
+
+    def test_historical_item_from_recovered_source_is_not_marked(self):
+        health = evaluate_cr_input_health(
+            hotlist_successful_ids=("weibo",),
+            hotlist_recovered_ids=("weibo",),
+            recovery_state_status="tracked",
+        )
+        item = adapt_hotlist_stats(
+            [{"word": "g", "titles": [_make_hotlist_item(source_id="weibo")]}],
+            context=CRRunContext(mode="current", input_health=health),
+        )[0].source_items[0]
+        self.assertFalse(item.observed_in_current_run)
+        self.assertFalse(item.observed_after_ingest_gap)
+
+    def test_current_rss_item_from_recovered_feed_is_marked(self):
+        raw = _make_rss_item(
+            title="Recovered RSS event",
+            feed_id="feed-a",
+        )
+        identity = input_item_identity(
+            source_type="rss",
+            feed_id="feed-a",
+            title="Recovered RSS event",
+            url=raw["url"],
+        )
+        health = evaluate_cr_input_health(
+            rss_successful_ids=("feed-a",),
+            rss_recovered_ids=("feed-a",),
+            recovery_state_status="tracked",
+        )
+        item = adapt_rss_stats(
+            [{"word": "g", "titles": [raw]}],
+            context=CRRunContext(
+                mode="current",
+                observed_item_identities=frozenset((identity,)),
+                input_health=health,
+            ),
+        )[0].source_items[0]
+        self.assertTrue(item.observed_in_current_run)
+        self.assertTrue(item.observed_after_ingest_gap)
 
 
 if __name__ == "__main__":

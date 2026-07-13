@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from trendradar.cr.models import CRCandidate, CRSourceItem
+from trendradar.cr.input_health import (
+    CRInputHealth,
+    collection_coverage_summary,
+)
 
 if TYPE_CHECKING:
     from trendradar.core.source_tiers import SourceTierResolver
@@ -182,6 +186,11 @@ class CRScoringProfile:
     # --- ABCD source-tier evidence (falls back to legacy when unset) ---
     source_tier_resolver: "SourceTierResolver | None" = None
 
+    # --- Collection coverage correction (opt-in) ---
+    coverage_penalty_enabled: bool = False
+    coverage_penalty_threshold: float = 0.67
+    coverage_penalty_factor: float = 0.85
+
 
 DEFAULT_CR_SCORING_PROFILE = CRScoringProfile()
 
@@ -233,6 +242,7 @@ class CRScoreResult:
 
     total_score: float = 0.0
     trigger_reasons: list[str] = field(default_factory=list)
+    coverage_warning: str | None = None
     debug: dict[str, object] = field(default_factory=dict)
 
 
@@ -372,7 +382,12 @@ def _score_item_rank_movement(item: CRSourceItem) -> tuple[float, dict[str, obje
     return 0.0, debug
 
 
-def _score_item_new_burst(item: CRSourceItem, single_source: bool) -> tuple[float, dict[str, object]]:
+def _score_item_new_burst(
+    item: CRSourceItem,
+    single_source: bool,
+    *,
+    recovery_evidence_trusted: bool = True,
+) -> tuple[float, dict[str, object]]:
     """Score new-burst for a single source item.
 
     Returns (score, debug_dict).  Score range: 0–15.
@@ -382,6 +397,17 @@ def _score_item_new_burst(item: CRSourceItem, single_source: bool) -> tuple[floa
     # Gate.
     if item.source_type != "hotlist":
         return 0.0, debug
+    if not recovery_evidence_trusted:
+        return 0.0, {
+            "rule": "ingest_recovery_state_untrusted",
+            "score": 0.0,
+        }
+    if item.observed_after_ingest_gap:
+        return 0.0, {
+            "rule": "ingest_recovery_not_event_new",
+            "source_id": item.source_id,
+            "score": 0.0,
+        }
     if item.first_crawl_of_day is True:
         return 0.0, debug
     if item.is_new is not True:
@@ -525,6 +551,7 @@ def score_growth_raw(
     candidate: CRCandidate,
     *,
     profile: CRScoringProfile | None = None,
+    input_health: CRInputHealth | None = None,
 ) -> CRComponentScore:
     """Score Growth Raw for a candidate.
 
@@ -543,14 +570,42 @@ def score_growth_raw(
     best_nb: tuple[float, dict, CRSourceItem | None] = (0.0, _zero_debug, None)
     best_rec: tuple[float, dict, CRSourceItem | None] = (0.0, _zero_debug, None)
     best_wp: tuple[float, dict, CRSourceItem | None] = (0.0, _zero_debug, None)
+    new_burst_gates: list[dict[str, object]] = []
 
     for item in items:
         rm_s, rm_d = _score_item_rank_movement(item)
         if rm_s > best_rm[0]:
             best_rm = (rm_s, rm_d, item)
 
-        nb_s, nb_d = _score_item_new_burst(item, single_source)
-        if nb_s > best_nb[0]:
+        nb_s, nb_d = _score_item_new_burst(
+            item,
+            single_source,
+            recovery_evidence_trusted=(
+                input_health.new_burst_evidence_trusted
+                if input_health is not None
+                else True
+            ),
+        )
+        if nb_d.get("rule") in {
+            "ingest_recovery_not_event_new",
+            "ingest_recovery_state_untrusted",
+        }:
+            new_burst_gates.append(
+                {
+                    "title": item.title,
+                    "source_id": item.source_id,
+                    "feed_id": item.feed_id,
+                    "rule": nb_d["rule"],
+                }
+            )
+        if nb_s > best_nb[0] or (
+            best_nb[2] is None
+            and nb_d.get("rule")
+            in {
+                "ingest_recovery_not_event_new",
+                "ingest_recovery_state_untrusted",
+            }
+        ):
             best_nb = (nb_s, nb_d, item)
 
         rec_s, rec_d = _score_item_recency_momentum(item)
@@ -568,6 +623,8 @@ def score_growth_raw(
             "title": item.title,
             "source_name": item.source_name,
             "source_id": item.source_id,
+            "feed_id": item.feed_id,
+            "observed_after_ingest_gap": item.observed_after_ingest_gap,
         }
 
     raw = best_rm[0] + best_nb[0] + best_rec[0] + best_wp[0]
@@ -575,6 +632,7 @@ def score_growth_raw(
     debug = {
         "rank_movement": {**best_rm[1], "max_item": _item_label(best_rm[2])},
         "new_burst": {**best_nb[1], "max_item": _item_label(best_nb[2])},
+        "new_burst_gates": new_burst_gates,
         "recency_momentum": {**best_rec[1], "max_item": _item_label(best_rec[2])},
         "weak_persistence": {**best_wp[1], "max_item": _item_label(best_wp[2])},
     }
@@ -840,6 +898,7 @@ def combine_cr_scores(
     background_support_raw: CRComponentScore | float | None = None,
     trigger_reasons: list[str] | None = None,
     debug: dict[str, object] | None = None,
+    input_health: CRInputHealth | None = None,
 ) -> CRScoreResult:
     """Combine component scores into a final CRScoreResult.
 
@@ -872,6 +931,47 @@ def combine_cr_scores(
     # Total — B2-lite or legacy.
     heat_score = heat_cs.capped_score
     cross_evidence_score = cross_ev_cs.capped_score
+
+    coverage = (
+        collection_coverage_summary(input_health)
+        if input_health is not None
+        else None
+    )
+    coverage_ratio = coverage["ratio"] if coverage is not None else None
+    penalty_applied = bool(
+        profile.coverage_penalty_enabled
+        and coverage_ratio is not None
+        and coverage_ratio < profile.coverage_penalty_threshold
+    )
+    penalty_factor = (
+        max(0.0, min(1.0, profile.coverage_penalty_factor))
+        if penalty_applied
+        else 1.0
+    )
+    if penalty_applied:
+        heat_score *= penalty_factor
+        cross_evidence_score *= penalty_factor
+        heat_cs.capped_score = heat_score
+        cross_ev_cs.capped_score = cross_evidence_score
+        heat_cs.reasons.append(
+            f"collection_coverage_penalty={penalty_factor:.2f}"
+        )
+        cross_ev_cs.reasons.append(
+            f"collection_coverage_penalty={penalty_factor:.2f}"
+        )
+
+    coverage_debug = {
+        "collection_coverage": coverage_ratio,
+        "configured_sources": coverage["configured"] if coverage else 0,
+        "successful_sources": coverage["successful"] if coverage else 0,
+        "failed_sources": coverage["failed"] if coverage else 0,
+        "penalty_enabled": profile.coverage_penalty_enabled,
+        "penalty_threshold": profile.coverage_penalty_threshold,
+        "penalty_factor": penalty_factor,
+        "penalty_applied": penalty_applied,
+    }
+    heat_cs.debug["collection_coverage"] = coverage_debug
+    cross_ev_cs.debug["collection_coverage"] = coverage_debug
 
     if profile.evidence_multiplier_enabled:
         # B2-lite: heat × multiplier + small cross-evidence bonus.
@@ -937,6 +1037,7 @@ def combine_cr_scores(
         "cross_evidence_raw": cross_ev_raw,
         "total_raw": total_raw,
         "evidence_multiplier": evidence_multiplier_debug,
+        "collection_coverage": coverage_debug,
     }
     if debug:
         merged_debug.update(debug)
@@ -953,6 +1054,7 @@ def combine_cr_scores(
         cross_evidence=cross_ev_cs,
         total_score=total_score,
         trigger_reasons=all_reasons,
+        coverage_warning=(coverage["warning"] if coverage else None),
         debug=merged_debug,
     )
 
@@ -966,6 +1068,7 @@ def score_cr_candidate(
     candidate: CRCandidate,
     *,
     profile: CRScoringProfile | None = None,
+    input_health: CRInputHealth | None = None,
 ) -> CRScoreResult:
     """Score a single CRCandidate using v0.1 deterministic scoring.
 
@@ -975,7 +1078,11 @@ def score_cr_candidate(
     if profile is None:
         profile = DEFAULT_CR_SCORING_PROFILE
 
-    growth = score_growth_raw(candidate, profile=profile)
+    growth = score_growth_raw(
+        candidate,
+        profile=profile,
+        input_health=input_health,
+    )
     current_heat = score_current_heat_raw(candidate, profile=profile)
     cross_layer = score_cross_layer_raw(candidate, profile=profile)
 
@@ -985,6 +1092,7 @@ def score_cr_candidate(
         growth_raw=growth,
         current_heat_raw=current_heat,
         cross_layer_raw=cross_layer,
+        input_health=input_health,
         debug={
             "candidate_id": candidate.candidate_id,
             "profile_version": profile.profile_version,
