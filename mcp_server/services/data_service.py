@@ -464,7 +464,7 @@ class DataService:
         获取当前系统配置
 
         Args:
-            section: 配置节 - all/crawler/push/keywords/weights
+            section: 配置节 - all/crawler/keywords/weights
 
         Returns:
             配置字典
@@ -490,36 +490,6 @@ class DataService:
                 "platforms": [p["id"] for p in platforms_config.get("sources", []) if p.get("enabled", True)]
             }
 
-        if section == "all" or section == "push":
-            notification = config_data.get("notification", {})
-            batch_size = advanced.get("batch_size", {})
-            push_config = {
-                "enable_notification": notification.get("enabled", True),
-                "enabled_channels": [],
-                "message_batch_size": batch_size.get("default", 4000),
-                "push_window": {}  # 已迁移至调度系统（schedule + timeline.yaml）
-            }
-
-            # 检测已配置的通知渠道（合并 config.yaml + .env）
-            from trendradar.core.loader import _load_webhook_config
-
-            webhook_config = _load_webhook_config(config_data)
-
-            channel_checks = {
-                "feishu": [webhook_config.get("FEISHU_WEBHOOK_URL")],
-                "dingtalk": [webhook_config.get("DINGTALK_WEBHOOK_URL")],
-                "wework": [webhook_config.get("WEWORK_WEBHOOK_URL")],
-                "telegram": [webhook_config.get("TELEGRAM_BOT_TOKEN"), webhook_config.get("TELEGRAM_CHAT_ID")],
-                "email": [webhook_config.get("EMAIL_FROM"), webhook_config.get("EMAIL_PASSWORD"), webhook_config.get("EMAIL_TO")],
-                "ntfy": [webhook_config.get("NTFY_SERVER_URL"), webhook_config.get("NTFY_TOPIC")],
-                "bark": [webhook_config.get("BARK_URL")],
-                "slack": [webhook_config.get("SLACK_WEBHOOK_URL")],
-                "generic_webhook": [webhook_config.get("GENERIC_WEBHOOK_URL")],
-            }
-            for ch_id, required_values in channel_checks.items():
-                if all(required_values):
-                    push_config["enabled_channels"].append(ch_id)
-
         if section == "all" or section == "keywords":
             keywords_config = {
                 "word_groups": word_groups,
@@ -538,14 +508,11 @@ class DataService:
         if section == "all":
             result = {
                 "crawler": crawler_config,
-                "push": push_config,
                 "keywords": keywords_config,
                 "weights": weights_config
             }
         elif section == "crawler":
             result = crawler_config
-        elif section == "push":
-            result = push_config
         elif section == "keywords":
             result = keywords_config
         elif section == "weights":

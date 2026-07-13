@@ -3,7 +3,7 @@
 Current Dashboard 测试。
 
 覆盖（见 plan 测试计划）：
-- render（environment / classic / None）
+- render（environment / unsupported / None）
 - 不受 cooldown / notify_labels 影响：栏目外标签（如 silence_gap）也进盘面
 - state.json schema + 发布安全（无 source_links / sample_titles / evidence_detail / 原始 URL）
 - 职责边界：write_dashboard 只写 index/state/landing，不写 full.html；
@@ -195,9 +195,9 @@ class TestRenderDegraded(unittest.TestCase):
         self.assertIn("未生成信息环境监测盘面", html)  # 降级提示
 
     def test_non_environment_style_shows_degraded(self):
-        """PR7e: classic 结果在 dashboard 仍显示降级提示（dashboard 按 report_style 判断）。"""
-        classic = AIAnalysisResult(report_style="classic", success=True)
-        html = DASH.render_current_dashboard_html(classic, META, NOW, mode="daily")
+        """非 environment 结果显示降级提示（dashboard 按 report_style 判断）。"""
+        unsupported = AIAnalysisResult(report_style="unsupported", success=True)
+        html = DASH.render_current_dashboard_html(unsupported, META, NOW, mode="daily")
         self.assertIn("每日盘面", html)
         self.assertIn("未生成信息环境监测盘面", html)  # 非 environment 降级
 

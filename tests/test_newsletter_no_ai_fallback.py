@@ -62,8 +62,8 @@ class TestUsableEnvironmentAiHelper(unittest.TestCase):
         r = AIAnalysisResult(success=False, report_style="environment")
         self.assertFalse(NL._is_usable_environment_ai(r))
 
-    def test_classic_style_is_not_usable(self):
-        r = AIAnalysisResult(success=True, report_style="classic")
+    def test_unsupported_style_is_not_usable(self):
+        r = AIAnalysisResult(success=True, report_style="unsupported")
         self.assertFalse(NL._is_usable_environment_ai(r))
 
     def test_proper_environment_result_is_usable(self):
@@ -94,7 +94,7 @@ class TestNoAiFallback(unittest.TestCase):
         self.assertIn(FALLBACK_NOTICE, out)
 
     def test_ai_wrong_report_style(self):
-        r = AIAnalysisResult(success=True, report_style="classic")
+        r = AIAnalysisResult(success=True, report_style="unsupported")
         out = _render(_report_data(), ai_analysis=r)
         self._assert_shell(out)
         self.assertIn(FALLBACK_NOTICE, out)

@@ -1,9 +1,9 @@
 # coding=utf-8
 """DR Telegram text formatter.
 
-This module reuses the content shape of the old daily digest: AI brief plus a
+This module uses the compact daily digest shape: AI brief plus a
 short, deduplicated topic list.  It has no delivery behavior and no dependency
-on Legacy Push or CR dispatch modules.
+on CR dispatch modules.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def select_dr_digest_topics(
 ) -> list[dict[str, str]]:
     """Select DR text topics from an environment AI result.
 
-    This mirrors the old daily digest selection policy: primary anomaly buckets
+    This applies the compact digest selection policy: primary anomaly buckets
     first, then silence gaps, with normalized topic dedupe.
     """
     if not ai_result or not getattr(ai_result, "success", False):

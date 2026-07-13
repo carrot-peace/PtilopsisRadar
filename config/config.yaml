@@ -3,10 +3,6 @@
 #                      Version: 2.3.0
 # ═══════════════════════════════════════════════════════════════
 
-
-# 可视化配置编辑器地址: https://sansan0.github.io/TrendRadar/
-
-
 # ===============================================================
 # 1. 基础设置
 # ===============================================================
@@ -25,15 +21,15 @@ app:
 # 1.5 调度系统 —— 什么时间做什么事
 #
 # 通过 timeline.yaml 里定义的时间段来自动决定：
-#   - 什么时候推送通知
+#   - 什么时候采集和生成报告
 #   - 什么时候做 AI 分析
 #   - 用什么报告模式
 #
 # 快速上手：选一个预设模板，改 preset 的值就行
 #
-#   always_on       → 全天候，有新增即推送
-#   morning_evening → 全天推送 + 晚间当日汇总（推荐）
-#   office_hours    → 工作日三段式（到岗→午间→收工），周末增量自由推
+#   always_on       → 全天候生成当前报告
+#   morning_evening → 全天当前报告 + 晚间当日汇总（推荐）
+#   office_hours    → 工作日三段式（到岗→午间→收工），周末生成增量报告
 #   night_owl       → 午后速览 + 深夜全天汇总
 #   daily_brief     → 全天采集 + 夜间一次性每日简报
 #   custom          → 完全自定义，详见 timeline.yaml
@@ -114,19 +110,19 @@ platforms:
 rss:
   enabled: true                       # 是否启用 RSS 抓取（true=启用, false=关闭）
 
-  # 文章新鲜度过滤（过滤超龄旧文章，避免重复推送）
-  # 仅在推送阶段过滤，所有文章仍会存入数据库
+  # 文章新鲜度过滤（过滤超龄旧文章，避免旧内容进入当前分析与报告）
+  # 仅影响下游处理，所有文章仍会存入数据库
   freshness_filter:
     enabled: true                     # 是否启用新鲜度过滤（true=启用, false=关闭）
 
     max_age_days: 1                   # 最大文章年龄（天）
-                                      # - 正整数：只推送 N 天内的文章
-                                      # - 0：禁用过滤，推送所有文章
+                                      # - 正整数：只处理 N 天内的文章
+                                      # - 0：禁用过滤，处理所有文章
 
   # 单个 feed 可配置 max_age_days 覆盖全局设置：
   # - 不配置：使用全局 freshness_filter.max_age_days（默认 3 天）
-  # - 正整数：覆盖全局设置，只推送此天数内的文章
-  # - 0：禁用此频道的新鲜度过滤，推送所有文章
+  # - 正整数：覆盖全局设置，只处理此天数内的文章
+  # - 0：禁用此频道的新鲜度过滤，处理所有文章
   feeds:
     - id: "hacker-news"
       name: "Hacker News"
@@ -136,7 +132,7 @@ rss:
       name: "阮一峰的网络日志"
       url: "http://www.ruanyifeng.com/blog/atom.xml"
       enabled: false                  # 禁用
-      # max_age_days: 3               # 示例：推送 3 天内的文章（更新较慢的博客）
+      # max_age_days: 3               # 示例：处理 3 天内的文章（更新较慢的博客）
      
     - id: "yahoo-finance"
       name: "雅虎财经"
@@ -229,7 +225,7 @@ rss:
     #   name: "自定义源"
     #   url: "https://example.com/feed.xml"
     #   enabled: false
-    #   max_age_days: 0               # 示例：禁用过滤，推送所有文章
+    #   max_age_days: 0               # 示例：禁用过滤，处理所有文章
 
 
 # ===============================================================
@@ -237,15 +233,11 @@ rss:
 # ===============================================================
 report:
   mode: "current"                     # 报告模式（开启 schedule 后作为默认值，会被 timeline 时段覆盖）
-                                      # daily = 当日汇总，按时推送当天所有匹配新闻（会包含之前推过的）
-                                      # current = 当前榜单，按时推送当前在榜的匹配新闻（持续在榜的每次都出现）
-                                      # incremental = 增量监控，只推送新增内容，零重复（没有新增时不推送）
+                                      # daily = 当日汇总，包含当天所有匹配新闻
+                                      # current = 当前榜单，包含当前在榜的匹配新闻
+                                      # incremental = 增量报告，只包含本次新增内容
 
-  display_mode: "keyword"             # 分组维度
-                                      # keyword = 按关键词分组显示
-                                      # platform = 按平台/来源分组显示
-
-  sort_by_position_first: false       # 关键词模式排序（仅 display_mode=keyword 时生效）
+  sort_by_position_first: false       # 关键词分组排序
                                       # true = 按 frequency_words.txt 的定义顺序
                                       # false = 按匹配到的热点条数排序（多的在前）
 
@@ -254,7 +246,7 @@ report:
   max_news_per_keyword: 0             # 每个关键词/标签最大显示数量（0=不限制，仅影响展示裁剪）
 
   # 背景表 realtime pull-only：background_group_prefix 开头的词组（如“背景-宏观经济”）
-  # 在 current/incremental 模式下不进 AI 告警输入（不自推 realtime），
+  # 在 current/incremental 模式下不进入实时 AI 告警输入，
   # 仅在 daily 报告与 HTML 中作为上下文展示。
   background_pull_only: true          # true = 背景组只作上下文、不触发 realtime 异常提醒
   background_group_prefix: "背景-"    # 背景组识别前缀（与 frequency_words.txt 中的命名一致）
@@ -292,7 +284,7 @@ ai_filter:
   batch_size: 200                         # 每批发送给 AI 的标题数，超过此数量自动分批
   batch_interval: 2                       # 分批间隔（秒），避免触发 API 限流，0=不等待
 
-  min_score: 0.7                          # 推送最低分数阈值（0.0~1.0），值越高越严格
+  min_score: 0.7                          # 报告纳入最低分数阈值（0.0~1.0），值越高越严格
                                           # 推荐 0.5~0.7 起步，0=不过滤
 
   # 兴趣描述文件（默认 config/ai_interests.txt，无需配置）
@@ -316,105 +308,7 @@ ai_filter:
 
 
 # ===============================================================
-# 5. 推送内容控制
-#
-# 统一管理推送消息中显示哪些区域及其排列顺序
-# ===============================================================
-display:
-  # 区域显示顺序（从上到下 = 推送中从上到下）
-  # 调整顺序：剪切粘贴整行即可
-  # 要显示某个区域，需同时：1. 在此列表中  2. 下方 regions 对应开关为 true
-  region_order:
-    - new_items                           # 1 新增热点区域
-    - hotlist                             # 2 热榜区域（关键词匹配 / AI 智能筛选）
-    - rss                                 # 3 RSS 订阅区域
-    - standalone                          # 4 独立展示区
-    - ai_analysis                         # 5 AI 分析区域
-
-  # 推送区域开关（需配合上方 region_order 使用）
-  regions:
-    hotlist: true                     # 热榜区域：关键词匹配 / AI 智能筛选（true=显示, false=隐藏）
-    new_items: false                  # 新增热点区域：含热榜新增 + RSS 新增（true=显示, false=隐藏）
-                                      # 注：热点词汇统计中的新增标记[新增]不受此配置影响
-
-    rss: true                         # RSS 订阅区域（true=显示并分析, false=隐藏并跳过分析）
-    standalone: false                 # 独立展示区：完整热榜/RSS，不受关键词过滤（true=显示, false=隐藏）
-    ai_analysis: true                 # AI 分析区域（true=显示, false=隐藏）
-
-  # 独立展示区：将指定平台/RSS 完整展示，不受关键词过滤
-  # 推送展示由 regions.standalone 控制，AI 分析由 ai_analysis.include_standalone 控制
-  standalone:
-    platforms: ["zhihu", "wallstreetcn-hot"]     # 热榜平台 ID 列表（如 ["zhihu", "weibo"]）
-    rss_feeds: []                                # RSS 源 ID 列表（如 ["hacker-news"]）
-    max_items: 20                                # 每个源最多展示条数（0=不限制）
-
-
-# ===============================================================
-# 6. 推送通知
-#
-# [警告] webhook 地址不要公开！
-#    GitHub 部署请将 webhook 填入 GitHub Secrets，不要写在这里
-#
-# 多账号：分号(;)分隔，如 "url1;url2;url3"
-#    配对项（如 Telegram token 和 chat_id）数量必须一致
-# ===============================================================
-notification:
-  enabled: true                       # 是否启用通知功能（true=启用, false=关闭）—— 总开关
-                                      # 开启 schedule 后此项仍为总开关：false=永远不推送，true=由调度控制
-
-  # 推送渠道配置
-  channels:
-    feishu:
-      webhook_url: ""                 # 飞书机器人 webhook URL
-
-    dingtalk:
-      webhook_url: ""                 # 钉钉机器人 webhook URL
-
-    wework:
-      webhook_url: ""                 # 企业微信机器人 webhook URL
-      msg_type: "markdown"            # 消息类型：markdown(群机器人) | text(个人微信应用)
-
-    telegram:
-      bot_token: ""                   # Telegram Bot Token
-      chat_id: ""                     # 旧配置：Telegram Chat ID；旧多账号 chat id 也视为 owner
-      # Telegram access control v1:
-      # - chat_id / TELEGRAM_CHAT_ID 继续兼容，并自动视为 owner。
-      # - owner 自动拥有 receiver + command 权限。
-      # - 如果某个 chat 只应接收、不应发命令，请迁移到 receiver_chat_ids，
-      #   不要继续放在旧 chat_id / TELEGRAM_CHAT_ID。
-      owner_chat_ids: ""              # 逗号分隔；最高权限 chat_id 列表
-      receiver_chat_ids: ""           # 逗号分隔；可收到主动推送的 chat_id 列表
-      command_chat_ids: ""            # 逗号分隔；可执行未来入站命令的 chat_id 列表
-      commands_enabled: false         # 本阶段只加载/暴露配置，不实现命令
-      unauthorized_behavior: "ignore" # ignore / reply；非法值回退 ignore
-
-    email:
-      from: ""                        # 发件人邮箱地址
-      password: ""                    # 发件人邮箱密码或授权码
-      to: ""                          # 收件人邮箱，多个用逗号分隔
-      smtp_server: ""                 # SMTP 服务器（可选，留空自动识别）
-      smtp_port: ""                   # SMTP 端口（可选，留空自动识别）
-
-    ntfy:
-      server_url: "https://ntfy.sh"   # ntfy 服务器地址（可改为自托管）
-      topic: ""                       # ntfy 主题名称
-      token: ""                       # ntfy 访问令牌（可选，用于私有主题）
-
-    bark:
-      url: ""                         # Bark 推送 URL（格式：https://api.day.app/your_device_key）
-
-    slack:
-      webhook_url: ""                 # Slack Incoming Webhook URL
-
-    generic_webhook:
-      webhook_url: ""                 # 通用 Webhook URL（支持 Discord、Matrix、IFTTT 等）
-      payload_template: ""            # JSON 模板，支持 {title} 和 {content} 占位符
-                                      # 示例：{"content": "{content}"}
-                                      # 留空则使用默认格式：{"title": "{title}", "content": "{content}"}
-
-
-# ===============================================================
-# 7. 存储配置
+# 5. 存储配置
 # ===============================================================
 storage:
   # 存储后端选择
@@ -428,7 +322,7 @@ storage:
     sqlite: true                      # 主存储（必须保持 true，请勿关闭）
     txt: false                        # 是否生成 TXT 快照（true=生成, false=不生成）
     html: true                        # 是否生成 HTML 报告（true=生成, false=不生成）
-                                      # [警告] 邮件推送或者需要看网页版报告必须设为 true
+                                      # 需要网页版报告或 HTML artifact 时必须设为 true
 
   # 本地存储配置
   local:
@@ -458,7 +352,7 @@ storage:
 
 
 # ===============================================================
-# 8. AI 模型配置（ai_analysis / ai_translation / ai_filter 共用）
+# 6. AI 模型配置（ai_analysis / ai_translation / ai_filter 共用）
 # ===============================================================
 ai:
   # LiteLLM 模型格式: 提供商/模型名
@@ -517,7 +411,7 @@ ai:
 
 
 # ===============================================================
-# 9. AI 分析功能（模型配置见上方 ai 段）
+# 7. AI 分析功能（模型配置见上方 ai 段）
 # ===============================================================
 ai_analysis:
   enabled: true                     # 是否启用 AI 分析（true=启用, false=关闭）—— 总开关
@@ -525,11 +419,6 @@ ai_analysis:
 
   language: "Chinese"               # 分析报告语言（如 "English", "Korean", "法语"）
 
-  # 报告风格（信息环境异常监测改造）
-  #   environment = 信息环境异常监测日报（默认）—— 验证状态由程序规则生成，AI 只写文字
-  #   classic     = 旧版"高级情报分析师"热点分析
-  report_style: "environment"
-  prompt_file: "ai_analysis_prompt.txt"   # classic 风格使用的提示词文件
   environment_prompt_file: "ai_environment_report_prompt.txt"  # environment 风格使用的提示词文件
 
   mode: "follow_report"             # AI 分析模式（可独立于 report.mode）
@@ -537,108 +426,31 @@ ai_analysis:
                                     # daily / current / incremental = 强制使用指定模式
 
   max_news_for_analysis: 200        # 参与分析的新闻数量上限（控制 token 成本的关键项）
-                                    # 热榜优先占用配额，RSS 用剩余配额，独立展示区不受此限制
+                                    # 热榜优先占用配额，RSS 使用剩余配额
 
   include_rss: true                 # 是否包含 RSS 内容进行分析（true=包含, false=不包含）
-  include_standalone: true          # 是否纳入独立展示区数据（true=纳入, false=不纳入）
 
   include_rank_timeline: true       # 排名时间线详细程度
                                     # true = 完整轨迹（如 1(09:30)→2(10:00)），AI 分析更准但多耗 0.5~1 倍 token
                                     # false = 简化格式（排名范围+出现次数），更省 token
-
-
-
-
 # ===============================================================
-# 9.5 实时异常提醒门控（cooldown / 去重 / 升级再推）
+# 8. AI 翻译功能（模型配置见上方 ai 段）
 #
-# 作用域（确定规则）：仅 environment 风格 + 自动实时推送（report.mode ∈ {current, incremental}）。
-# 本配置仅作用于 Telegram environment 实时自动提醒（current / incremental），
-# daily 模式（含 daily_brief）不受影响——每日推送不被候选 gate 静默、也不读写 alert_state。
-# 明确不适用：
-#   - daily 模式（含 daily_brief 预设）—— 每日推送不被候选 gate 静默、也不读写 alert_state
-#   - 手动 /now 拉取实时报告（未来功能，绕过 gate 直接完整渲染）
-#   - classic report_style、HTML 完整报告、其它通知渠道的常规推送
-#
-# 解决的问题：同一议题每次 cron 运行都重复推送、打扰用户。
-# 核心语义：默认克制；同一议题短时间内不重复推；只有「信息结构升级」才突破冷却再推。
-# 状态存储：output/alert_state.json（本地）或对象存储 alert_state.json（远程/GitHub Actions）。
-# ===============================================================
-alert:
-  enabled: true                       # 总开关；false = 退回上一阶段行为（选到候选即推，无冷却）
-  cooldown_minutes: 180               # 同一议题（topic_key）的冷却窗口（分钟）内不重复推
-  state_ttl_days: 14                  # alert_state topic 状态保留天数；缺省/非法=14，0 或负数=禁用 TTL 清理
-  max_items: 3                        # 单轮最多推送的异常信号条数
-  allow_upgrade_break_cooldown: true  # 发生升级时是否可突破冷却再推
-
-  # high_heat_unverified（高热待核实）自动推门槛：满足任一即可自动推，否则留给每日简报
-  high_heat_min_rank: 10              # D 层最高名次 ≤ 此值
-  high_heat_min_platforms: 2          # 或 D 层平台数 ≥ 此值
-
-  # 进入自动推送的候选标签（silence_gap 永不进自动提醒，留给每日简报）
-  # 语义：省略或 null → 使用默认优先级顺序（三个桶全开）；
-  #       空列表 [] → 禁用所有自动提醒（无桶可选，等效于静默）。
-  notify_labels:
-    - cross_layer_verified
-    - high_heat_unverified
-    - chinese_only_hot
-
-
-# ===============================================================
-# 9b. Telegram HTML 附件（增强项，默认关闭）
-#
-# 文本推送成功后，可选地把事件对应的发布根 HTML 作为 document 附件发给 receiver。
-# 重要语义：
-#   - 附件失败【永远不会】影响文本推送结果；failure_behavior 只控制日志强度。
-#   - 附件只发送 public/{current|daily}/index.html 或 full.html，
-#     不发送 state.json / db / log / alert_state / secrets。
-#   - 多 receiver 时，每个文本发送成功的 receiver 都会单独收到附件。
-#   - dashboard 作为 Telegram 单文件附件时，内部 full.html 相对链接可能不可用；
-#     这是当前已知限制，本轮不改 dashboard HTML。
-# ===============================================================
-telegram_attachments:
-  enabled: false                      # 总开关，默认关闭
-  # 哪些推送成功后附带 HTML（均要求 environment 风格，classic 不附附件）：
-  #   - realtime_alert：current/incremental 且本轮真的推了 alert
-  #   - daily_digest  ：environment 每日简报（指 environment daily digest，不是所有 mode=daily）
-  # 旧写法 realtime / daily 仍会兼容归一化，但正式取值请使用 realtime_alert / daily_digest。
-  # 空列表 [] = 禁用附件（无可触发事件，等效于 enabled: false）。
-  attach_on:
-    - realtime_alert
-    - daily_digest
-  # 按事件选择附件类型。未配置时使用内置默认：
-  #   - realtime_alert → dashboard → public/current/index.html
-  #   - daily_digest   → full      → public/daily/full.html
-  # 可选值：dashboard / full。
-  report_kind_by_event:
-    realtime_alert: dashboard
-    daily_digest: full
-  # legacy/deprecated：旧全局字段，仅为兼容保留；不再覆盖 realtime_alert / daily_digest
-  # 的内置默认策略。新配置请使用 report_kind_by_event。
-  report_kind: full
-  max_file_mb: 8                      # 超过则跳过该附件并记日志（<=0 表示不检查大小）
-  failure_behavior: warn              # warn=失败打 [警告] 日志；silent=仅普通日志。两者都不影响文本推送结果
-
-
-# ===============================================================
-# 10. AI 翻译功能（模型配置见上方 ai 段）
-#
-# 对推送标题进行翻译，不包含 AI 分析的内容
+# 对报告标题进行翻译，不包含 AI 分析的内容
 # ===============================================================
 ai_translation:
   enabled: false                    # 是否启用翻译功能（true=启用, false=关闭）
   language: "中文"                   # 翻译目标语言（如 "English", "Korean", "法语"）
   prompt_file: "ai_translation_prompt.txt"   # 提示词文件（相对于 config 目录）
 
-  # 翻译范围（display.regions 关闭的区域即使开启也不会翻译）
+  # 翻译范围
   scope:
     hotlist: false                  # 翻译热榜标题（true=翻译, false=不翻译）
     rss: true                       # 翻译 RSS 标题（true=翻译, false=不翻译）
-    standalone: true                # 翻译独立展示区标题（true=翻译, false=不翻译）
 
 
 # ===============================================================
-# 11. 高级设置（一般无需修改）
+# 9. 高级设置（一般无需修改）
 # ===============================================================
 advanced:
   debug: false                        # 调试模式（true=开启详细日志, false=正常模式）
@@ -669,17 +481,3 @@ advanced:
     rank: 0.6                         # 排名权重
     frequency: 0.3                    # 频次权重
     hotness: 0.1                      # 热度权重
-
-  # 多账号限制
-  max_accounts_per_channel: 3         # 每个渠道最大账号数量
-
-  # 以下为内部参数（一般无需修改）
-  # 消息分批大小（字节）- 内部配置，请勿修改
-  batch_size:
-    default: 4000
-    dingtalk: 20000
-    feishu: 30000
-    bark: 4000
-    slack: 4000
-  batch_send_interval: 3              # 批次发送间隔（秒）
-  feishu_message_separator: "━━━━━━━━━━━━━━━━"

@@ -36,13 +36,12 @@ class FakeSender:
 
 
 class TestOperatorAlert(unittest.TestCase):
-    def test_sends_to_owners_without_receiver_fallback(self):
+    def test_sends_to_explicit_owners(self):
         sender = FakeSender()
         result = send_owner_alert(
             {
                 "TELEGRAM_BOT_TOKEN": "secret-token",
                 "TELEGRAM_OWNER_CHAT_IDS": "111,222",
-                "TELEGRAM_RECEIVER_CHAT_IDS": "999",
             },
             "safe diagnostic",
             sender=sender,
@@ -51,8 +50,6 @@ class TestOperatorAlert(unittest.TestCase):
         self.assertEqual(
             [call["chat_id"] for call in sender.calls], ["111", "222"]
         )
-        self.assertNotIn("999", [call["chat_id"] for call in sender.calls])
-
     def test_requested_subset_cannot_expand_beyond_configured_owners(self):
         sender = FakeSender()
         result = send_owner_alert(

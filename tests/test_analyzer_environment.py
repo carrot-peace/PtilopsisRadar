@@ -124,7 +124,7 @@ class TestEnvironmentAssembly(unittest.TestCase):
         # 占位符已被替换
         self.assertNotIn("{evidence_summary}", prompt)
         self.assertNotIn("{overview_stats}", prompt)
-        # 不应出现 classic 的 raw title 占位符
+        # 不应出现已移除的 raw-title prompt 占位符
         self.assertNotIn("{news_content}", prompt)
         self.assertNotIn("{rss_content}", prompt)
 
@@ -229,19 +229,22 @@ class TestEnvironmentConfigSemantics(unittest.TestCase):
         self.assertNotIn("议题「B议题」", captured["prompt"])
 
 
-class TestClassicDeprecated(unittest.TestCase):
-    def test_classic_config_normalized_to_environment(self):
-        """PR7e: REPORT_STYLE=classic 被忽略，统一走 environment 流程。"""
+class TestReportStyleNormalization(unittest.TestCase):
+    def test_unsupported_config_normalized_to_environment(self):
+        """不支持的 REPORT_STYLE 被忽略，统一走 environment 流程。"""
         ai_config = {"MODEL": "test/model", "API_KEY": "k"}
-        analysis_config = {"ENABLED": True, "REPORT_STYLE": "classic",
-                           "PROMPT_FILE": "ai_analysis_prompt.txt", "LANGUAGE": "Chinese"}
+        analysis_config = {
+            "ENABLED": True,
+            "REPORT_STYLE": "unsupported",
+            "ENVIRONMENT_PROMPT_FILE": "ai_environment_report_prompt.txt",
+            "LANGUAGE": "Chinese",
+        }
         az = B.analyzer.AIAnalyzer(ai_config, analysis_config, _time_func, debug=False)
         az._call_ai = lambda _: '{"overview":"x","items":{},"background_notes":[]}'
         stats = [{"word": "X", "titles": [T("a", "微博", 2)]}]
         result = az.analyze(stats=stats, source_tier_resolver=_bootstrap.make_resolver(B))
         self.assertEqual(result.report_style, "environment")
-        # classic 字段保持空（environment 流程不填充 classic 字段）
-        self.assertEqual(result.core_trends, "")
+        self.assertEqual(az.report_style, "environment")
 
 
 if __name__ == "__main__":

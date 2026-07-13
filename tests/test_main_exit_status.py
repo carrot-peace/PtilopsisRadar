@@ -1,9 +1,20 @@
 # coding=utf-8
 """Regression tests for scheduled application exit status propagation."""
 
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+# Several lightweight test modules install partial ``trendradar`` package
+# stubs during collection.  This test needs the real application package, so
+# make that import independent of test collection order.
+for _stale in [
+    _name
+    for _name in list(sys.modules)
+    if _name == "trendradar" or _name.startswith("trendradar.")
+]:
+    del sys.modules[_stale]
 
 import trendradar.__main__ as application
 from trendradar.deployment.run_with_heartbeat import main as run_with_heartbeat

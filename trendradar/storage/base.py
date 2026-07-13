@@ -444,7 +444,7 @@ class StorageBackend(ABC):
         Args:
             date_str: 日期字符串 YYYY-MM-DD
             period_key: 时间段 key
-            action: 动作类型 (analyze / push)
+            action: 动作标识（当前为 analyze）
 
         Returns:
             是否已执行
@@ -458,35 +458,10 @@ class StorageBackend(ABC):
         Args:
             date_str: 日期字符串 YYYY-MM-DD
             period_key: 时间段 key
-            action: 动作类型 (analyze / push)
+            action: 动作标识（当前为 analyze）
 
         Returns:
             是否记录成功
-        """
-        return False
-
-    # === 实时异常提醒状态（cooldown / 去重 / 升级再推）===
-    # 与按天 DB 不同：alert_state 是单一、非按天分区的文档，以保证 cooldown 跨午夜不丢。
-    # 默认实现为空，子类按本地文件 / 远程对象覆盖。
-
-    def get_alert_state(self) -> Dict:
-        """
-        读取实时异常提醒状态。
-
-        Returns:
-            {"version": int, "topics": {topic_key: record}}；无数据返回 {}
-        """
-        return {}
-
-    def save_alert_state(self, state: Dict) -> bool:
-        """
-        保存实时异常提醒状态（整体覆盖写）。
-
-        Args:
-            state: {"version": int, "topics": {topic_key: record}}
-
-        Returns:
-            是否保存成功
         """
         return False
 

@@ -7,8 +7,8 @@ Current Dashboard 模块（newsletter 风格）
 设计约束（见 plan）：
 - 与 alert cooldown / notify_labels 解耦：直接读 AIAnalysisResult 全量 buckets，
   不调用 apply_alert_cooldown / select_environment_alert_items。
-- 不依赖 formatter.py 的私有下划线 helper；只复用数据层的 derive_radar_readout
-  与 SECTION_ORDER（evidence.py 的公开常量），渲染与 CSS 在本模块内自实现。
+- 只复用数据层的 derive_radar_readout 与 SECTION_ORDER（evidence.py 的公开常量），
+  渲染与 CSS 在本模块内自实现。
 - build_dashboard_state 产出的是**发布安全摘要**：禁止包含 source_links、
   sample_titles、evidence_detail、sources_by_tier、原始 RSS/热榜 URL，
   以及任何 db/log/alert_state/secrets。

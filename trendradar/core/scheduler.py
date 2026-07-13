@@ -2,7 +2,7 @@
 """
 时间线调度器
 
-统一的时间线调度系统，替代分散的 push_window / analysis_window 逻辑。
+统一的时间线调度系统，集中管理采集、分析与报告模式。
 基于 periods + day_plans + week_map 模型实现灵活的时间段调度。
 """
 
@@ -22,11 +22,9 @@ class ResolvedSchedule:
     day_plan: str                   # 当前日计划
     collect: bool
     analyze: bool
-    push: bool
     report_mode: str
     ai_mode: str
     once_analyze: bool
-    once_push: bool
     frequency_file: Optional[str] = None  # 频率词文件路径，None=使用默认
     filter_method: Optional[str] = None   # 筛选策略: "keyword"|"ai"，None=使用全局配置
     interests_file: Optional[str] = None  # AI 筛选兴趣文件，None=使用默认
@@ -41,7 +39,7 @@ class Scheduler:
     - 预设模板 + 自定义模式
     - 跨日时间段（如 22:00-07:00）
     - 每天 / 每周差异化配置
-    - once 执行去重（analyze / push 独立维度）
+    - once 分析执行去重
     - 冲突策略（error_on_overlap / last_wins）
     """
 
@@ -114,11 +112,9 @@ class Scheduler:
                 day_plan="disabled",
                 collect=True,
                 analyze=True,
-                push=True,
                 report_mode=self.fallback_report_mode,
                 ai_mode="follow_report",
                 once_analyze=False,
-                once_push=False,
             )
 
         now = self.get_time()
@@ -163,11 +159,9 @@ class Scheduler:
             day_plan=day_plan_key,
             collect=merged.get("collect", True),
             analyze=merged.get("analyze", False),
-            push=merged.get("push", False),
             report_mode=merged.get("report_mode", "current"),
             ai_mode=self._resolve_ai_mode(merged),
             once_analyze=merged.get("once", {}).get("analyze", False),
-            once_push=merged.get("once", {}).get("push", False),
             frequency_file=merged.get("frequency_file"),
             filter_method=merged.get("filter_method"),
             interests_file=merged.get("interests_file"),
@@ -179,8 +173,6 @@ class Scheduler:
             actions.append("采集")
         if resolved.analyze:
             actions.append(f"分析(AI:{resolved.ai_mode})")
-        if resolved.push:
-            actions.append(f"Legacy Push配置已忽略(模式:{resolved.report_mode})")
         print(f"[调度] 行为: {', '.join(actions) if actions else '无'}")
         if resolved.frequency_file:
             print(f"[调度] 频率词文件: {resolved.frequency_file}")
@@ -287,7 +279,7 @@ class Scheduler:
 
         Args:
             period_key: 时间段 key
-            action: 动作类型 (analyze / push)
+            action: 动作类型
             date_str: 日期 YYYY-MM-DD
 
         Returns:
@@ -301,7 +293,7 @@ class Scheduler:
 
         Args:
             period_key: 时间段 key
-            action: 动作类型 (analyze / push)
+            action: 动作类型
             date_str: 日期 YYYY-MM-DD
         """
         self.storage.record_period_execution(date_str, period_key, action)

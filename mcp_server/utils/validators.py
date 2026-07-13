@@ -572,7 +572,7 @@ def validate_config_section(section: Optional[str]) -> str:
     Raises:
         InvalidParameterError: 配置节无效
     """
-    valid_sections = ["all", "crawler", "push", "keywords", "weights"]
+    valid_sections = ["all", "crawler", "keywords", "weights"]
     return validate_mode(section, valid_sections, "all")
 
 
@@ -667,4 +667,3 @@ def validate_date_query(
     DateParser.validate_date_not_too_old(parsed_date, max_days=max_days_ago)
 
     return parsed_date
-

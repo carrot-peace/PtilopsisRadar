@@ -17,17 +17,11 @@ from trendradar.ai.prompt_loader import load_prompt_template
 @dataclass
 class AIAnalysisResult:
     """AI 分析结果"""
-    # 报告风格：environment（信息环境异常监测日报）。classic 已废弃，统一为 environment。
+    # 唯一支持的报告风格：environment（信息环境异常监测日报）。
     report_style: str = "environment"
 
-    # ── classic 风格（已废弃，保留字段以兼容旧调用方） ──
-    core_trends: str = ""                # 核心热点与舆情态势
-    sentiment_controversy: str = ""      # 舆论风向与争议
-    signals: str = ""                    # 异动与弱信号
-    rss_insights: str = ""               # RSS 深度洞察
-    outlook_strategy: str = ""           # 研判与策略建议
     # ── environment 风格：信息环境异常监测（程序定栏定标签，AI 只写文字） ──
-    # 注：字段名为数据层 bucket key；呈现层名称见 formatter._SECTION_TITLES。
+    # 注：字段名为数据层 bucket key；各 renderer 负责映射呈现层名称。
     overview: str = ""                                                   # 今日盘面（AI 补一句）
     overview_stats: Dict[str, Any] = field(default_factory=dict)         # 程序盘面骨架
     cross_layer_verified: List[Dict] = field(default_factory=list)       # 跨层呼应（优先看）
@@ -95,7 +89,7 @@ class AIAnalyzer:
         self.include_rank_timeline = analysis_config.get("INCLUDE_RANK_TIMELINE", False)
         self.language = analysis_config.get("LANGUAGE", "Chinese")
 
-        # 报告风格：environment（信息环境异常监测）。classic 已废弃，统一为 environment。
+        # 唯一支持的信息环境异常监测报告风格。
         self.report_style = "environment"
 
         # 加载提示词模板（environment prompt）
@@ -165,125 +159,6 @@ class AIAnalyzer:
             source_tier_resolver=source_tier_resolver,
         )
 
-    def _prepare_news_content(
-        self,
-        stats: List[Dict],
-        rss_stats: Optional[List[Dict]] = None,
-    ) -> tuple:
-        """
-        准备新闻内容文本（增强版）
-
-        热榜新闻包含：来源、标题、排名范围、时间范围、出现次数
-        RSS 包含：来源、标题、发布时间
-
-        Returns:
-            tuple: (news_content, rss_content, hotlist_total, rss_total, analyzed_count, hotlist_analyzed, rss_analyzed)
-        """
-        news_lines = []
-        rss_lines = []
-        news_count = 0
-        rss_count = 0
-
-        # 计算总新闻数
-        hotlist_total = sum(len(s.get("titles", [])) for s in stats) if stats else 0
-        rss_total = sum(len(s.get("titles", [])) for s in rss_stats) if rss_stats else 0
-
-        # 热榜内容
-        if stats:
-            for stat in stats:
-                word = stat.get("word", "")
-                titles = stat.get("titles", [])
-                if word and titles:
-                    news_lines.append(f"\n**{word}** ({len(titles)}条)")
-                    for t in titles:
-                        if not isinstance(t, dict):
-                            continue
-                        title = t.get("title", "")
-                        if not title:
-                            continue
-
-                        # 来源
-                        source = t.get("source_name", t.get("source", ""))
-
-                        # 构建行
-                        if source:
-                            line = f"- [{source}] {title}"
-                        else:
-                            line = f"- {title}"
-
-                        # 始终显示简化格式：排名范围 + 时间范围 + 出现次数
-                        ranks = t.get("ranks", [])
-                        if ranks:
-                            min_rank = min(ranks)
-                            max_rank = max(ranks)
-                            rank_str = f"{min_rank}" if min_rank == max_rank else f"{min_rank}-{max_rank}"
-                        else:
-                            rank_str = "-"
-
-                        first_time = t.get("first_time", "")
-                        last_time = t.get("last_time", "")
-                        time_str = self._format_time_range(first_time, last_time)
-
-                        appear_count = t.get("count", 1)
-
-                        line += f" | 排名:{rank_str} | 时间:{time_str} | 出现:{appear_count}次"
-
-                        # 开启完整时间线时，额外添加轨迹
-                        if self.include_rank_timeline:
-                            rank_timeline = t.get("rank_timeline", [])
-                            timeline_str = self._format_rank_timeline(rank_timeline)
-                            line += f" | 轨迹:{timeline_str}"
-
-                        news_lines.append(line)
-
-                        news_count += 1
-                        if news_count >= self.max_news:
-                            break
-                if news_count >= self.max_news:
-                    break
-
-        # RSS 内容（仅在启用时构建）
-        if self.include_rss and rss_stats:
-            remaining = self.max_news - news_count
-            for stat in rss_stats:
-                if rss_count >= remaining:
-                    break
-                word = stat.get("word", "")
-                titles = stat.get("titles", [])
-                if word and titles:
-                    rss_lines.append(f"\n**{word}** ({len(titles)}条)")
-                    for t in titles:
-                        if not isinstance(t, dict):
-                            continue
-                        title = t.get("title", "")
-                        if not title:
-                            continue
-
-                        # 来源
-                        source = t.get("source_name", t.get("feed_name", ""))
-
-                        # 发布时间
-                        time_display = t.get("time_display", "")
-
-                        # 构建行：[来源] 标题 | 发布时间
-                        if source:
-                            line = f"- [{source}] {title}"
-                        else:
-                            line = f"- {title}"
-                        if time_display:
-                            line += f" | {time_display}"
-                        rss_lines.append(line)
-
-                        rss_count += 1
-                        if rss_count >= remaining:
-                            break
-
-        news_content = "\n".join(news_lines) if news_lines else ""
-        rss_content = "\n".join(rss_lines) if rss_lines else ""
-        total_count = news_count + rss_count
-
-        return news_content, rss_content, hotlist_total, rss_total, total_count, news_count, rss_count
-
     def _call_ai(self, user_prompt: str) -> str:
         """调用 AI API（使用 LiteLLM）"""
         messages = []
@@ -292,176 +167,6 @@ class AIAnalyzer:
         messages.append({"role": "user", "content": user_prompt})
 
         return self.client.chat(messages)
-
-    def _retry_fix_json(self, original_response: str, error_msg: str) -> Optional[AIAnalysisResult]:
-        """
-        JSON 解析失败时，请求 AI 修复 JSON（仅重试一次）
-
-        使用轻量 prompt，不重复原始分析的 system prompt，节省 token。
-
-        Args:
-            original_response: AI 原始响应（JSON 格式有误）
-            error_msg: JSON 解析的错误信息
-
-        Returns:
-            修复后的分析结果，失败时返回 None
-        """
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是一个 JSON 修复助手。用户会提供一段格式有误的 JSON 和错误信息，"
-                    "你需要修复 JSON 格式错误并返回正确的 JSON。\n"
-                    "常见问题：字符串值内的双引号未转义、缺少逗号、字符串未正确闭合等。\n"
-                    "只返回纯 JSON，不要包含 markdown 代码块标记（如 ```json）或任何说明文字。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"以下 JSON 解析失败：\n\n"
-                    f"错误：{error_msg}\n\n"
-                    f"原始内容：\n{original_response}\n\n"
-                    f"请修复以上 JSON 中的格式问题（如值中的双引号改用中文引号「」或转义 \\\"、"
-                    f"缺少逗号、不完整的字符串等），保持原始内容语义不变，只修复格式。"
-                    f"直接返回修复后的纯 JSON。"
-                ),
-            },
-        ]
-
-        try:
-            response = self.client.chat(messages)
-            return self._parse_response(response)
-        except Exception as e:
-            print(f"[AI] 重试修复 JSON 异常: {type(e).__name__}: {e}")
-            return None
-
-    def _format_time_range(self, first_time: str, last_time: str) -> str:
-        """格式化时间范围（简化显示，只保留时分）"""
-        def extract_time(time_str: str) -> str:
-            if not time_str:
-                return "-"
-            # 尝试提取 HH:MM 部分
-            if " " in time_str:
-                parts = time_str.split(" ")
-                if len(parts) >= 2:
-                    time_part = parts[1]
-                    if ":" in time_part:
-                        return time_part[:5]  # HH:MM
-            elif ":" in time_str:
-                return time_str[:5]
-            # 处理 HH-MM 格式
-            result = time_str[:5] if len(time_str) >= 5 else time_str
-            if len(result) == 5 and result[2] == '-':
-                result = result.replace('-', ':')
-            return result
-
-        first = extract_time(first_time)
-        last = extract_time(last_time)
-
-        if first == last or last == "-":
-            return first
-        return f"{first}~{last}"
-
-    def _format_rank_timeline(self, rank_timeline: List[Dict]) -> str:
-        """格式化排名时间线"""
-        if not rank_timeline:
-            return "-"
-
-        parts = []
-        for item in rank_timeline:
-            time_str = item.get("time", "")
-            if len(time_str) == 5 and time_str[2] == '-':
-                time_str = time_str.replace('-', ':')
-            rank = item.get("rank")
-            if rank is None:
-                parts.append(f"0({time_str})")
-            else:
-                parts.append(f"{rank}({time_str})")
-
-        return "→".join(parts)
-
-    def _parse_response(self, response: str) -> AIAnalysisResult:
-        """解析 AI 响应"""
-        result = AIAnalysisResult(raw_response=response)
-
-        if not response or not response.strip():
-            result.error = "AI 返回空响应"
-            return result
-
-        # 提取 JSON 文本（去掉 markdown 代码块标记）
-        json_str = response
-
-        if "```json" in response:
-            parts = response.split("```json", 1)
-            if len(parts) > 1:
-                code_block = parts[1]
-                end_idx = code_block.find("```")
-                if end_idx != -1:
-                    json_str = code_block[:end_idx]
-                else:
-                    json_str = code_block
-        elif "```" in response:
-            parts = response.split("```", 2)
-            if len(parts) >= 2:
-                json_str = parts[1]
-
-        json_str = json_str.strip()
-        if not json_str:
-            result.error = "提取的 JSON 内容为空"
-            result.core_trends = response[:500] + "..." if len(response) > 500 else response
-            result.success = True
-            return result
-
-        # 第一步：标准 JSON 解析
-        data = None
-        parse_error = None
-
-        try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            parse_error = e
-
-        # 第二步：json_repair 本地修复
-        if data is None:
-            try:
-                from json_repair import repair_json
-                repaired = repair_json(json_str, return_objects=True)
-                if isinstance(repaired, dict):
-                    data = repaired
-                    print("[AI] JSON 本地修复成功（json_repair）")
-            except Exception:
-                pass
-
-        # 两步都失败，记录错误（后续由 analyze 方法的重试机制处理）
-        if data is None:
-            if parse_error:
-                error_context = json_str[max(0, parse_error.pos - 30):parse_error.pos + 30] if json_str and parse_error.pos else ""
-                result.error = f"JSON 解析错误 (位置 {parse_error.pos}): {parse_error.msg}"
-                if error_context:
-                    result.error += f"，上下文: ...{error_context}..."
-            else:
-                result.error = "JSON 解析失败"
-            # 兜底：使用已提取的 json_str（不含 markdown 标记），避免推送中出现 ```json
-            result.core_trends = json_str[:500] + "..." if len(json_str) > 500 else json_str
-            result.success = True
-            return result
-
-        # 解析成功，提取字段
-        try:
-            result.core_trends = data.get("core_trends", "")
-            result.sentiment_controversy = data.get("sentiment_controversy", "")
-            result.signals = data.get("signals", "")
-            result.rss_insights = data.get("rss_insights", "")
-            result.outlook_strategy = data.get("outlook_strategy", "")
-
-            result.success = True
-        except (KeyError, TypeError, AttributeError) as e:
-            result.error = f"字段提取错误: {type(e).__name__}: {e}"
-            result.core_trends = json_str[:500] + "..." if len(json_str) > 500 else json_str
-            result.success = True
-
-        return result
 
     # ════════════════════════════════════════════════════════════
     # 信息环境异常监测（environment 风格）

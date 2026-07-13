@@ -7,16 +7,12 @@ evidence buckets + AI prose (``AIAnalysisResult``) and the collected
 ``report_data`` into a clean, structured daily artifact, then renders that
 model to self-contained HTML.
 
-Hard boundary (see ``docs/legacy_push_removal_plan.md`` PR-D):
-- This module MUST NOT import the legacy notification package.
-- It MUST NOT call any legacy dispatch / sender entrypoint.
-- It MUST NOT use the CR Telegram sink or env.
-- It produces artifacts only. It never pushes. Any future DR push requires a
-  separate explicit DR dispatch plan, gate, receipt model, and cooldown policy.
-
-The exact forbidden symbol names are intentionally omitted from this source so
-the literal Legacy-Push source guard stays clean; they are enumerated in the
-canonical plan and asserted in ``tests/test_daily_report_v2_artifact.py``.
+Hard boundary (see ``docs/transport_boundaries.md``):
+- This module does not import Telegram transport packages.
+- It does not invoke a dispatch plan or sender.
+- It does not use the CR or DR Telegram sink or environment configuration.
+- It produces artifacts only; DR delivery is owned by the separate DR dispatch
+  pipeline, with its own plan, gate, receipts, and cooldown policy.
 
 The module is split into a pure model layer (``build_daily_report_v2`` and the
 classification helpers) and a renderer (``render_daily_report_v2``) so the
@@ -332,7 +328,7 @@ class RawAppendix:
 
 @dataclass
 class DailyReportV2:
-    """Structured Daily Report v2 artifact model (no Transport, no push)."""
+    """Structured Daily Report v2 artifact model without transport behavior."""
 
     ai_backed: bool = False
     degraded: bool = False
@@ -732,7 +728,7 @@ def render_daily_report_v2(
     """Render the DR v2 artifact to self-contained HTML.
 
     Signature mirrors ``render_newsletter_report`` so DR v2 is a drop-in daily
-    artifact renderer. Artifact-only: no scripts, no Transport, no push.
+    artifact renderer. It contains no scripts or transport behavior.
     """
     model = build_daily_report_v2(ai_analysis, report_data)
     generated_at: datetime = (

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 from trendradar.context import AppContext
 from trendradar import __version__
-from trendradar.core import load_config, parse_multi_account_config
+from trendradar.core import load_config
 from trendradar.core.analyzer import strip_background_groups
 from trendradar.crawler import DataFetcher
 from trendradar.storage import convert_crawl_results_to_news_data
@@ -33,7 +33,6 @@ from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_da
 from trendradar.ai import AIAnalyzer, AIAnalysisResult
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.core.cdn import fetch_with_fallback
-from trendradar.telegram_bot.access import build_telegram_access_config
 try:
     from trendradar.versioning import compare_version_tuple, parse_version_tuple
 except ModuleNotFoundError:
@@ -58,21 +57,6 @@ except ModuleNotFoundError:
         return 0
 
 
-LEGACY_NOTIFICATION_CONFIGS = [
-    ("FEISHU_WEBHOOK_URL", "飞书"),
-    ("DINGTALK_WEBHOOK_URL", "钉钉"),
-    ("WEWORK_WEBHOOK_URL", "企业微信"),
-    ("BARK_URL", "Bark"),
-    ("SLACK_WEBHOOK_URL", "Slack"),
-    ("GENERIC_WEBHOOK_URL", "通用Webhook"),
-]
-
-
-LEGACY_PUSH_REMOVED_MSG = (
-    "Legacy Push has been removed from runtime. "
-    "Use CR-New canary / CR dry-run Telegram sink instead."
-)
-
 DOCTOR_STATUS_LABELS = {
     "pass": "[通过]",
     "warn": "[警告]",
@@ -83,40 +67,6 @@ DOCTOR_STATUS_LABELS = {
 def _format_switch_state(enabled: bool) -> str:
     """Return a neutral label for a configured boolean switch."""
     return "[开启]" if enabled else "[关闭]"
-
-
-def _telegram_receiver_chat_ids(config: Dict) -> List[str]:
-    """Return Telegram receiver chat ids using the same access parser as runtime senders."""
-    tg_access = config.get("TELEGRAM_ACCESS") or {}
-    receivers = tg_access.get("receiver_chat_ids") or []
-    if receivers:
-        return list(receivers)
-
-    try:
-        return list(build_telegram_access_config(config).get("receiver_chat_ids") or [])
-    except Exception:
-        return []
-
-
-def _has_telegram_notification_configured(config: Dict) -> bool:
-    """Runtime notification is Telegram-only: token plus at least one receiver."""
-    return bool(config.get("TELEGRAM_BOT_TOKEN") and _telegram_receiver_chat_ids(config))
-
-
-def _legacy_notification_config_labels(config: Dict) -> List[str]:
-    """Return legacy non-Telegram notification configs that are present but ignored."""
-    labels = []
-    for key, label in LEGACY_NOTIFICATION_CONFIGS:
-        if parse_multi_account_config(config.get(key, "")):
-            labels.append(label)
-
-    if config.get("NTFY_SERVER_URL") or config.get("NTFY_TOPIC") or config.get("NTFY_TOKEN"):
-        labels.append("ntfy")
-
-    if config.get("EMAIL_FROM") or config.get("EMAIL_PASSWORD") or config.get("EMAIL_TO"):
-        labels.append("邮件")
-
-    return labels
 
 
 def _parse_version(version_str: str) -> Tuple[int, int, int]:
@@ -260,21 +210,18 @@ class NewsAnalyzer:
     MODE_STRATEGIES = {
         "incremental": {
             "mode_name": "增量模式",
-            "description": "增量模式（只关注新增新闻，生成 artifact，不触发 Legacy Push）",
+            "description": "增量模式（只关注新增新闻，生成 artifact）",
             "report_type": "增量分析",
-            "should_send_notification": False,
         },
         "current": {
             "mode_name": "当前榜单模式",
             "description": "当前榜单模式（当前榜单匹配新闻 + 新增新闻区域，生成 artifact）",
             "report_type": "当前榜单",
-            "should_send_notification": False,
         },
         "daily": {
             "mode_name": "全天汇总模式",
             "description": "全天汇总模式（所有匹配新闻 + 新增新闻区域，生成 artifact）",
             "report_type": "全天汇总",
-            "should_send_notification": False,
         },
     }
 
@@ -406,10 +353,6 @@ class NewsAnalyzer:
     def _get_mode_strategy(self) -> Dict:
         """获取当前模式的策略配置"""
         return self.MODE_STRATEGIES.get(self.report_mode, self.MODE_STRATEGIES["daily"])
-
-    def _has_notification_configured(self) -> bool:
-        """检查是否配置了运行时通知渠道。当前运行时只支持 Telegram。"""
-        return _has_telegram_notification_configured(self.ctx.config)
 
     def _has_valid_content(
         self, stats: List[Dict], new_titles: Optional[Dict] = None
@@ -543,11 +486,9 @@ class NewsAnalyzer:
                 day_plan="manual",
                 collect=True,
                 analyze=True,
-                push=True,
                 report_mode=mode,
                 ai_mode=mode,
                 once_analyze=False,
-                once_push=False,
             )
 
         # 调度系统决策
@@ -573,18 +514,18 @@ class NewsAnalyzer:
             # 确定 AI 分析使用的模式
             ai_mode_config = analysis_config.get("MODE", "follow_report")
             if ai_mode_config == "follow_report":
-                # 跟随调度解析出的 AI 模式；调度未指定时再回退到推送报告模式。
+                # 跟随调度解析出的 AI 模式；调度未指定时再回退到运行报告模式。
                 ai_mode = getattr(schedule, "ai_mode", None) or mode
                 if ai_mode == "follow_report":
                     ai_mode = mode
                 if ai_mode != mode:
-                    print(f"[AI] 使用调度分析模式: {ai_mode} (推送模式: {mode})")
+                    print(f"[AI] 使用调度分析模式: {ai_mode} (运行模式: {mode})")
                     print(f"[AI] 正在准备 {ai_mode} 模式的数据...")
                     ai_stats, ai_id_to_name = self._prepare_ai_analysis_data(
                         ai_mode, current_results, id_to_name
                     )
                     if not ai_stats:
-                        print(f"[AI] 警告: 无法准备 {ai_mode} 模式的数据，回退到推送模式数据")
+                        print(f"[AI] 警告: 无法准备 {ai_mode} 模式的数据，回退到运行模式数据")
                         ai_stats = stats
                         ai_id_to_name = id_to_name
                         ai_mode = mode
@@ -825,13 +766,11 @@ class NewsAnalyzer:
             from trendradar.report.translation import translate_report_content
 
             translator = self.ctx.create_artifact_translator()
-            display_regions = self.ctx.config.get("DISPLAY", {}).get("REGIONS", {})
             _, rss_items, rss_new_items = translate_report_content(
                 report_data={"stats": [], "new_titles": []},
                 rss_items=rss_items,
                 rss_new_items=rss_new_items,
                 translator=translator,
-                display_regions=display_regions,
                 debug=self.ctx.config.get("DEBUG", False),
             )
 
@@ -854,9 +793,7 @@ class NewsAnalyzer:
             #   current/incremental → 轻量盘面 dashboard（不写 full.html）
             # landing（public/index.html）由两条路径各自幂等维护。
             if mode == "daily":
-                # PR8a: 所有 canonical output 始终传入原始 ai_result，
-                # 不再由 DISPLAY.REGIONS.AI_ANALYSIS gate 决定。
-                # 由 renderer 自行决定显示 editorial 还是 no-AI fallback notice。
+                # renderer 根据实际分析结果显示 editorial 或 no-AI fallback notice。
                 html_ai = ai_result
                 html_file = self.ctx.generate_html(
                     stats,
@@ -873,8 +810,7 @@ class NewsAnalyzer:
                     report_metadata=report_metadata,
                 )
             else:
-                # PR8a: AI_ANALYSIS gate removed — current / incremental dashboard
-                # 始终收到真实 ai_result，与 daily full report 一致。
+                # current / incremental dashboard 与 daily 报告使用同一分析结果。
                 html_ai = ai_result
                 self.ctx.generate_dashboard(
                     mode=mode,
@@ -1204,13 +1140,6 @@ class NewsAnalyzer:
             print("爬虫功能已禁用（ENABLE_CRAWLER=False），程序退出")
             return False
 
-        if not self.ctx.config["ENABLE_NOTIFICATION"]:
-            print("Legacy Push 已从正常运行时移除；将只进行数据抓取、分析和 artifact 生成")
-        elif self._has_notification_configured():
-            print("检测到旧 Telegram 通知配置；Legacy Push 已从正常运行时移除，不会发送通知")
-        else:
-            print("ENABLE_NOTIFICATION 已启用，但 Legacy Push 已从正常运行时移除，不会发送通知")
-
         mode_strategy = self._get_mode_strategy()
         print(f"报告模式: {self.report_mode}")
         print(f"运行模式: {mode_strategy['description']}")
@@ -1280,7 +1209,7 @@ class NewsAnalyzer:
             (rss_items, rss_new_items, raw_rss_items, rss_new_urls) 元组：
             - rss_items: 统计条目列表（按模式处理，用于统计区块）
             - rss_new_items: 新增条目列表（用于新增区块）
-            - raw_rss_items: 原始 RSS 条目列表（用于独立展示区）
+            - raw_rss_items: 原始 RSS 条目列表（供 AI 筛选与 CR 输入使用）
             - rss_new_urls: 原始新增 RSS 条目的 URL 集合（用于 AI 模式 is_new 检测）
             如果未启用或失败返回 (None, None, None, set())
         """
@@ -1413,13 +1342,10 @@ class NewsAnalyzer:
             (rss_stats, rss_new_stats, raw_rss_items, rss_new_urls) 元组：
             - rss_stats: RSS 关键词统计列表（与热榜 stats 格式一致）
             - rss_new_stats: RSS 新增关键词统计列表（与热榜 stats 格式一致）
-            - raw_rss_items: 原始 RSS 条目列表（用于独立展示区）
+            - raw_rss_items: 原始 RSS 条目列表（供 AI 筛选与 CR 输入使用）
             - rss_new_urls: 原始新增 RSS 条目的 URL 集合（未经关键词过滤，用于 AI 模式 is_new 检测）
         """
         from trendradar.core.analyzer import count_rss_frequency
-
-        # PR8a: display.regions.RSS gate removed — RSS 关键词分析始终执行，
-        # 不再由 display config 决定是否跳过。原始条目和关键词统计都进入 canonical output。
 
         # 加载关键词配置
         try:
@@ -1433,10 +1359,10 @@ class NewsAnalyzer:
 
         rss_stats = None
         rss_new_stats = None
-        raw_rss_items = None  # 原始 RSS 条目列表（用于独立展示区）
+        raw_rss_items = None  # 原始 RSS 条目列表（供下游分析与 CR 输入使用）
         rss_new_urls = set()  # 原始新增 RSS URLs（未经关键词过滤）
 
-        # 1. 首先获取原始条目（用于独立展示区和 canonical output）
+        # 1. 首先获取原始条目（供下游分析与 CR 输入使用）
         # 根据模式获取原始条目
         if self.report_mode == "incremental":
             new_items_dict = self.storage_manager.detect_new_rss_items(rss_data)
@@ -1484,7 +1410,7 @@ class NewsAnalyzer:
             )
             if not rss_stats:
                 print("[RSS] 增量模式：关键词匹配后没有内容")
-                # 即使关键词匹配为空，也返回原始条目用于独立展示区
+                # 即使关键词匹配为空，也返回原始条目供下游分析使用
                 return None, None, raw_rss_items, rss_new_urls
 
         elif self.report_mode == "current":
@@ -1508,7 +1434,7 @@ class NewsAnalyzer:
             )
             if not rss_stats:
                 print("[RSS] 当前榜单模式：关键词匹配后没有内容")
-                # 即使关键词匹配为空，也返回原始条目用于独立展示区
+                # 即使关键词匹配为空，也返回原始条目供下游分析使用
                 return None, None, raw_rss_items, rss_new_urls
 
             # 生成新增统计
@@ -1547,7 +1473,7 @@ class NewsAnalyzer:
             )
             if not rss_stats:
                 print("[RSS] 当日汇总模式：关键词匹配后没有内容")
-                # 即使关键词匹配为空，也返回原始条目用于独立展示区
+                # 即使关键词匹配为空，也返回原始条目供下游分析使用
                 return None, None, raw_rss_items, rss_new_urls
 
             # 生成新增统计
@@ -1682,7 +1608,6 @@ class NewsAnalyzer:
 
         简化后的逻辑：
         - 每次运行都生成 HTML 报告（时间戳快照 + latest/{mode}.html + index.html）
-        - 正常运行时不触发 Legacy Push
         """
         # 暴露原始全量 RSS 给 CR 跨证据准入(_run_analysis_pipeline 读取)。
         self._cr_raw_rss_items = raw_rss_items
@@ -2049,44 +1974,7 @@ def _run_doctor(config_path: Optional[str] = None) -> bool:
         except Exception as e:
             _record_doctor_result(results, "fail", "存储配置", f"检查失败: {e}")
 
-        # 7) Legacy Push 配置检查（正常运行时已断开）
-        channel_details = []
-        channel_issues = []
-
-        # Telegram 配置校验
-        tg_tokens = parse_multi_account_config(config.get("TELEGRAM_BOT_TOKEN", ""))
-        tg_receivers = _telegram_receiver_chat_ids(config)
-        has_tg_receiver_config = bool(
-            config.get("TELEGRAM_CHAT_ID")
-            or config.get("TELEGRAM_OWNER_CHAT_IDS")
-            or config.get("TELEGRAM_RECEIVER_CHAT_IDS")
-            or tg_receivers
-        )
-        if tg_tokens and tg_receivers:
-            channel_details.append(f"Telegram({len(tg_receivers)}个接收者)")
-        elif tg_tokens or has_tg_receiver_config:
-            channel_issues.append("Telegram bot_token/receiver_chat_ids 配置不完整")
-
-        legacy_labels = _legacy_notification_config_labels(config)
-        legacy_detail = []
-        if channel_details:
-            legacy_detail.extend(channel_details)
-        if legacy_labels:
-            legacy_detail.extend(legacy_labels)
-
-        if channel_issues or legacy_detail:
-            _record_doctor_result(
-                results,
-                "warn",
-                "通知配置",
-                "Legacy Push 已从正常运行时移除；旧通知配置不会发送"
-                + (f"；检测到: {', '.join(legacy_detail)}" if legacy_detail else "")
-                + (f"；配置问题: {'；'.join(channel_issues)}" if channel_issues else ""),
-            )
-        else:
-            _record_doctor_result(results, "pass", "通知配置", "Legacy Push 已从正常运行时移除；未配置旧通知渠道")
-
-        # 8) 输出目录可写检查
+        # 7) 输出目录可写检查
         try:
             output_dir = Path("output")
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -2120,68 +2008,6 @@ def _run_doctor(config_path: Optional[str] = None) -> bool:
     return False
 
 
-def _build_test_report_data(ctx: AppContext) -> Dict:
-    """构造通知测试用报告数据"""
-    now = ctx.get_time()
-    time_display = now.strftime("%H:%M")
-    title = f"Ptilopsis Radar 通知测试消息（{now.strftime('%Y-%m-%d %H:%M:%S')}）"
-
-    return {
-        "stats": [
-            {
-                "word": "连通性测试",
-                "count": 1,
-                "titles": [
-                    {
-                        "title": title,
-                        "source_name": "Ptilopsis Radar",
-                        "url": "https://github.com/sansan0/TrendRadar",
-                        "mobile_url": "",
-                        "ranks": [1],
-                        "rank_threshold": ctx.rank_threshold,
-                        "count": 1,
-                        "is_new": True,
-                        "time_display": time_display,
-                        "matched_keyword": "连通性测试",
-                    }
-                ],
-            }
-        ],
-        "failed_ids": [],
-        "new_titles": [],
-        "id_to_name": {},
-    }
-
-
-def _create_test_html_file(ctx: AppContext) -> Optional[str]:
-    """创建 Telegram HTML 附件测试文件"""
-    try:
-        now = ctx.get_time()
-        output_dir = Path("output") / "html" / ctx.format_date()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        html_path = output_dir / f"notification_test_{ctx.format_time()}.html"
-        html_content = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head><meta charset="UTF-8"><title>Ptilopsis Radar 通知测试</title></head>
-<body>
-<h2>Ptilopsis Radar 通知连通性测试</h2>
-<p>测试时间：{now.strftime('%Y-%m-%d %H:%M:%S')} ({ctx.timezone})</p>
-<p>这是一条测试消息，用于验证 Telegram 通知渠道是否可达。</p>
-</body>
-</html>"""
-        html_path.write_text(html_content, encoding="utf-8")
-        return str(html_path)
-    except Exception as e:
-        print(f"[测试通知] 创建测试 HTML 失败: {e}")
-        return None
-
-
-def _run_test_notification(config: Dict) -> bool:
-    """Fail closed: old Legacy Push test-notification path is removed."""
-    print(LEGACY_PUSH_REMOVED_MSG)
-    return False
-
-
 def main() -> int:
     """主程序入口"""
     # 解析命令行参数
@@ -2193,13 +2019,11 @@ def main() -> int:
   --show-schedule        显示当前调度状态（时间段、行为开关）
 诊断命令:
   --doctor               运行环境与配置体检
-  --test-notification    Legacy Push 已移除；命令将 fail closed
 
 示例:
   python -m trendradar                    # 正常运行
   python -m trendradar --show-schedule    # 查看当前调度状态
   python -m trendradar --doctor           # 运行一键体检
-  python -m trendradar --test-notification # Legacy Push removed notice
 """
     )
     parser.add_argument(
@@ -2212,12 +2036,6 @@ def main() -> int:
         action="store_true",
         help="运行环境与配置体检"
     )
-    parser.add_argument(
-        "--test-notification",
-        action="store_true",
-        help="Legacy Push 已移除；不发送 Telegram 测试通知"
-    )
-
     args = parser.parse_args()
 
     debug_mode = False
@@ -2234,11 +2052,6 @@ def main() -> int:
         if args.show_schedule:
             _handle_status_commands(config)
             return 0
-
-        # 处理通知测试命令
-        if args.test_notification:
-            ok = _run_test_notification(config)
-            return 0 if ok else 1
 
         version_url = config.get("VERSION_CHECK_URL", "")
         configs_version_url = config.get("CONFIGS_VERSION_CHECK_URL", "")
@@ -2307,7 +2120,6 @@ def _handle_status_commands(config: Dict) -> None:
         print(f"\n 行为开关:")
         print(f"  采集数据: {_format_switch_state(schedule.collect)}")
         print(f"  AI 分析:  {_format_switch_state(schedule.analyze)}")
-        print(f"  Legacy Push 开关: {'已配置但正常运行时忽略' if schedule.push else '未配置'}")
         print(f"  报告模式: {schedule.report_mode}")
         print(f"  AI 模式:  {schedule.ai_mode}")
 
@@ -2319,11 +2131,6 @@ def _handle_status_commands(config: Dict) -> None:
                 print(f"  AI 分析:  仅一次 {once_state}")
             else:
                 print(f"  AI 分析:  不限次数")
-            if schedule.once_push:
-                already_pushed = scheduler.already_executed(schedule.period_key, "push", date_str)
-                print(f"  Legacy Push once: 已忽略 {'(历史状态: 今日已记录)' if already_pushed else '(历史状态: 今日未记录)'}")
-            else:
-                print(f"  Legacy Push once: 未配置")
 
     except Exception as e:
         print(f"\n[失败] 获取调度状态失败: {e}")

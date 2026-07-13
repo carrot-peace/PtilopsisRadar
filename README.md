@@ -123,12 +123,11 @@ AI (optional, requires API Key configuration) has one sole task: based on the pr
 ### Reports & Push Notifications
 
 Generates an Information Environment Anomaly Monitoring Daily Report (HTML).
-Legacy notification push has been removed from normal runtime and its old
-notification package has been deleted.
-
-Legacy notification push should not be treated as the future push path. See
-[`docs/legacy_push_removal_plan.md`](docs/legacy_push_removal_plan.md) for the
-canonical Legacy Push removal and CR-New separation plan.
+Report delivery runs only through the separately gated CR or DR dispatch
+planes. Deployment notifications and supervisor alerts use an independent,
+owner-only operational channel. The old multi-channel notification, fallback,
+and compatibility facade are fully removed. See
+[`docs/transport_boundaries.md`](docs/transport_boundaries.md).
 
 ---
 
@@ -243,7 +242,7 @@ docker compose up -d
 ### GitHub Actions Deployment
 
 1. Fork this repository
-2. Configure required environment variables in repository Settings → Secrets (push Webhooks, AI API Key, etc.)
+2. Configure required environment variables in repository Settings → Secrets (AI API Key, remote storage, etc.)
 3. Enable the scheduled task in `.github/workflows/crawler.yml`
 
 > This deployment method requires remote storage, Secrets, and workflow configuration. Currently recommended for experienced users.
@@ -262,21 +261,11 @@ ai:
 
 Supported models include DeepSeek, OpenAI, Gemini, Claude, Ollama, etc. See [LiteLLM docs](https://docs.litellm.ai/docs/providers).
 
-### Legacy Push Channels
-
-Legacy notification push has been removed. The old `trendradar.notification`
-package, dispatcher, sender, fallback, and compatibility facade are no longer
-available. Legacy notification config fields are inert historical config, not a
-usable runtime path and not the future push path.
-
 ### Diagnostic Commands
 
 ```bash
 # Environment health check
 uv run python -m trendradar --doctor
-
-# Legacy Push has been removed; this prints the removal notice and sends nothing
-uv run python -m trendradar --test-notification
 
 # Show current schedule status
 uv run python -m trendradar --show-schedule
@@ -288,15 +277,13 @@ uv run python -m trendradar --show-schedule
 
 | File | Purpose |
 |------|---------|
-| `config/config.yaml` | Main config: data sources, report mode, AI model, storage, scheduling, inert legacy notification fields, etc. |
+| `config/config.yaml` | Main config: data sources, report mode, AI model, storage, scheduling, etc. |
 | `config/source_tiers.yaml` | Source tier mapping: platform / RSS feed to A / B / C / D tier assignment |
 | `config/frequency_words.txt` | Keywords / topic groups: for keyword matching mode (`filter.method: keyword`) |
 | `config/ai_interests.txt` | AI filter interest description: for AI smart filtering mode (`filter.method: ai`) |
 | `config/ai_environment_report_prompt.txt` | AI prompt template for Information Environment Anomaly Monitoring Daily Report |
 | `config/timeline.yaml` | Scheduling strategy: time period definitions, day plans, week mapping |
-| `config/ai_analysis_prompt.txt` | AI prompt template for classic hot-topic analysis style (`report_style: classic`) |
-
-Configuration files contain detailed comments. Visual config editor: https://sansan0.github.io/TrendRadar/
+Configuration files contain detailed comments.
 
 ---
 
@@ -307,7 +294,6 @@ trendradar/
 ├── __main__.py          # Entry point: NewsAnalyzer orchestrates collect→analyze→artifact pipeline
 ├── context.py           # AppContext: dependency injection container, wraps config-related ops
 ├── core/                # Core logic
-│   ├── config.py        #   Config parsing, multi-account management
 │   ├── loader.py        #   Config file loading
 │   ├── frequency.py     #   Keyword matching
 │   ├── analyzer.py      #   Frequency statistics, weight calculation
@@ -329,12 +315,14 @@ trendradar/
 │   ├── evidence.py      #   Evidence summary construction & programmatic classification
 │   ├── filter.py        #   AI smart filtering
 │   ├── translator.py    #   AI translation
-│   ├── formatter.py     #   AI analysis result formatting
+│   ├── prompt_loader.py #   AI prompt template loading
 │   └── client.py        #   LiteLLM client
 ├── report/              # Report generation
-│   ├── html.py          #   HTML report rendering
 │   ├── generator.py     #   Report generator
-│   └── formatter.py     #   Title formatting
+│   ├── newsletter.py    #   Current/incremental full-report renderer
+│   ├── dashboard.py     #   Current dashboard and publish-safe state
+│   ├── daily_v2.py      #   Daily artifact model and renderer
+│   └── translation.py   #   Artifact-owned report translation
 └── utils/               # Utilities
     ├── time.py          #   Time handling
     └── url.py           #   URL handling

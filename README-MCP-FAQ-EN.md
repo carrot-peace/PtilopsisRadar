@@ -39,7 +39,7 @@
 | **Article** | `read_article` | Read single article content (Markdown format) |
 | | `read_articles_batch` | Batch read multiple articles (max 5) |
 
-> MCP notification sending tools are no longer exposed; the old application runtime Legacy Push / Telegram notification path has also been removed.
+> MCP does not provide notification-sending tools, and the regular collection and report-generation flow does not send Telegram messages.
 
 ---
 
@@ -532,7 +532,7 @@ After testing one query, please immediately check the [SiliconFlow Billing](http
 - Available platform list
 - Crawler configuration (request interval, timeout settings)
 - Weight configuration (ranking weight, frequency weight)
-- Notification configuration (Feishu, DingTalk, WeCom, Telegram, Email, ntfy, Bark, Slack, Generic Webhook)
+- Keyword and topic-group configuration
 
 ---
 
@@ -806,13 +806,13 @@ Users often use natural language like "this week", "last 7 days" to express date
 
 ---
 
-## Notification Push
+## MCP Delivery Boundary
 
 ### Q21: Can I send notification messages via MCP?
 
 MCP notification sending tools are no longer exposed. The `get_notification_channels` and `send_notification` MCP tools have been removed from the MCP server and are no longer available.
 
-The old application runtime Legacy Push / Telegram notification path has been removed; MCP is not a backup notification sending path.
+MCP is not an alternate entry point for CR or DR dispatch. Telegram delivery is controlled only by each pipeline's explicit configuration and gates.
 
 ---
 

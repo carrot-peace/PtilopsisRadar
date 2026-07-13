@@ -11,8 +11,6 @@ from typing import Dict, Any, Optional
 
 import yaml
 
-from .config import parse_multi_account_config, validate_paired_configs
-from trendradar.telegram_bot.access import build_telegram_access_config
 from trendradar.utils.time import DEFAULT_TIMEZONE
 
 
@@ -89,32 +87,12 @@ def _load_report_config(config_data: Dict) -> Dict:
 
     return {
         "REPORT_MODE": report_config.get("mode", "daily"),
-        "DISPLAY_MODE": report_config.get("display_mode", "keyword"),
         "RANK_THRESHOLD": report_config.get("rank_threshold", 10),
         "SORT_BY_POSITION_FIRST": sort_by_position_env if sort_by_position_env is not None else report_config.get("sort_by_position_first", False),
         "MAX_NEWS_PER_KEYWORD": max_news_env or report_config.get("max_news_per_keyword", 0),
         # 背景组 realtime pull-only：current/incremental 模式不进 AI 告警输入，仅作 daily/HTML 上下文
         "BACKGROUND_PULL_ONLY": report_config.get("background_pull_only", False),
         "BACKGROUND_GROUP_PREFIX": report_config.get("background_group_prefix", "背景-"),
-    }
-
-
-def _load_notification_config(config_data: Dict) -> Dict:
-    """加载通知配置"""
-    notification = config_data.get("notification", {})
-    advanced = config_data.get("advanced", {})
-    batch_size = advanced.get("batch_size", {})
-
-    return {
-        "ENABLE_NOTIFICATION": notification.get("enabled", True),
-        "MESSAGE_BATCH_SIZE": batch_size.get("default", 4000),
-        "DINGTALK_BATCH_SIZE": batch_size.get("dingtalk", 20000),
-        "FEISHU_BATCH_SIZE": batch_size.get("feishu", 29000),
-        "BARK_BATCH_SIZE": batch_size.get("bark", 3600),
-        "SLACK_BATCH_SIZE": batch_size.get("slack", 4000),
-        "BATCH_SEND_INTERVAL": advanced.get("batch_send_interval", 1.0),
-        "FEISHU_MESSAGE_SEPARATOR": advanced.get("feishu_message_separator", "---"),
-        "MAX_ACCOUNTS_PER_CHANNEL": _get_env_int("MAX_ACCOUNTS_PER_CHANNEL") or advanced.get("max_accounts_per_channel", 3),
     }
 
 
@@ -158,10 +136,9 @@ def _load_timeline_data(config_dir: str = "config") -> Dict:
                 "default": {
                     "collect": True,
                     "analyze": False,
-                    "push": False,
                     "report_mode": "current",
                     "ai_mode": "follow_report",
-                    "once": {"analyze": False, "push": False},
+                    "once": {"analyze": False},
                 },
                 "periods": {},
                 "day_plans": {"all_day": {"periods": []}},
@@ -264,44 +241,6 @@ def _load_rss_config(config_data: Dict) -> Dict:
     }
 
 
-def _load_display_config(config_data: Dict) -> Dict:
-    """加载推送内容显示配置"""
-    display = config_data.get("display", {})
-    regions = display.get("regions", {})
-    standalone = display.get("standalone", {})
-
-    # 默认区域顺序
-    default_region_order = ["hotlist", "rss", "new_items", "standalone", "ai_analysis"]
-    region_order = display.get("region_order", default_region_order)
-
-    # 验证 region_order 中的值是否合法
-    valid_regions = {"hotlist", "rss", "new_items", "standalone", "ai_analysis"}
-    region_order = [r for r in region_order if r in valid_regions]
-
-    # 如果过滤后为空，使用默认顺序
-    if not region_order:
-        region_order = default_region_order
-
-    return {
-        # 区域显示顺序
-        "REGION_ORDER": region_order,
-        # 区域开关
-        "REGIONS": {
-            "HOTLIST": regions.get("hotlist", True),
-            "NEW_ITEMS": regions.get("new_items", True),
-            "RSS": regions.get("rss", True),
-            "STANDALONE": regions.get("standalone", False),
-            "AI_ANALYSIS": regions.get("ai_analysis", True),
-        },
-        # 独立展示区配置
-        "STANDALONE": {
-            "PLATFORMS": standalone.get("platforms", []),
-            "RSS_FEEDS": standalone.get("rss_feeds", []),
-            "MAX_ITEMS": standalone.get("max_items", 20),
-        },
-    }
-
-
 def _load_ai_config(config_data: Dict) -> Dict:
     """加载 AI 模型配置（LiteLLM 格式）"""
     ai_config = config_data.get("ai", {})
@@ -335,9 +274,6 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
     return {
         "ENABLED": enabled_env if enabled_env is not None else ai_config.get("enabled", False),
         "LANGUAGE": ai_config.get("language", "Chinese"),
-        "PROMPT_FILE": ai_config.get("prompt_file", "ai_analysis_prompt.txt"),
-        # 报告风格：environment=信息环境异常监测日报（默认） / classic=旧版热点分析
-        "REPORT_STYLE": ai_config.get("report_style", "environment"),
         "ENVIRONMENT_PROMPT_FILE": ai_config.get(
             "environment_prompt_file", "ai_environment_report_prompt.txt"
         ),
@@ -345,121 +281,6 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
         "MAX_NEWS_FOR_ANALYSIS": ai_config.get("max_news_for_analysis", 50),
         "INCLUDE_RSS": ai_config.get("include_rss", True),
         "INCLUDE_RANK_TIMELINE": ai_config.get("include_rank_timeline", False),
-        "INCLUDE_STANDALONE": ai_config.get("include_standalone", False),
-    }
-
-
-def _load_alert_config(config_data: Dict) -> Dict:
-    """加载实时异常提醒门控配置（cooldown / 去重 / 升级再推）。
-
-    仅作用于 environment 风格的自动推送（alert layer）：
-    不影响 daily_brief 内容、不影响 classic report_style、不影响 HTML、不影响其它逻辑。
-    默认值保守克制。
-    """
-    alert_config = config_data.get("alert", {}) or {}
-
-    notify_labels = alert_config.get("notify_labels") or [
-        "cross_layer_verified",
-        "high_heat_unverified",
-        "chinese_only_hot",
-    ]
-
-    raw_state_ttl_days = alert_config.get("state_ttl_days", 14)
-    try:
-        state_ttl_days = int(raw_state_ttl_days)
-    except (ValueError, TypeError):
-        state_ttl_days = 14
-    if state_ttl_days < 0:
-        state_ttl_days = 0
-
-    raw_cooldown_minutes = alert_config.get("cooldown_minutes", 180)
-    try:
-        cooldown_minutes = int(raw_cooldown_minutes)
-    except (ValueError, TypeError):
-        cooldown_minutes = 180
-    if cooldown_minutes < 0:
-        cooldown_minutes = 0
-
-    return {
-        "ENABLED": alert_config.get("enabled", True),
-        "COOLDOWN_MINUTES": cooldown_minutes,
-        "STATE_TTL_DAYS": state_ttl_days,
-        "MAX_ITEMS": alert_config.get("max_items", 3),
-        "ALLOW_UPGRADE_BREAK_COOLDOWN": alert_config.get("allow_upgrade_break_cooldown", True),
-        "HIGH_HEAT_MIN_RANK": alert_config.get("high_heat_min_rank", 10),
-        "HIGH_HEAT_MIN_PLATFORMS": alert_config.get("high_heat_min_platforms", 2),
-        "NOTIFY_LABELS": list(notify_labels),
-    }
-
-
-def _load_telegram_attachments_config(config_data: Dict) -> Dict:
-    """加载 Telegram HTML 报告附件配置（增强项，默认关闭）。
-
-    附件是文本推送成功后的可选增强：
-      - 附件失败**永远不会**影响文本推送结果（failure_behavior 只控制日志强度）；
-      - 只发送发布根的单文件 HTML，不发送 state.json / db / log / alert_state / secrets；
-      - dashboard 作为 Telegram 单文件附件时，内部 full.html 相对链接可能不可用，
-        这是当前已知限制，本配置加载器不改 HTML 内容。
-
-    attach_on 取值（均要求 environment 风格，classic 一律不附附件）：
-      - realtime_alert：environment + current/incremental 且本轮真的推了 alert
-      - daily_digest ：environment + daily（每日简报）；指 environment 每日简报，
-        不是所有 mode=daily。
-      - 旧写法 realtime / daily 会分别归一化为 realtime_alert / daily_digest。
-
-    report_kind_by_event 支持：
-      - realtime_alert：默认 dashboard
-      - daily_digest ：默认 full
-      显式配置会覆盖对应事件默认值。legacy/deprecated report_kind 仅保留兼容，
-      不再覆盖 realtime_alert / daily_digest 的内置默认策略。
-    """
-    raw = config_data.get("telegram_attachments", {}) or {}
-
-    enabled_env = _get_env_bool("TELEGRAM_ATTACHMENTS_ENABLED")
-    enabled = enabled_env if enabled_env is not None else bool(raw.get("enabled", False))
-
-    attach_on_raw = raw.get("attach_on")
-    if not isinstance(attach_on_raw, (list, tuple)):
-        attach_on_raw = ["realtime_alert", "daily_digest"]
-    allowed = {"realtime_alert", "daily_digest"}
-    legacy_attach_on = {"realtime": "realtime_alert", "daily": "daily_digest"}
-    attach_on = []
-    for item in attach_on_raw:
-        name = str(item).strip()
-        name = legacy_attach_on.get(name, name)
-        if name in allowed and name not in attach_on:
-            attach_on.append(name)
-
-    report_kind = str(raw.get("report_kind", "full")).strip().lower()
-    allowed_report_kinds = {"dashboard", "full"}
-    if report_kind not in allowed_report_kinds:
-        report_kind = "full"
-
-    report_kind_by_event = {}
-    raw_policy = raw.get("report_kind_by_event")
-    if isinstance(raw_policy, dict):
-        for event_name in ("realtime_alert", "daily_digest"):
-            kind = str(raw_policy.get(event_name, "")).strip().lower()
-            if kind in allowed_report_kinds:
-                report_kind_by_event[event_name] = kind
-
-    raw_max_mb = raw.get("max_file_mb", 8)
-    try:
-        max_file_mb = float(raw_max_mb)
-    except (ValueError, TypeError):
-        max_file_mb = 8.0
-
-    failure_behavior = str(raw.get("failure_behavior", "warn")).strip().lower()
-    if failure_behavior not in ("silent", "warn"):
-        failure_behavior = "warn"
-
-    return {
-        "ENABLED": enabled,
-        "ATTACH_ON": attach_on,
-        "REPORT_KIND_BY_EVENT": report_kind_by_event,
-        "REPORT_KIND": report_kind,
-        "MAX_FILE_MB": max_file_mb,
-        "FAILURE_BEHAVIOR": failure_behavior,
     }
 
 
@@ -478,7 +299,6 @@ def _load_ai_translation_config(config_data: Dict) -> Dict:
         "SCOPE": {
             "HOTLIST": scope.get("hotlist", True),
             "RSS": scope.get("rss", True),
-            "STANDALONE": scope.get("standalone", True),
         },
     }
 
@@ -569,198 +389,6 @@ def _load_storage_config(config_data: Dict) -> Dict:
     }
 
 
-def _load_webhook_config(config_data: Dict) -> Dict:
-    """加载 Webhook 配置"""
-    notification = config_data.get("notification", {})
-    channels = notification.get("channels", {})
-
-    # 各渠道配置
-    feishu = channels.get("feishu", {})
-    dingtalk = channels.get("dingtalk", {})
-    wework = channels.get("wework", {})
-    telegram = channels.get("telegram", {})
-    email = channels.get("email", {})
-    ntfy = channels.get("ntfy", {})
-    bark = channels.get("bark", {})
-    slack = channels.get("slack", {})
-    generic = channels.get("generic_webhook", {})
-
-    telegram_chat_id = _get_env_str("TELEGRAM_CHAT_ID") or telegram.get("chat_id", "")
-    telegram_owner_chat_ids = (
-        _get_env_str("TELEGRAM_OWNER_CHAT_IDS") or telegram.get("owner_chat_ids", "")
-    )
-    telegram_receiver_chat_ids = (
-        _get_env_str("TELEGRAM_RECEIVER_CHAT_IDS") or telegram.get("receiver_chat_ids", "")
-    )
-    telegram_command_chat_ids = (
-        _get_env_str("TELEGRAM_COMMAND_CHAT_IDS") or telegram.get("command_chat_ids", "")
-    )
-    commands_enabled_env = _get_env_bool("TELEGRAM_COMMANDS_ENABLED")
-    telegram_commands_enabled = (
-        commands_enabled_env
-        if commands_enabled_env is not None
-        else telegram.get("commands_enabled", False)
-    )
-    telegram_unauthorized_behavior = (
-        _get_env_str("TELEGRAM_UNAUTHORIZED_BEHAVIOR")
-        or telegram.get("unauthorized_behavior", "ignore")
-    )
-    telegram_access_raw = {
-        # Legacy TELEGRAM_CHAT_ID, including legacy semicolon-separated multi-account
-        # chat ids, is treated as owner. Owners automatically receive outbound
-        # pushes and can run future commands. Receiver-only chats must be moved
-        # to TELEGRAM_RECEIVER_CHAT_IDS instead of remaining in TELEGRAM_CHAT_ID.
-        "TELEGRAM_CHAT_ID": telegram_chat_id,
-        "TELEGRAM_OWNER_CHAT_IDS": telegram_owner_chat_ids,
-        "TELEGRAM_RECEIVER_CHAT_IDS": telegram_receiver_chat_ids,
-        "TELEGRAM_COMMAND_CHAT_IDS": telegram_command_chat_ids,
-        "TELEGRAM_COMMANDS_ENABLED": telegram_commands_enabled,
-        "TELEGRAM_UNAUTHORIZED_BEHAVIOR": telegram_unauthorized_behavior,
-    }
-    try:
-        telegram_access = build_telegram_access_config(telegram_access_raw)
-    except ValueError as e:
-        # fail-open：Telegram 子配置写错（如 command 白名单越界）不应拖垮整个 config 加载，
-        # 否则飞书/钉钉/邮件等其它渠道也会一起起不来。丢弃越界的 command 白名单后重建，
-        # 保留 owner/receiver 出站能力；commands 本阶段未实现，丢弃无副作用。
-        print(f"[Telegram] access 配置无效，已忽略 command 白名单：{e}")
-        telegram_command_chat_ids = ""
-        telegram_access = build_telegram_access_config(
-            {**telegram_access_raw, "TELEGRAM_COMMAND_CHAT_IDS": ""}
-        )
-
-    return {
-        # 飞书
-        "FEISHU_WEBHOOK_URL": _get_env_str("FEISHU_WEBHOOK_URL") or feishu.get("webhook_url", ""),
-        # 钉钉
-        "DINGTALK_WEBHOOK_URL": _get_env_str("DINGTALK_WEBHOOK_URL") or dingtalk.get("webhook_url", ""),
-        # 企业微信
-        "WEWORK_WEBHOOK_URL": _get_env_str("WEWORK_WEBHOOK_URL") or wework.get("webhook_url", ""),
-        "WEWORK_MSG_TYPE": _get_env_str("WEWORK_MSG_TYPE") or wework.get("msg_type", "markdown"),
-        # Telegram
-        "TELEGRAM_BOT_TOKEN": _get_env_str("TELEGRAM_BOT_TOKEN") or telegram.get("bot_token", ""),
-        "TELEGRAM_CHAT_ID": telegram_chat_id,
-        "TELEGRAM_OWNER_CHAT_IDS": telegram_owner_chat_ids,
-        "TELEGRAM_RECEIVER_CHAT_IDS": telegram_receiver_chat_ids,
-        "TELEGRAM_COMMAND_CHAT_IDS": telegram_command_chat_ids,
-        "TELEGRAM_COMMANDS_ENABLED": telegram_commands_enabled,
-        "TELEGRAM_UNAUTHORIZED_BEHAVIOR": telegram_access["unauthorized_behavior"],
-        "TELEGRAM_ACCESS": telegram_access,
-        # 邮件
-        "EMAIL_FROM": _get_env_str("EMAIL_FROM") or email.get("from", ""),
-        "EMAIL_PASSWORD": _get_env_str("EMAIL_PASSWORD") or email.get("password", ""),
-        "EMAIL_TO": _get_env_str("EMAIL_TO") or email.get("to", ""),
-        "EMAIL_SMTP_SERVER": _get_env_str("EMAIL_SMTP_SERVER") or email.get("smtp_server", ""),
-        "EMAIL_SMTP_PORT": _get_env_str("EMAIL_SMTP_PORT") or email.get("smtp_port", ""),
-        # ntfy
-        "NTFY_SERVER_URL": _get_env_str("NTFY_SERVER_URL") or ntfy.get("server_url") or "https://ntfy.sh",
-        "NTFY_TOPIC": _get_env_str("NTFY_TOPIC") or ntfy.get("topic", ""),
-        "NTFY_TOKEN": _get_env_str("NTFY_TOKEN") or ntfy.get("token", ""),
-        # Bark
-        "BARK_URL": _get_env_str("BARK_URL") or bark.get("url", ""),
-        # Slack
-        "SLACK_WEBHOOK_URL": _get_env_str("SLACK_WEBHOOK_URL") or slack.get("webhook_url", ""),
-        # 通用 Webhook
-        "GENERIC_WEBHOOK_URL": _get_env_str("GENERIC_WEBHOOK_URL") or generic.get("webhook_url", ""),
-        "GENERIC_WEBHOOK_TEMPLATE": _get_env_str("GENERIC_WEBHOOK_TEMPLATE") or generic.get("payload_template", ""),
-    }
-
-
-def _print_notification_sources(config: Dict) -> None:
-    """打印通知渠道配置来源信息"""
-    notification_sources = []
-    max_accounts = config["MAX_ACCOUNTS_PER_CHANNEL"]
-
-    if config["FEISHU_WEBHOOK_URL"]:
-        accounts = parse_multi_account_config(config["FEISHU_WEBHOOK_URL"])
-        count = min(len(accounts), max_accounts)
-        source = "环境变量" if os.environ.get("FEISHU_WEBHOOK_URL") else "配置文件"
-        notification_sources.append(f"飞书({source}, {count}个账号)")
-
-    if config["DINGTALK_WEBHOOK_URL"]:
-        accounts = parse_multi_account_config(config["DINGTALK_WEBHOOK_URL"])
-        count = min(len(accounts), max_accounts)
-        source = "环境变量" if os.environ.get("DINGTALK_WEBHOOK_URL") else "配置文件"
-        notification_sources.append(f"钉钉({source}, {count}个账号)")
-
-    if config["WEWORK_WEBHOOK_URL"]:
-        accounts = parse_multi_account_config(config["WEWORK_WEBHOOK_URL"])
-        count = min(len(accounts), max_accounts)
-        source = "环境变量" if os.environ.get("WEWORK_WEBHOOK_URL") else "配置文件"
-        notification_sources.append(f"企业微信({source}, {count}个账号)")
-
-    telegram_receivers = (config.get("TELEGRAM_ACCESS") or {}).get("receiver_chat_ids", [])
-    has_new_tg_access_targets = bool(
-        config.get("TELEGRAM_OWNER_CHAT_IDS")
-        or config.get("TELEGRAM_RECEIVER_CHAT_IDS")
-    )
-    if config["TELEGRAM_BOT_TOKEN"] and telegram_receivers and has_new_tg_access_targets:
-        tokens = parse_multi_account_config(config["TELEGRAM_BOT_TOKEN"])
-        if tokens:
-            # receiver fan-out 不受 MAX_ACCOUNTS_PER_CHANNEL 截断（dispatcher 会全量发送），
-            # 这里必须显示真实接收者数，避免「日志说 3 个、实际发 10 个」的不一致。
-            count = len(telegram_receivers)
-            token_source = "环境变量" if os.environ.get("TELEGRAM_BOT_TOKEN") else "配置文件"
-            notification_sources.append(f"Telegram({token_source}, {count}个接收者)")
-    elif config["TELEGRAM_BOT_TOKEN"] and config["TELEGRAM_CHAT_ID"]:
-        tokens = parse_multi_account_config(config["TELEGRAM_BOT_TOKEN"])
-        chat_ids = parse_multi_account_config(config["TELEGRAM_CHAT_ID"])
-        valid, count = validate_paired_configs(
-            {"bot_token": tokens, "chat_id": chat_ids},
-            "Telegram",
-            required_keys=["bot_token", "chat_id"]
-        )
-        if valid and count > 0:
-            count = min(count, max_accounts)
-            token_source = "环境变量" if os.environ.get("TELEGRAM_BOT_TOKEN") else "配置文件"
-            notification_sources.append(f"Telegram({token_source}, {count}个账号)")
-
-    if config["EMAIL_FROM"] and config["EMAIL_PASSWORD"] and config["EMAIL_TO"]:
-        from_source = "环境变量" if os.environ.get("EMAIL_FROM") else "配置文件"
-        notification_sources.append(f"邮件({from_source})")
-
-    if config["NTFY_SERVER_URL"] and config["NTFY_TOPIC"]:
-        topics = parse_multi_account_config(config["NTFY_TOPIC"])
-        tokens = parse_multi_account_config(config["NTFY_TOKEN"])
-        if tokens:
-            valid, count = validate_paired_configs(
-                {"topic": topics, "token": tokens},
-                "ntfy"
-            )
-            if valid and count > 0:
-                count = min(count, max_accounts)
-                server_source = "环境变量" if os.environ.get("NTFY_SERVER_URL") else "配置文件"
-                notification_sources.append(f"ntfy({server_source}, {count}个账号)")
-        else:
-            count = min(len(topics), max_accounts)
-            server_source = "环境变量" if os.environ.get("NTFY_SERVER_URL") else "配置文件"
-            notification_sources.append(f"ntfy({server_source}, {count}个账号)")
-
-    if config["BARK_URL"]:
-        accounts = parse_multi_account_config(config["BARK_URL"])
-        count = min(len(accounts), max_accounts)
-        bark_source = "环境变量" if os.environ.get("BARK_URL") else "配置文件"
-        notification_sources.append(f"Bark({bark_source}, {count}个账号)")
-
-    if config["SLACK_WEBHOOK_URL"]:
-        accounts = parse_multi_account_config(config["SLACK_WEBHOOK_URL"])
-        count = min(len(accounts), max_accounts)
-        slack_source = "环境变量" if os.environ.get("SLACK_WEBHOOK_URL") else "配置文件"
-        notification_sources.append(f"Slack({slack_source}, {count}个账号)")
-
-    if config.get("GENERIC_WEBHOOK_URL"):
-        accounts = parse_multi_account_config(config["GENERIC_WEBHOOK_URL"])
-        count = min(len(accounts), max_accounts)
-        source = "环境变量" if os.environ.get("GENERIC_WEBHOOK_URL") else "配置文件"
-        notification_sources.append(f"通用Webhook({source}, {count}个账号)")
-
-    if notification_sources:
-        print(f"通知渠道配置来源: {', '.join(notification_sources)}")
-        print(f"每个渠道最大账号数: {max_accounts}")
-    else:
-        print("未配置任何通知渠道")
-
-
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     加载配置文件
@@ -797,9 +425,6 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     # 报告配置
     config.update(_load_report_config(config_data))
 
-    # 通知配置
-    config.update(_load_notification_config(config_data))
-
     # 统一调度配置
     config["SCHEDULE"] = _load_schedule_config(config_data)
     config["_TIMELINE_DATA"] = _load_timeline_data(
@@ -830,28 +455,13 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     # AI 翻译配置
     config["AI_TRANSLATION"] = _load_ai_translation_config(config_data)
 
-    # 实时异常提醒门控配置（cooldown / 去重 / 升级再推，仅作用于 environment 自动推送）
-    config["ALERT"] = _load_alert_config(config_data)
-
-    # Telegram HTML 报告附件配置（增强项，默认关闭；失败不影响文本推送）
-    config["TELEGRAM_ATTACHMENTS"] = _load_telegram_attachments_config(config_data)
-
     # AI 智能筛选配置
     config["AI_FILTER"] = _load_ai_filter_config(config_data)
 
     # 筛选策略配置
     config["FILTER"] = _load_filter_config(config_data)
 
-    # 推送内容显示配置
-    config["DISPLAY"] = _load_display_config(config_data)
-
     # 存储配置
     config["STORAGE"] = _load_storage_config(config_data)
-
-    # Webhook 配置
-    config.update(_load_webhook_config(config_data))
-
-    # 打印通知渠道配置来源
-    _print_notification_sources(config)
 
     return config

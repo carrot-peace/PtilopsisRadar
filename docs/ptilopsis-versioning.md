@@ -10,8 +10,10 @@ radar product surface rather than upstream feature history.
 
 - Main product: `MAJOR.MINOR.PATCH`, starting at `0.1.0`.
 - MCP Server: displayed as `0.1.0-mcp`.
-- Config files: keep their existing schema versions, such as
-  `config.yaml Version: 2.3.0`.
+- Config files and prompt templates keep their existing schema/template
+  versions, such as `config.yaml Version: 2.3.0` and
+  `ai_environment_report_prompt.txt Version: 1.0.0`. The repository-level
+  `version_configs` manifest lists only files that are currently shipped.
 - CR schemas, dispatch receipts, scoring profiles, and lifecycle reports keep
   their own internal schema/profile versions.
 

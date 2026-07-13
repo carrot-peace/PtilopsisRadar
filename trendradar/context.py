@@ -129,21 +129,6 @@ class AppContext:
         return self.rss_config.get("FEEDS", [])
 
     @property
-    def display_mode(self) -> str:
-        """PR8f: display_mode=platform 已废弃，canonical output 固定为 keyword 模式。"""
-        return "canonical"
-
-    @property
-    def show_new_section(self) -> bool:
-        """是否显示新增热点区域（PR8b: canonical 固定为 True，忽略 display config）"""
-        return True
-
-    @property
-    def region_order(self) -> List[str]:
-        """获取区域显示顺序（PR8b: canonical 固定顺序，忽略 display config）"""
-        return ["hotlist", "rss", "new_items", "ai_analysis"]
-
-    @property
     def filter_method(self) -> str:
         """获取筛选策略: keyword | ai"""
         return self.config.get("FILTER", {}).get("METHOD", "keyword")
@@ -314,7 +299,6 @@ class AppContext:
             id_to_name=id_to_name,
             mode=mode,
             rank_threshold=self.rank_threshold,
-            show_new_section=self.show_new_section,
         )
 
     def generate_html(
@@ -648,7 +632,7 @@ class AppContext:
         if self.rss_enabled:
             all_rss = storage.get_all_rss_ids()
 
-            # 应用新鲜度过滤（与推送阶段一致）
+            # 应用与报告输入一致的新鲜度过滤
             rss_config = self.rss_config
             freshness_config = rss_config.get("FRESHNESS_FILTER", {})
             freshness_enabled = freshness_config.get("ENABLED", True)
@@ -913,7 +897,7 @@ class AppContext:
             if latest_time:
                 print(f"[AI筛选] current 模式：最新时间 {latest_time}，过滤已下榜新闻")
 
-        # RSS 新鲜度过滤配置（与推送阶段一致）
+        # RSS 新鲜度过滤配置（与报告输入一致）
         rss_config = self.rss_config
         freshness_config = rss_config.get("FRESHNESS_FILTER", {})
         freshness_enabled = freshness_config.get("ENABLED", True)

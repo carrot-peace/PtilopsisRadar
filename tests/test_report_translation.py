@@ -123,7 +123,6 @@ class TestReportTranslation(unittest.TestCase):
             _rss_items(),
             _rss_new_items(),
             translator=translator,
-            display_regions={"HOTLIST": True, "RSS": True, "NEW_ITEMS": True},
         )
 
         self.assertEqual([["hot title", "new hot title", "rss title", "rss new title"]], translator.calls)
@@ -132,22 +131,24 @@ class TestReportTranslation(unittest.TestCase):
         self.assertEqual("RSS", rss[0]["titles"][0]["title"])
         self.assertEqual("RSSNEW", rss_new[0]["titles"][0]["title"])
 
-    def test_display_regions_control_hotlist_and_rss_translation(self) -> None:
-        translator = FakeTranslator(["RSS"])
+    def test_translation_scope_controls_hotlist_and_rss(self) -> None:
+        translator = FakeTranslator(
+            ["RSS", "RSSNEW"],
+            scope={"HOTLIST": False, "RSS": True},
+        )
 
         report, rss, rss_new = translate_report_content(
             _report_data(),
             _rss_items(),
             _rss_new_items(),
             translator=translator,
-            display_regions={"HOTLIST": False, "RSS": True, "NEW_ITEMS": False},
         )
 
-        self.assertEqual([["rss title"]], translator.calls)
+        self.assertEqual([["rss title", "rss new title"]], translator.calls)
         self.assertEqual("hot title", report["stats"][0]["titles"][0]["title"])
         self.assertEqual("new hot title", report["new_titles"][0]["titles"][0]["title"])
         self.assertEqual("RSS", rss[0]["titles"][0]["title"])
-        self.assertEqual("rss new title", rss_new[0]["titles"][0]["title"])
+        self.assertEqual("RSSNEW", rss_new[0]["titles"][0]["title"])
 
     def test_skip_rss_translates_only_report_data(self) -> None:
         translator = FakeTranslator(["HOT", "NEW"])
@@ -157,7 +158,6 @@ class TestReportTranslation(unittest.TestCase):
             _rss_items(),
             _rss_new_items(),
             translator=translator,
-            display_regions={"HOTLIST": True, "RSS": True, "NEW_ITEMS": True},
             skip_rss=True,
         )
 
@@ -179,7 +179,6 @@ class TestReportTranslation(unittest.TestCase):
             _rss_items(),
             _rss_new_items(),
             translator=translator,
-            display_regions={"HOTLIST": True, "RSS": True, "NEW_ITEMS": True},
         )
 
         self.assertEqual("HOT", report["stats"][0]["titles"][0]["title"])
@@ -199,7 +198,6 @@ class TestReportTranslation(unittest.TestCase):
             rss,
             rss_new,
             translator=translator,
-            display_regions={"HOTLIST": True, "RSS": True, "NEW_ITEMS": True},
         )
 
         self.assertEqual(original, (report, rss, rss_new))
