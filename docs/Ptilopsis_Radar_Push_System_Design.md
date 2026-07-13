@@ -113,48 +113,34 @@ DR must not be treated as CR-A. DR is a scheduled daily product, not a realtime 
 
 ## 3. Engineering Alignment with Current Repository
 
-The target baseline assumes the PR6–PR8 cleanup direction:
+The repository now has a single canonical report input and three explicit
+transport planes:
 
 ```text
-non-Telegram runtime channels removed
-classic report runtime removed
-standalone/display-region runtime gates removed
-display_mode=platform runtime path retired
-canonical output fixed as the CR/DR input baseline
-generic Telegram split path removed
+CR dispatch and Telegram sink
+DR dispatch and Telegram sink
+deployment owner-only Telegram alerts
 ```
-
-If legacy `DISPLAY_MODE` or `display_mode=platform` compatibility branches still exist in the checked-out branch, CR must bypass them and consume canonical data only. Those compatibility remnants are out of scope for CR product semantics.
 
 Current repository reality:
 
 ```text
-current/incremental automatic push is still AI-driven
-current realtime alert branch depends on ai_analysis.success
-environment alert formatter is not the CR-A MVP foundation
+report generation writes artifacts without an implicit send path
+CR-A uses deterministic scoring, decision, lifecycle, and explicit dispatch
+DR has its own artifact and dispatch modules
+deployment alerts are owner-only and independent of report delivery
 ```
 
 Reusable infrastructure:
 
 ```text
-Telegram delivery
-Telegram receiver fanout
-Telegram HTML attachment mechanism
+explicit CR/DR Telegram delivery
+CR/DR HTML attachment handling
 local HTML artifact generation
 DR environment newsletter direction
-alert_state / cooldown / dedupe concepts
+CR lifecycle / cooldown / dedupe state
 source/evidence metadata
 daily newsletter HTML rendering direction
-```
-
-Not reusable as CR-A MVP foundation:
-
-```text
-AIAnalysisResult-driven realtime alert branch
-select_environment_alert_items()
-render_environment_telegram_alert_brief()
-current dashboard naming as product language
-generic split Telegram text path
 ```
 
 Important engineering principle:
@@ -165,7 +151,8 @@ CR scoring, CR decision, CR presentation, and delivery must be separated through
 CR scoring must not be implemented inside Telegram sender, HTML renderer, archive writer, or CLI orchestration code.
 ```
 
-The existing repository contains legacy procedural flows and long parameter chains. PR6–PR8 reduced several legacy runtime surfaces, but CR should not extend the old pattern.
+CR code should continue to use explicit models and internal APIs instead of
+growing orchestration parameter chains.
 
 ### 3.1 Field Reality
 

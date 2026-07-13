@@ -83,13 +83,12 @@ CREATE TABLE IF NOT EXISTS crawl_source_status (
 -- ============================================
 -- 时间段执行记录表
 -- 记录每天每个时间段在各 action 维度的执行状态（用于 once 功能）
--- 替代旧的 push_records 表
 -- ============================================
 CREATE TABLE IF NOT EXISTS period_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     execution_date TEXT NOT NULL,          -- YYYY-MM-DD
     period_key TEXT NOT NULL,              -- period 的稳定 key
-    action TEXT NOT NULL,                  -- analyze | push
+    action TEXT NOT NULL,                  -- 当前仅使用 analyze
     executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(execution_date, period_key, action)
 );

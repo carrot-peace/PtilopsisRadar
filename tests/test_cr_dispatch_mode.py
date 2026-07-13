@@ -5,7 +5,7 @@ Tests for CR-A dispatch mode resolution (PR-CR-A1).
 Covers:
   Group A — Mode resolution from env vars
   Group B — Runtime behavior wiring (source-level checks)
-  Group C — Source boundary (no legacy push, no independent Telegram path)
+  Group C — Source boundary (no generic fallback, no independent Telegram path)
 
 No real network calls.  No real tokens.  No environment mutation.
 """
@@ -251,10 +251,10 @@ class TestRuntimeBehavior(unittest.TestCase):
 
 
 class TestSourceBoundary(unittest.TestCase):
-    """Group C: no legacy push or independent Telegram path in dispatch hook."""
+    """Group C: no generic fallback or independent Telegram path in dispatch hook."""
 
-    def test_no_legacy_push_tokens_in_dispatch_hook(self) -> None:
-        """The dispatch hook region must not reference legacy push."""
+    def test_no_generic_notification_tokens_in_dispatch_hook(self) -> None:
+        """The dispatch hook region must not reference a generic notification path."""
         region = ast.unparse(load_cr_dispatch_hook().off_gate)
 
         forbidden = (
@@ -268,7 +268,7 @@ class TestSourceBoundary(unittest.TestCase):
             self.assertNotIn(
                 token,
                 region,
-                f"legacy push token {token!r} in dispatch hook region",
+                f"forbidden transport token {token!r} in dispatch hook region",
             )
 
     def test_no_ptilopsis_cr_telegram_send_code_in_main(self) -> None:

@@ -3,7 +3,6 @@
 Newsletter 风格完整报告渲染器（environment）
 
 为 daily 定时盘面生成 newsletter 风格的完整报告（public/{group}/full.html）。
-本模块是唯一的 HTML 报告渲染器（classic renderer 已在 PR7e 中移除）。
 
 页面结构（窄栏、黑白、无卡片阴影，对齐已审定的样例）：
 - EDITORIAL ZONE：overview 导言 + 内联统计 + 各异常 bucket + 已抑制
@@ -13,7 +12,7 @@ Newsletter 风格完整报告渲染器（environment）
 数据来源全部为生产真实结构：
 - report_data：prepare_report_data 产出（stats/new_titles/failed_ids/total_new_count）
 - stats title：含 ranks(list) / source_name / is_new（无单值 rank，排名取 ranks 最小值）
-- ai_analysis：AIAnalysisResult，environment buckets（字段对齐 formatter._env_html_item）
+- ai_analysis：AIAnalysisResult，提供 environment buckets 与分析文字
 """
 
 import html as _html_lib
@@ -234,7 +233,7 @@ def _is_usable_environment_ai(ai_analysis: Any) -> bool:
 
     仅当三者同时满足才算可用：非 None、success 为 True、report_style 为
     environment。不要把 `ai_analysis is not None` 直接当作可用——AI 失败、跳过或
-    classic 风格的结果都应进入 no-AI fallback。
+    任何非 environment 结果都应进入 no-AI fallback。
     """
     return (
         ai_analysis is not None

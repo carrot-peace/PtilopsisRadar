@@ -45,7 +45,6 @@ context = _stub_pkg("trendradar.context")
 context.AppContext = object
 core = _stub_pkg("trendradar.core")
 core.load_config = lambda: {{}}
-core.parse_multi_account_config = lambda value, separator=";": []
 core.Scheduler = object
 core_analyzer = _stub_pkg("trendradar.core.analyzer", is_pkg=False)
 core_analyzer.strip_background_groups = lambda groups, prefix: groups
@@ -60,16 +59,13 @@ time_mod.is_within_days = lambda *a, **k: True
 time_mod.calculate_days_old = lambda *a, **k: 0
 cdn = _stub_pkg("trendradar.core.cdn", is_pkg=False)
 cdn.fetch_with_fallback = lambda *a, **k: None
-telegram_bot = _stub_pkg("trendradar.telegram_bot")
-access = _stub_pkg("trendradar.telegram_bot.access", is_pkg=False)
-access.build_telegram_access_config = lambda config: {{"receiver_chat_ids": []}}
 
 
 class ResolvedSchedule:
     def __init__(
         self, period_key=None, period_name=None, day_plan="test",
-        collect=True, analyze=True, push=True, report_mode="current",
-        ai_mode="current", once_analyze=False, once_push=False,
+        collect=True, analyze=True, report_mode="current",
+        ai_mode="current", once_analyze=False,
         frequency_file=None, filter_method=None, interests_file=None,
     ):
         self.period_key = period_key
@@ -77,11 +73,9 @@ class ResolvedSchedule:
         self.day_plan = day_plan
         self.collect = collect
         self.analyze = analyze
-        self.push = push
         self.report_mode = report_mode
         self.ai_mode = ai_mode
         self.once_analyze = once_analyze
-        self.once_push = once_push
         self.frequency_file = frequency_file
         self.filter_method = filter_method
         self.interests_file = interests_file

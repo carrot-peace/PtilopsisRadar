@@ -39,7 +39,7 @@
 | **文章** | `read_article` | 读取单篇文章内容（Markdown 格式） |
 | | `read_articles_batch` | 批量读取多篇文章（最多 5 篇） |
 
-> MCP 通知发送工具已不再暴露；旧应用运行时 Legacy Push / Telegram 通知链路也已移除。
+> MCP 不提供通知发送工具；应用的常规采集与报告生成流程也不包含 Telegram 发送。
 
 ---
 
@@ -532,7 +532,7 @@
 - 可用平台列表
 - 爬虫配置（请求间隔、超时设置）
 - 权重配置（排名权重、频次权重）
-- 通知配置（飞书、钉钉、企业微信、Telegram、Email、ntfy、Bark、Slack、通用 Webhook）
+- 关键词与主题组配置
 
 ---
 
@@ -806,13 +806,13 @@
 
 ---
 
-## 通知推送
+## MCP 发送边界
 
 ### Q21: 能否通过 MCP 发送通知消息？
 
 MCP 通知发送工具已不再暴露。`get_notification_channels`、`send_notification` 等 MCP 通知发送工具已从 MCP server 移除，不再作为可用工具提供。
 
-旧应用运行时 Legacy Push / Telegram 通知链路已移除；不要把 MCP 当作备用通知发送路径。
+MCP 不是 CR/DR dispatch 的替代入口；Telegram 发送仅由各自独立的显式配置和开关控制。
 
 ---
 

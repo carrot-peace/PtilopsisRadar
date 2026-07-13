@@ -368,7 +368,7 @@ Invalid config values ⇒ no-op, not a crash of the calling run.
   all unchanged).
 - No `deploy_trace` schema change.
 - No count-based hard cap (`MAX_ENTRIES`) — future knob.
-- No legacy notification reintroduction.
+- No generic notification fallback.
 - J3a/J3b (archive compaction + retention) and J4 (queue) are documented but
   deferred. J3a introduces no runtime mutation; J3b deletes only files that
   are covered by a weekly rollup.

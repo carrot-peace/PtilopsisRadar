@@ -3,12 +3,6 @@
 核心模块 - 配置管理和核心工具
 """
 
-from trendradar.core.config import (
-    parse_multi_account_config,
-    validate_paired_configs,
-    limit_accounts,
-    get_account_at_index,
-)
 from trendradar.core.loader import load_config
 from trendradar.core.frequency import load_frequency_words, matches_word_groups
 from trendradar.core.scheduler import Scheduler, ResolvedSchedule
@@ -26,10 +20,6 @@ from trendradar.core.analyzer import (
 )
 
 __all__ = [
-    "parse_multi_account_config",
-    "validate_paired_configs",
-    "limit_accounts",
-    "get_account_at_index",
     "load_config",
     "load_frequency_words",
     "matches_word_groups",

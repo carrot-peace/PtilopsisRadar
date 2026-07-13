@@ -141,7 +141,7 @@ class TestDailyUsesDailyReportV2(_RoutingTestBase):
         self.assertIn(FALLBACK_NOTICE, out)
 
     def test_daily_non_environment_style(self):
-        ai = AIAnalysisResult(success=True, report_style="classic")
+        ai = AIAnalysisResult(success=True, report_style="unsupported")
         out = self.ctx.render_html(_report_data(), 1, mode="daily", ai_analysis=ai)
         self._assert_daily_v2_only(out)
         self.assertIn(FALLBACK_NOTICE, out)
@@ -199,7 +199,7 @@ class TestDailyUsesDailyReportV2(_RoutingTestBase):
 
 class TestNonDailyAllNewsletter(_RoutingTestBase):
     def test_non_daily_ai_none_uses_newsletter(self):
-        """PR7e: non-daily + 无 AI → 统一走 newsletter（不再回落 classic HTML）。"""
+        """non-daily + 无 AI → newsletter 的 no-AI fallback。"""
         out = self.ctx.render_html(_report_data(), 1, mode="current", ai_analysis=None)
         self._assert_newsletter_only(out)
         self.assertIn(FALLBACK_NOTICE, out)

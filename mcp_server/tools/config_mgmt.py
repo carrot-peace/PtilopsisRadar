@@ -43,7 +43,7 @@ class ConfigManagementTools:
         获取当前系统配置
 
         Args:
-            section: 配置节 - all/crawler/push/keywords/weights，默认all
+            section: 配置节 - all/crawler/keywords/weights，默认all
 
         Returns:
             配置字典

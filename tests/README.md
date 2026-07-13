@@ -1,7 +1,7 @@
 # 测试说明（信息环境异常监测改造）
 
 这些测试覆盖"信息环境异常监测 / 舆情雷达"改造涉及的核心逻辑：来源分层、
-程序化证据摘要与分栏规则、AI 流程组装、各渠道渲染，以及关键配置/提示词文件。
+程序化证据摘要与分栏规则、AI 流程组装、现行报告产物，以及关键配置/提示词文件。
 
 ## 如何运行
 
@@ -33,14 +33,14 @@ monkeypatch `AIAnalyzer._call_ai` 注入"假响应"，因此测试**不联网、
 |------|--------|
 | `test_source_tier_resolver.py` | 按显示名/ID 查 tier、unknown 兜底、tier 归一化、空 resolver（缺 source_tiers.yaml）不崩、从 config 构建 |
 | `test_evidence_labels.py` | `assign_label` 全规则矩阵与优先级（跨层/中文源独热/高热/情绪/沉默温差/背景）、bucketize、overview_stats、prompt 渲染、固定风险提示常量 |
-| `test_analyzer_environment.py` | environment 端到端：程序定栏定标签（AI 改不动）、AI 文字按议题合并、高热强制风险提示、AI 失败/坏 JSON/代码块 JSON 容错、无信号 skipped、缺 resolver 兜底、classic 不受影响 |
-| `test_formatter_environment.py` | 6 渠道 + HTML 渲染含标题/栏目/风险提示/方法说明、router、skipped/failed、classic 回归、默认 report_style |
+| `test_analyzer_environment.py` | environment 端到端：程序定栏定标签（AI 改不动）、AI 文字按议题合并、高热强制风险提示、AI 失败/坏 JSON/代码块 JSON 容错、无信号 skipped、缺 resolver 兜底 |
+| `test_dashboard.py` / `test_newsletter_ai_item.py` | 当前盘面、日报产物和 AI 分析区块渲染 |
 | `test_config_and_prompt_files.py` | 新 prompt 含 `{evidence_summary}`/`{overview_stats}` 且不含 `{news_content}`/`{rss_content}`、角色为监测编辑、source_tiers.yaml 与 config.yaml 关键项 |
 
 ## 未覆盖（需在 3.12 + 依赖 + API Key 环境手动验证）
 
 - 真实热榜采集、入库、timeline 调度（主流程，本次未改动）。
 - 真实 LiteLLM 调用与真实模型输出质量。
-- HTML 报告整页生成与各推送渠道实际投递。
+- 真实数据下的完整报告生成，以及 CR/DR 显式 Telegram 传输。
 
-建议在 Python 3.12 环境中按 `计划文件 → 验收 / 本地验证` 章节跑一次端到端。
+建议在 Python 3.12 环境中跑一次端到端采集与产物检查。
