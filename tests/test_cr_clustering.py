@@ -1243,9 +1243,11 @@ class TestEntityResourceLoader(unittest.TestCase):
     def test_missing_file_returns_empty(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            res = load_entity_resources(config_dir=d)
+            with self.assertLogs("trendradar.cr.entity_match", level="WARNING") as logs:
+                res = load_entity_resources(config_dir=d)
             self.assertEqual(res.dictionary, {})
             self.assertEqual(res.stoplist, set())
+            self.assertIn("未找到", logs.output[0])
 
     @unittest.skipUnless(_HAS_YAML, "PyYAML required to exercise the parse path")
     def test_malformed_yaml_returns_empty(self):
@@ -1275,9 +1277,11 @@ class TestEntityResourceLoader(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "cr_entity_dictionary.yaml"), "w", encoding="utf-8") as f:
                 f.write("dictionary:\n  特朗普: trump\n  欧盟: [eu, european union]\nstoplist:\n  - trump\n")
-            res = load_entity_resources(config_dir=d)
+            with self.assertLogs("trendradar.cr.entity_match", level="INFO") as logs:
+                res = load_entity_resources(config_dir=d)
             self.assertEqual(res.dictionary, {"特朗普": "trump"})  # list value skipped
             self.assertEqual(res.stoplist, {"trump"})
+            self.assertIn("加载成功", logs.output[0])
 
 
 if __name__ == "__main__":

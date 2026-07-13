@@ -8,6 +8,7 @@ Ptilopsis Radar 主程序
 
 import argparse
 import json
+import logging
 import os
 import re
 import sys
@@ -18,6 +19,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 from trendradar.context import AppContext
 from trendradar import __version__
@@ -961,9 +965,16 @@ class NewsAnalyzer:
                     _admitted = sum(
                         len(g.get("titles", [])) for g in _admitted_rss_stats
                     )
-                    print(f"[CR-A] 跨证据 RSS 准入: {_admitted} 条(来自 {len(_raw_rss)} 条原始 RSS)")
+                    logger.info(
+                        "[CR-A] 跨证据 RSS 准入: %d 条(来自 %d 条原始 RSS)",
+                        _admitted,
+                        len(_raw_rss),
+                    )
             except Exception as exc:  # noqa: BLE001 - 准入失败回退,不阻断
-                print(f"[CR-A] 跨证据 RSS 准入失败,回退关键词 RSS: {exc}", file=sys.stderr)
+                logger.warning(
+                    "[CR-A] 跨证据 RSS 准入失败,回退关键词 RSS: %s",
+                    exc,
+                )
                 _cr_rss_stats = rss_items
 
             _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
