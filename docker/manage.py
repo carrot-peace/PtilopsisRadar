@@ -577,7 +577,7 @@ def _cleanup_stale_pid():
 
 
 def start_webserver():
-    """启动 Web 服务器托管 output 目录"""
+    """启动并验证 Web 服务器；仅在 PID 与 HTTP 均健康时返回 True。"""
     print(f"启动 Web 服务器 (端口: {WEBSERVER_PORT})...")
     print(f"  安全提示：仅提供静态文件访问，限制在 {WEBSERVER_DIR} 目录")
 
@@ -592,7 +592,7 @@ def start_webserver():
                 print(f"  [警告] Web 服务器已在运行 (PID: {old_pid})")
                 print(f"  访问: http://localhost:{WEBSERVER_PORT}")
                 print("  停止服务: python manage.py stop_webserver")
-                return
+                return True
 
             # 进程异常时优先尝试终止旧进程，避免端口占用导致重启失败
             _terminate_webserver_process(old_pid, require_expected=True)
@@ -621,8 +621,8 @@ def start_webserver():
         # 等待一下确保服务器启动
         time.sleep(1)
 
-        # 检查进程是否还在运行
-        if process.poll() is None:
+        # 必须同时验证进程身份与本机 HTTP，不能只依赖 Popen 状态。
+        if process.poll() is None and _is_webserver_running(process.pid):
             # 保存 PID
             with open(WEBSERVER_PID_FILE, 'w') as f:
                 f.write(str(process.pid))
@@ -631,10 +631,15 @@ def start_webserver():
             print(f"  访问地址: http://localhost:{WEBSERVER_PORT}")
             print(f"  首页: http://localhost:{WEBSERVER_PORT}/index.html")
             print("  停止服务: python manage.py stop_webserver")
+            return True
         else:
             print(f"  [失败] Web 服务器启动失败")
+            _terminate_webserver_process(process.pid, require_expected=True)
+            _cleanup_stale_pid()
+            return False
     except Exception as e:
         print(f"  [失败] 启动失败: {e}")
+        return False
 
 
 def stop_webserver():
@@ -748,7 +753,7 @@ def show_help():
 def main():
     if len(sys.argv) < 2:
         show_help()
-        return
+        return 0
 
     command = sys.argv[1]
     commands = {
@@ -766,15 +771,19 @@ def main():
 
     if command in commands:
         try:
-            commands[command]()
+            result = commands[command]()
+            return 1 if result is False else 0
         except KeyboardInterrupt:
             print("\n操作已取消")
+            return 130
         except Exception as e:
             print(f"[失败] 执行出错: {e}")
+            return 1
     else:
         print(f"[失败] 未知命令: {command}")
         print("运行 'python manage.py help' 查看可用命令")
+        return 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

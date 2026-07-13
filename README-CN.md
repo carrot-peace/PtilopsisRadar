@@ -197,7 +197,7 @@ uv run python -m trendradar
 
 ```bash
 # 构建镜像
-container build --arch arm64 --tag ptilopsis-radar:latest --file docker/Dockerfile .
+scripts/apple-container/build-image.zsh ptilopsis-radar:latest
 
 # 准备 .env
 cp docker/.env.example docker/.env
