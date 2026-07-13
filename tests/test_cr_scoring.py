@@ -1694,6 +1694,50 @@ class TestCollectionCoveragePenalty(unittest.TestCase):
         self.assertTrue(coverage["penalty_applied"])
         self.assertEqual(coverage["penalty_factor"], 0.5)
 
+    def test_tiered_multiplier_runs_after_coverage_attenuation(self):
+        candidate = _make_candidate(
+            source_items=[
+                _make_item(source_id="weibo"),
+                _make_item(
+                    source_type="rss",
+                    source_id=None,
+                    feed_id="reuters",
+                    source_name="Reuters",
+                ),
+            ],
+            source_names=["weibo", "Reuters"],
+            source_ids=["weibo", "reuters"],
+            has_hotlist=True,
+            has_rss=True,
+            primary_source_type="mixed",
+        )
+        profile = CRScoringProfile(
+            profile_version=TIERED_CR_SCORING_PROFILE_VERSION,
+            source_tier_resolver=_TIER_RESOLVER,
+            coverage_penalty_enabled=True,
+            coverage_penalty_threshold=0.75,
+            coverage_penalty_factor=0.5,
+        )
+
+        result = combine_cr_scores(
+            candidate,
+            profile=profile,
+            growth_raw=40.0,
+            current_heat_raw=30.0,
+            cross_layer_raw=10.0,
+            input_health=self.health,
+        )
+
+        evidence = result.debug["evidence_multiplier"]
+        self.assertAlmostEqual(evidence["heat_score"], 35.0)
+        self.assertAlmostEqual(evidence["cross_evidence_score"], 5.0)
+        self.assertEqual(evidence["reason"], "strong_cross_tier_evidence:B,D")
+        self.assertAlmostEqual(result.total_score, 39.75)
+        self.assertEqual(
+            result.profile_version,
+            TIERED_CR_SCORING_PROFILE_VERSION,
+        )
+
 
 class TestB2LiteScenarios(unittest.TestCase):
     """B2-lite boundary scenario tests (from replay)."""

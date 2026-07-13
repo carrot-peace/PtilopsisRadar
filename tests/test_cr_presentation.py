@@ -625,6 +625,23 @@ class TestRenderCRAText(unittest.TestCase):
         text = render_cr_a_text(run)
         self.assertNotIn("Suppressed (high-score):", text)
 
+    def test_suppression_count_precedes_coverage_warning(self):
+        """Combined observability headers retain a stable, readable order."""
+        warning = "Collection coverage: 1/4 (3 failed)"
+        run = CRPresentationRun(
+            run_label="T",
+            candidates=[],
+            high_score_suppressed_count=2,
+            coverage_warning=warning,
+        )
+
+        lines = render_cr_a_text(run).splitlines()
+
+        self.assertLess(
+            lines.index("Suppressed (high-score): 2"),
+            lines.index(warning),
+        )
+
     def test_no_summary_line(self):
         """No Summary line fabricated."""
         pc = self._make_pc(push_eligible=True)
