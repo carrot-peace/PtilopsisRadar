@@ -13,6 +13,7 @@
 - sample_titles 只是代表性"传播文本"，不是事实来源。
 """
 
+import hashlib
 import re
 from typing import Any, Callable, Dict, List, Optional
 
@@ -109,6 +110,24 @@ def _rank_trend(title: Dict[str, Any]) -> str:
     if last >= first + 3:
         return "降温"
     return "稳定"
+
+
+def _stable_identifier(prefix: str, *parts: Any) -> str:
+    """Return a compact deterministic identifier for program-owned records."""
+    canonical = "\x1f".join(str(part or "").strip() for part in parts)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}_{digest}"
+
+
+def _evidence_id(title: Dict[str, Any]) -> str:
+    """Identify one captured headline without relying on AI-copied text."""
+    source = (
+        title.get("source_name")
+        or title.get("feed_name")
+        or title.get("source")
+        or ""
+    )
+    return _stable_identifier("ev", source, title.get("title", ""), _title_url(title))
 
 
 def build_evidence(
@@ -218,10 +237,11 @@ def _build_one(
     joined = " ".join(t.get("title", "") for t in all_titles)
     sentiment_flag = bool(_EMOTION_RE.search(joined))
 
-    # 代表性传播文本（按热度排序，最多 3 条）—— 不是事实来源
-    sample_titles = _pick_samples(all_titles, resolver, limit=3)
+    # 保留全量去重传播文本；只有 analyzer 的 prompt 层可以按 max_events / batch
+    # 预算裁剪。否则第 7 条以后的事件连确定性 fallback 都无法生成。
+    sample_titles = _pick_samples(all_titles, resolver, limit=0)
     # 抓取出处链接（仅供 HTML 证据展开；不进入 AI prompt）
-    source_links = _pick_source_links(all_titles, resolver, limit=5)
+    source_links = _pick_source_links(all_titles, resolver, limit=0)
 
     # 来源数（去重的热榜平台 + RSS 源；字段名沿用 platform_count 以兼容渲染层）
     platform_count = len(source_names)
@@ -264,26 +284,33 @@ def _build_one(
     }
 
 
-def _pick_samples(titles: List[Dict], resolver, limit: int = 3) -> List[Dict[str, str]]:
+def _pick_samples(titles: List[Dict], resolver, limit: int = 3) -> List[Dict[str, Any]]:
     def sort_key(t):
         mr = _min_rank(t)
         return mr if mr is not None else 9999
 
+    # The same headline appearing in two sources is precisely the cross-layer
+    # evidence DR needs to preserve. Deduplicate repeated captures from the
+    # same source, not the headline text globally.
     seen = set()
     result = []
     for t in sorted(titles, key=sort_key):
         title = t.get("title", "")
-        if not title or title in seen:
-            continue
-        seen.add(title)
         name = t.get("source_name", t.get("feed_name", "")) or ""
+        dedupe_key = (name, title)
+        if not title or dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         result.append({
+            "evidence_id": _evidence_id(t),
             "title": title,
             "source": name,
             "tier": resolver.tier_of(name) if name else "unknown",
             "trend": _rank_trend(t),
+            "rank": _min_rank(t),
+            "sentiment_flag": bool(_EMOTION_RE.search(title)),
         })
-        if len(result) >= limit:
+        if limit > 0 and len(result) >= limit:
             break
     return result
 
@@ -334,6 +361,7 @@ def _pick_source_links(titles: List[Dict], resolver, limit: int = 5) -> List[Dic
         name = t.get("source_name", t.get("feed_name", t.get("source", ""))) or ""
         rank = _min_rank(t)
         item = {
+            "evidence_id": _evidence_id(t),
             "title": title,
             "url": url,
             "source": name,
@@ -342,7 +370,7 @@ def _pick_source_links(titles: List[Dict], resolver, limit: int = 5) -> List[Dic
             "time": _title_time(t),
         }
         result.append(item)
-        if len(result) >= limit:
+        if limit > 0 and len(result) >= limit:
             break
     return result
 
@@ -386,6 +414,28 @@ def assign_label(
     # 5. 仅 C 层、无 D、无 A/B -> background_notes（点2：无 D 热度不进中文源独热）
     # 6. 其余 -> background_notes
     return None
+
+
+def assign_evidence_label(item: Dict[str, Any]) -> Optional[str]:
+    """Classify an event-sized evidence subset with the canonical rules.
+
+    This keeps the event's bucket, verification status and factual boundary in
+    sync.  It deliberately does not inherit the broader keyword group's label.
+    """
+    present = set(item.get("source_tiers_present") or [])
+    highest_d = item.get("highest_d_tier_rank")
+    high_d = int(item.get("d_tier_platform_count", 0) or 0) >= _HIGH_D_PLATFORM_COUNT
+    if isinstance(highest_d, dict):
+        rank = highest_d.get("rank")
+        high_d = high_d or (isinstance(rank, int) and 0 < rank <= _HIGH_D_RANK)
+    return assign_label(
+        has_A="A" in present,
+        has_B="B" in present,
+        has_C="C" in present,
+        has_D="D" in present,
+        high_d=high_d,
+        sentiment_flag=bool(item.get("sentiment_flag")),
+    )
 
 
 def bucketize(items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -444,11 +494,17 @@ def derive_radar_readout(overview_stats: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _format_sample_line(sample: Dict[str, str]) -> str:
+def _format_sample_line(sample: Dict[str, Any]) -> str:
     src = sample.get("source", "")
     tier = sample.get("tier", "")
     tier_tag = f"[{tier}]" if tier and tier != "unknown" else ""
-    return f"    · {tier_tag}[{src}] {sample.get('title', '')}（{sample.get('trend', '')}）"
+    rank = sample.get("rank")
+    rank_text = f"，第{rank}名" if isinstance(rank, int) and rank > 0 else ""
+    return (
+        f"    · evidence_id={sample.get('evidence_id', '-')} "
+        f"{tier_tag}[{src}] {sample.get('title', '')}"
+        f"（{sample.get('trend', '')}{rank_text}）"
+    )
 
 
 def render_evidence_for_prompt(

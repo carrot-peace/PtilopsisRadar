@@ -270,6 +270,31 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
     ai_config = config_data.get("ai_analysis", {})
 
     enabled_env = _get_env_bool("AI_ANALYSIS_ENABLED")
+    max_output_env = _get_env_int_or_none("AI_ANALYSIS_MAX_OUTPUT_TOKENS")
+    max_events_env = _get_env_int_or_none("AI_ANALYSIS_MAX_EVENTS")
+    batch_evidence_env = _get_env_int_or_none("AI_ANALYSIS_BATCH_MAX_EVIDENCE")
+
+    def positive_int(value: Any, default: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    max_output_tokens = positive_int(
+        max_output_env if max_output_env is not None else ai_config.get("max_output_tokens"),
+        16000,
+    )
+    max_events = positive_int(
+        max_events_env if max_events_env is not None else ai_config.get("max_events"),
+        30,
+    )
+    batch_max_evidence = positive_int(
+        batch_evidence_env
+        if batch_evidence_env is not None
+        else ai_config.get("batch_max_evidence"),
+        12,
+    )
 
     return {
         "ENABLED": enabled_env if enabled_env is not None else ai_config.get("enabled", False),
@@ -279,6 +304,10 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
         ),
         "MODE": ai_config.get("mode", "follow_report"),
         "MAX_NEWS_FOR_ANALYSIS": ai_config.get("max_news_for_analysis", 50),
+        "MAX_OUTPUT_TOKENS": max_output_tokens,
+        "MAX_EVENTS": max_events,
+        "BATCH_MAX_EVIDENCE": batch_max_evidence,
+        "EXTRA_PARAMS": ai_config.get("extra_params", {}),
         "INCLUDE_RSS": ai_config.get("include_rss", True),
         "INCLUDE_RANK_TIMELINE": ai_config.get("include_rank_timeline", False),
     }

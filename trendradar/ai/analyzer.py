@@ -6,12 +6,73 @@ AI 分析器模块
 基于 LiteLLM 统一接口，支持 100+ AI 提供商
 """
 
+import copy
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from trendradar.ai.client import AIClient
 from trendradar.ai.prompt_loader import load_prompt_template
+
+
+ENVIRONMENT_SCHEMA_VERSION = "environment-events-v1"
+ENVIRONMENT_RESPONSE_FORMAT: Dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "environment_events_report",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["schema_version", "overview", "items", "background_notes"],
+            "properties": {
+                "schema_version": {
+                    "type": "string",
+                    "enum": [ENVIRONMENT_SCHEMA_VERSION],
+                },
+                "overview": {"type": "string"},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["topic_group", "events"],
+                        "properties": {
+                            "topic_group": {"type": "string"},
+                            "events": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": [
+                                        "title",
+                                        "summary",
+                                        "analysis",
+                                        "evidence_ids",
+                                    ],
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "summary": {"type": "string"},
+                                        "analysis": {"type": "string"},
+                                        "evidence_ids": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                "background_notes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        },
+    },
+}
 
 
 @dataclass
@@ -35,6 +96,7 @@ class AIAnalysisResult:
 
     # 基础元数据
     raw_response: str = ""               # 原始响应
+    ai_response_metadata: List[Dict[str, Any]] = field(default_factory=list)
     success: bool = False                # 是否成功
     skipped: bool = False                # 是否因无内容跳过（非失败）
     error: str = ""                      # 错误信息
@@ -70,26 +132,59 @@ class AIAnalyzer:
             get_time_func: 获取当前时间的函数
             debug: 是否开启调试模式
         """
-        self.ai_config = ai_config
+        self.ai_config = dict(ai_config)
         self.analysis_config = analysis_config
         self.get_time_func = get_time_func
         self.debug = debug
 
+        # 从分析配置获取功能参数
+        self.max_news = analysis_config.get("MAX_NEWS_FOR_ANALYSIS", 50)
+
+        def positive_int(value: Any, default: int) -> int:
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                return default
+            return parsed if parsed > 0 else default
+
+        self.max_events = positive_int(analysis_config.get("MAX_EVENTS", 30), 30)
+        self.batch_max_evidence = positive_int(
+            analysis_config.get("BATCH_MAX_EVIDENCE", 12), 12
+        )
+        self.max_output_tokens = positive_int(
+            analysis_config.get("MAX_OUTPUT_TOKENS", 16000), 16000
+        )
+        self.include_rss = analysis_config.get("INCLUDE_RSS", True)
+        self.include_rank_timeline = analysis_config.get("INCLUDE_RANK_TIMELINE", False)
+        self.language = analysis_config.get("LANGUAGE", "Chinese")
+
+        # DR 的输出预算与生成参数独立于翻译/过滤等 AI 功能。
+        client_config = dict(self.ai_config)
+        client_config["MAX_TOKENS"] = self.max_output_tokens
+        base_extra = client_config.get("EXTRA_PARAMS", {})
+        analysis_extra = analysis_config.get("EXTRA_PARAMS", {})
+        merged_extra = dict(base_extra) if isinstance(base_extra, dict) else {}
+        if isinstance(analysis_extra, dict):
+            merged_extra.update(analysis_extra)
+        merged_extra.setdefault("response_format", copy.deepcopy(ENVIRONMENT_RESPONSE_FORMAT))
+        model_name = str(client_config.get("MODEL", "")).lower()
+        if "gemini-3" in model_name:
+            merged_extra.setdefault("reasoning_effort", "low")
+        client_config["EXTRA_PARAMS"] = merged_extra
+        # Gemini 3.x 的默认采样已针对 thinking 调优；DR 仅指定 low reasoning，
+        # 不再额外发送全局 temperature。
+        if "gemini-3" in model_name:
+            client_config["TEMPERATURE"] = None
+
         # 创建 AI 客户端（基于 LiteLLM）
-        self.client = AIClient(ai_config)
+        self.client = AIClient(client_config)
 
         # 验证配置
         valid, error = self.client.validate_config()
         if not valid:
             print(f"[AI] 配置警告: {error}")
 
-        # 从分析配置获取功能参数
-        self.max_news = analysis_config.get("MAX_NEWS_FOR_ANALYSIS", 50)
-        self.include_rss = analysis_config.get("INCLUDE_RSS", True)
-        self.include_rank_timeline = analysis_config.get("INCLUDE_RANK_TIMELINE", False)
-        self.language = analysis_config.get("LANGUAGE", "Chinese")
-
-        # 唯一支持的信息环境异常监测报告风格。
+        # 唯一支持的信息环境异常监测报告风格；classic 已废弃。
         self.report_style = "environment"
 
         # 加载提示词模板（environment prompt）
@@ -141,8 +236,10 @@ class AIAnalyzer:
             print(f"[AI] 接口: 存在自定义 API 端点")
 
         timeout = self.ai_config.get("TIMEOUT", 120)
-        max_tokens = self.ai_config.get("MAX_TOKENS", 5000)
-        print(f"[AI] 参数: timeout={timeout}, max_tokens={max_tokens}")
+        print(
+            f"[AI] 参数: timeout={timeout}, dr_max_output_tokens={self.max_output_tokens}, "
+            f"max_events={self.max_events}, batch_max_evidence={self.batch_max_evidence}"
+        )
 
         if not self.client.api_key:
             return AIAnalysisResult(
@@ -233,38 +330,25 @@ class AIAnalyzer:
         prompt_buckets = self._limit_environment_prompt_buckets(
             buckets, SECTION_ORDER, SUPPRESSED_BUCKETS
         )
-        evidence_summary = render_evidence_for_prompt(prompt_buckets, overview_stats)
-        overview_stats_text = render_overview_stats_for_prompt(overview_stats)
-        current_time = self.get_time_func().strftime("%Y-%m-%d %H:%M:%S")
-
-        user_prompt = self.user_prompt_template
-        user_prompt = user_prompt.replace("{current_time}", current_time)
-        user_prompt = user_prompt.replace("{language}", self.language)
-        user_prompt = user_prompt.replace("{overview_stats}", overview_stats_text)
-        user_prompt = user_prompt.replace("{evidence_summary}", evidence_summary)
-
-        if self.debug:
-            print("\n" + "=" * 80)
-            print("[AI 调试] 信息环境监测 —— 发送给 AI 的完整提示词")
-            print("=" * 80)
-            if self.system_prompt:
-                print("\n--- System Prompt ---")
-                print(self.system_prompt)
-            print("\n--- User Prompt ---")
-            print(user_prompt)
-            print("=" * 80 + "\n")
-
-        # 调用 AI（容错：失败仍输出程序事实）
-        ai_overview, ai_items, ai_background, ai_error = "", {}, [], ""
-        try:
-            response = self._call_ai(user_prompt)
-            ai_overview, ai_items, ai_background, ai_error = self._parse_environment_response(response)
-        except Exception as e:
-            ai_error = f"AI 调用失败 ({type(e).__name__}): {str(e)[:200]}"
-            print(f"[AI] 环境监测 AI 调用失败，仅输出程序证据: {ai_error}")
+        (
+            ai_overview,
+            ai_items,
+            ai_error,
+            raw_responses,
+            response_metadata,
+            blocking_ai_error,
+        ) = self._execute_environment_batches(
+            prompt_buckets=prompt_buckets,
+            overview_stats=overview_stats,
+            section_order=SECTION_ORDER,
+            render_evidence_for_prompt=render_evidence_for_prompt,
+            render_overview_stats_for_prompt=render_overview_stats_for_prompt,
+        )
 
         result = AIAnalysisResult(
-            success=True,
+            # 截断、schema/JSON 错误、批次调用失败或覆盖缺失都不是可接受的
+            # 成功；scheduler 必须能区分程序 fallback 与完整 AI 日报。
+            success=not blocking_ai_error,
             report_style="environment",
             overview=ai_overview,
             overview_stats=overview_stats,
@@ -273,48 +357,293 @@ class AIAnalyzer:
             total_news=hotlist_total + rss_total,
             hotlist_count=hotlist_total,
             rss_count=rss_total,
-            analyzed_news=overview_stats["total_items"],
-            max_news_limit=self.max_news,
+            analyzed_news=sum(
+                len(item.get("sample_titles") or [])
+                for label in SECTION_ORDER
+                for item in prompt_buckets.get(label, [])
+            ),
+            max_news_limit=self.max_events,
             include_rss=self.include_rss,
             error=ai_error,
+            raw_response="\n\n".join(raw_responses),
+            ai_response_metadata=response_metadata,
         )
 
-        # 程序组装各栏目：事实由程序写死，文字取 AI（按议题名匹配）
+        # 程序组装各栏目。议题组只用于生成候选事件；每个事件必须按自己绑定
+        # 的 evidence_ids 重新分桶，栏目、状态与事实边界不可继承关键词组。
+        rendered_by_label: Dict[str, List[Dict[str, Any]]] = {
+            label: [] for label in BUCKET_ORDER
+        }
+        claimed_evidence_ids: set[str] = set()
+        bg_notes: List[str] = [
+            f"{item['topic_group']}（{item['source_layers']}）"
+            for item in buckets.get("background", [])
+        ]
         for label in BUCKET_ORDER:
-            meta = LABELS[label]
-            rendered = []
             for item in buckets.get(label, []):
                 topic = item["topic_group"]
                 prose = ai_items.get(topic) if isinstance(ai_items.get(topic), dict) else {}
                 prose = prose or {}
-                entry = {
-                    "topic": topic,
-                    "summary": str(prose.get("summary", "")).strip(),
-                    "analysis": str(prose.get("analysis", "")).strip(),
-                    "source_layers": item["source_layers"],
-                    "platforms": self._platforms_str(item),
-                    "platform_count": item["platform_count"],
-                    "highest_heat": item["highest_heat"],
-                    "verification_status": meta["verification_status"],
-                    "factual_boundary": meta["factual_boundary"],
-                    "sentiment_flag": bool(item.get("sentiment_flag")),
-                    "evidence_detail": item,
-                }
-                if label == "high_heat_unverified":
-                    entry["risk_note"] = RISK_NOTE_HIGH_HEAT
-                rendered.append(entry)
-            setattr(result, label, rendered)
+                event_entries = self._build_event_entries(
+                    group_topic=topic,
+                    prose=prose,
+                    evidence=item,
+                    risk_note_high_heat=RISK_NOTE_HIGH_HEAT,
+                    claimed_evidence_ids=claimed_evidence_ids,
+                )
+                # 每条未被 AI 认领的证据仍生成统一的事件级程序 fallback；禁止
+                # 回退成关键词组摘要，也避免部分 events 成功时其余证据静默丢失。
+                for sample in item.get("sample_titles") or []:
+                    fallback = self._deterministic_event_fallback(
+                        group_topic=topic,
+                        evidence=item,
+                        sample=sample,
+                        risk_note_high_heat=RISK_NOTE_HIGH_HEAT,
+                        claimed_evidence_ids=claimed_evidence_ids,
+                    )
+                    if fallback is not None:
+                        event_entries.append(fallback)
 
-        # 已抑制（背景源）：程序事实 + AI 文字
-        bg_notes: List[str] = []
-        for item in buckets.get("background", []):
-            bg_notes.append(f"{item['topic_group']}（{item['source_layers']}）")
-        for note in ai_background:
-            if note and str(note).strip():
-                bg_notes.append(str(note).strip())
+                for entry in event_entries:
+                    event_label = entry.pop("_bucket_label", None)
+                    if event_label in rendered_by_label:
+                        rendered_by_label[event_label].append(entry)
+                    else:
+                        bg_notes.append(
+                            f"{entry.get('topic', topic)}（{entry.get('source_layers', '-')}）"
+                        )
+
+        for label, rendered in rendered_by_label.items():
+            setattr(result, label, rendered)
         result.background_notes = bg_notes
 
         return result
+
+    @staticmethod
+    def _base_environment_entry(
+        *,
+        topic: str,
+        summary: str,
+        analysis: str,
+        evidence: Dict[str, Any],
+        verification_status: str,
+        factual_boundary: str,
+    ) -> Dict[str, Any]:
+        """Build one reader-facing entry from program-owned evidence."""
+        return {
+            "topic": topic,
+            "summary": summary,
+            "analysis": analysis,
+            "source_layers": evidence.get("source_layers", "-"),
+            "platforms": AIAnalyzer._platforms_str(evidence),
+            "platform_count": int(evidence.get("platform_count", 0) or 0),
+            "highest_heat": evidence.get("highest_heat", "-"),
+            "verification_status": verification_status,
+            "factual_boundary": factual_boundary,
+            "sentiment_flag": bool(evidence.get("sentiment_flag")),
+            "evidence_detail": evidence,
+        }
+
+    @staticmethod
+    def _event_evidence(
+        group_evidence: Dict[str, Any], evidence_ids: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Narrow topic-group evidence to the exact program IDs cited by one event.
+
+        Partial matches are rejected: one invented ID invalidates the event rather
+        than silently broadening or narrowing its factual boundary.
+        """
+        allowed = {
+            str(sample.get("evidence_id", "")).strip(): sample
+            for sample in (group_evidence.get("sample_titles") or [])
+            if isinstance(sample, dict) and str(sample.get("evidence_id", "")).strip()
+        }
+        requested = list(dict.fromkeys(value for value in evidence_ids if value))
+        if not requested or any(value not in allowed for value in requested):
+            return None
+        matched_set = set(requested)
+        samples = [
+            dict(sample)
+            for sample in (group_evidence.get("sample_titles") or [])
+            if isinstance(sample, dict)
+            and str(sample.get("evidence_id", "")).strip() in matched_set
+        ]
+        links = [
+            dict(link)
+            for link in (group_evidence.get("source_links") or [])
+            if isinstance(link, dict)
+            and str(link.get("evidence_id", "")).strip() in matched_set
+        ]
+
+        sources_by_tier: Dict[str, List[str]] = {}
+        for record in [*samples, *links]:
+            tier = str(record.get("tier", "unknown") or "unknown")
+            source = str(record.get("source", "") or "").strip()
+            if source and source not in sources_by_tier.setdefault(tier, []):
+                sources_by_tier[tier].append(source)
+        present = [tier for tier in ("A", "B", "C", "D") if sources_by_tier.get(tier)]
+        source_names = {
+            source for names in sources_by_tier.values() for source in names if source
+        }
+
+        ranked: List[tuple[int, str]] = []
+        ranked_d: List[tuple[int, str]] = []
+        for record in [*samples, *links]:
+            rank = record.get("rank")
+            source = str(record.get("source", "") or "").strip()
+            if isinstance(rank, int) and rank > 0:
+                ranked.append((rank, source))
+                if record.get("tier") == "D":
+                    ranked_d.append((rank, source))
+        highest_heat = "-"
+        if ranked:
+            rank, source = min(ranked, key=lambda pair: pair[0])
+            highest_heat = f"{source} 第{rank}名" if source else f"第{rank}名"
+        highest_d_tier_rank = None
+        if ranked_d:
+            rank, source = min(ranked_d, key=lambda pair: pair[0])
+            highest_d_tier_rank = {"platform": source, "rank": rank}
+
+        return {
+            "topic_group": group_evidence.get("topic_group", ""),
+            "evidence_ids": requested,
+            "source_tiers_present": present,
+            "sources_by_tier": sources_by_tier,
+            "source_layers": "/".join(present) or "-",
+            "platform_count": len(source_names),
+            "d_tier_platform_count": len(sources_by_tier.get("D", [])),
+            "highest_d_tier_rank": highest_d_tier_rank,
+            "highest_heat": highest_heat,
+            "sentiment_flag": any(bool(sample.get("sentiment_flag")) for sample in samples),
+            "sample_titles": samples,
+            "source_links": links,
+        }
+
+    @classmethod
+    def _build_event_entries(
+        cls,
+        *,
+        group_topic: str,
+        prose: Dict[str, Any],
+        evidence: Dict[str, Any],
+        risk_note_high_heat: str,
+        claimed_evidence_ids: set[str],
+    ) -> List[Dict[str, Any]]:
+        from trendradar.ai.evidence import LABELS, assign_evidence_label
+
+        raw_events = prose.get("events")
+        if not isinstance(raw_events, list):
+            return []
+
+        entries: List[Dict[str, Any]] = []
+        seen_titles = set()
+        for raw in raw_events:
+            if not isinstance(raw, dict):
+                continue
+            title = str(raw.get("title", "") or "").strip()
+            summary = str(raw.get("summary", "") or "").strip()
+            analysis = str(raw.get("analysis", "") or "").strip()
+            raw_evidence_ids = raw.get("evidence_ids") or []
+            if not isinstance(raw_evidence_ids, list):
+                continue
+            exact_ids = [
+                str(value).strip()
+                for value in raw_evidence_ids
+                if str(value).strip()
+            ]
+            detail = cls._event_evidence(evidence, exact_ids)
+            if not title or detail is None or title in seen_titles:
+                continue
+            bound_ids = set(detail.get("evidence_ids") or [])
+            if not bound_ids or bound_ids.intersection(claimed_evidence_ids):
+                continue
+            seen_titles.add(title)
+            claimed_evidence_ids.update(bound_ids)
+            event_label = assign_evidence_label(detail)
+            event_meta = LABELS.get(event_label, {})
+            status = event_meta.get("verification_status", "来源覆盖有限")
+            boundary = event_meta.get(
+                "factual_boundary", "现有证据未达到独立异常信号的展示阈值。"
+            )
+            entry = cls._base_environment_entry(
+                topic=title,
+                summary=summary,
+                analysis=analysis,
+                evidence=detail,
+                verification_status=status,
+                factual_boundary=boundary,
+            )
+            stable_material = "\x1f".join(sorted(bound_ids))
+            entry["event_id"] = "evt_" + hashlib.sha256(
+                stable_material.encode("utf-8")
+            ).hexdigest()[:16]
+            entry["topic_group"] = group_topic
+            entry["_bucket_label"] = event_label
+            if event_label == "high_heat_unverified":
+                entry["risk_note"] = risk_note_high_heat
+            entries.append(entry)
+        return entries
+
+    @classmethod
+    def _deterministic_event_fallback(
+        cls,
+        *,
+        group_topic: str,
+        evidence: Dict[str, Any],
+        sample: Dict[str, Any],
+        risk_note_high_heat: str,
+        claimed_evidence_ids: set[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Create one grounded event when AI omitted or could not write it."""
+        from trendradar.ai.evidence import LABELS, assign_evidence_label
+
+        evidence_id = str(sample.get("evidence_id", "") or "").strip()
+        if not evidence_id or evidence_id in claimed_evidence_ids:
+            return None
+        detail = cls._event_evidence(evidence, [evidence_id])
+        if detail is None:
+            return None
+        claimed_evidence_ids.add(evidence_id)
+
+        headline = str(sample.get("title", "") or "").strip()
+        source = str(sample.get("source", "") or "未知来源").strip()
+        tier = str(sample.get("tier", "unknown") or "unknown")
+        rank = sample.get("rank")
+        rank_text = f"第{rank}名" if isinstance(rank, int) and rank > 0 else "榜单中"
+        if tier == "D":
+            title = f"{source}出现“{headline}”相关传播"
+            summary = (
+                f"标题为『{headline}』的内容出现在{source}{rank_text}。"
+                "当前只能确认这条传播记录，不能据此确认标题所述事件已经成立。"
+            )
+        else:
+            title = f"{source}收录“{headline}”"
+            summary = (
+                f"{source}出现标题为『{headline}』的来源记录。"
+                "当前摘要仅保留该来源可直接支持的信息，具体内容以原始出处为准。"
+            )
+        analysis = f"单一{tier}层来源，覆盖平台为{source}。"
+
+        event_label = assign_evidence_label(detail)
+        event_meta = LABELS.get(event_label, {})
+        entry = cls._base_environment_entry(
+            topic=title,
+            summary=summary,
+            analysis=analysis,
+            evidence=detail,
+            verification_status=event_meta.get("verification_status", "来源覆盖有限"),
+            factual_boundary=event_meta.get(
+                "factual_boundary", "现有证据未达到独立异常信号的展示阈值。"
+            ),
+        )
+        entry["event_id"] = "evt_" + hashlib.sha256(
+            evidence_id.encode("utf-8")
+        ).hexdigest()[:16]
+        entry["topic_group"] = group_topic
+        entry["_bucket_label"] = event_label
+        if event_label == "high_heat_unverified":
+            entry["risk_note"] = risk_note_high_heat
+        return entry
 
     def _limit_environment_prompt_buckets(
         self,
@@ -328,27 +657,325 @@ class AIAnalyzer:
         程序盘面统计与最终栏目仍基于全量 evidence；此限制只控制 prompt 体积。
         """
         try:
-            limit = int(self.max_news)
+            group_limit = max(0, int(self.max_news))
         except (TypeError, ValueError):
-            limit = 0
-        if limit <= 0:
-            return buckets
-
+            group_limit = 0
+        try:
+            event_limit = max(0, int(self.max_events))
+        except (TypeError, ValueError):
+            event_limit = 0
         limited = {k: [] for k in buckets.keys()}
-        remaining = limit
-        ordered_keys = list(section_order) + ["background"] + list(suppressed_buckets)
+        remaining_groups = group_limit or 10 ** 9
+        remaining_evidence = event_limit or 10 ** 9
+        # background / suppressed 项不需要 AI 文字，盘面计数已通过 overview_stats
+        # 单独提供；不再用它们占据输入容量。
+        ordered_keys = list(section_order)
         seen = set()
         for key in ordered_keys:
             if key in seen or key not in buckets:
                 continue
             seen.add(key)
-            if remaining <= 0:
+            if remaining_groups <= 0 or remaining_evidence <= 0:
                 break
-            selected = buckets.get(key, [])[:remaining]
-            limited[key] = selected
-            remaining -= len(selected)
+            for item in buckets.get(key, []):
+                if remaining_groups <= 0 or remaining_evidence <= 0:
+                    break
+                samples = list(item.get("sample_titles") or [])[:remaining_evidence]
+                if not samples:
+                    continue
+                selected = self._copy_evidence_with_samples(item, samples)
+                limited[key].append(selected)
+                remaining_groups -= 1
+                remaining_evidence -= len(samples)
 
         return limited
+
+    @staticmethod
+    def _copy_evidence_with_samples(
+        item: Dict[str, Any], samples: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        selected = copy.deepcopy(item)
+        selected["sample_titles"] = copy.deepcopy(samples)
+        evidence_ids = {
+            str(sample.get("evidence_id", "")) for sample in samples if sample.get("evidence_id")
+        }
+        selected["source_links"] = [
+            copy.deepcopy(link)
+            for link in (item.get("source_links") or [])
+            if str(link.get("evidence_id", "")) in evidence_ids
+        ]
+        return selected
+
+    def _chunk_environment_prompt_buckets(
+        self,
+        buckets: Dict[str, List[Dict[str, Any]]],
+        section_order: List[str],
+        max_evidence: int,
+    ) -> List[Dict[str, List[Dict[str, Any]]]]:
+        """Split prompt work by evidence count, including inside a large topic."""
+        size = max(1, int(max_evidence or 1))
+        chunks: List[Dict[str, List[Dict[str, Any]]]] = []
+        current = {key: [] for key in buckets}
+        current_size = 0
+
+        def flush() -> None:
+            nonlocal current, current_size
+            if any(current.get(key) for key in section_order):
+                chunks.append(current)
+            current = {key: [] for key in buckets}
+            current_size = 0
+
+        for label in section_order:
+            for item in buckets.get(label, []):
+                samples = list(item.get("sample_titles") or [])
+                offset = 0
+                while offset < len(samples):
+                    if current_size >= size:
+                        flush()
+                    take = min(size - current_size, len(samples) - offset)
+                    piece_samples = samples[offset:offset + take]
+                    current[label].append(
+                        self._copy_evidence_with_samples(item, piece_samples)
+                    )
+                    current_size += take
+                    offset += take
+        flush()
+        return chunks
+
+    @staticmethod
+    def _merge_environment_items(
+        target: Dict[str, Dict[str, Any]], incoming: Dict[str, Dict[str, Any]]
+    ) -> None:
+        for topic, payload in incoming.items():
+            existing = target.setdefault(topic, {"events": []})
+            existing_events = existing.setdefault("events", [])
+            for event in payload.get("events", []):
+                if isinstance(event, dict):
+                    existing_events.append(event)
+
+    def _environment_user_prompt(
+        self,
+        prompt_buckets: Dict[str, List[Dict[str, Any]]],
+        overview_stats: Dict[str, Any],
+        render_evidence_for_prompt: Callable,
+        render_overview_stats_for_prompt: Callable,
+    ) -> str:
+        user_prompt = self.user_prompt_template
+        user_prompt = user_prompt.replace(
+            "{current_time}", self.get_time_func().strftime("%Y-%m-%d %H:%M:%S")
+        )
+        user_prompt = user_prompt.replace("{language}", self.language)
+        user_prompt = user_prompt.replace(
+            "{overview_stats}", render_overview_stats_for_prompt(overview_stats)
+        )
+        user_prompt = user_prompt.replace(
+            "{evidence_summary}",
+            render_evidence_for_prompt(prompt_buckets, overview_stats),
+        )
+        return user_prompt
+
+    @staticmethod
+    def _is_token_truncation(metadata: Dict[str, Any]) -> bool:
+        reason = str(metadata.get("finish_reason", "") or "").upper()
+        return reason in {"MAX_TOKENS", "LENGTH", "TOKEN_LIMIT"}
+
+    @staticmethod
+    def _batch_topics(
+        batch: Dict[str, List[Dict[str, Any]]], section_order: List[str]
+    ) -> set[str]:
+        return {
+            str(item.get("topic_group", ""))
+            for label in section_order
+            for item in batch.get(label, [])
+            if item.get("topic_group")
+        }
+
+    def _execute_environment_batches(
+        self,
+        *,
+        prompt_buckets: Dict[str, List[Dict[str, Any]]],
+        overview_stats: Dict[str, Any],
+        section_order: List[str],
+        render_evidence_for_prompt: Callable,
+        render_overview_stats_for_prompt: Callable,
+    ) -> tuple:
+        """Run bounded structured-output batches, retrying truncation by halving."""
+        try:
+            batch_size = max(1, int(self.batch_max_evidence))
+        except (TypeError, ValueError):
+            batch_size = 12
+        queue = self._chunk_environment_prompt_buckets(
+            prompt_buckets, section_order, batch_size
+        )
+        if not queue:
+            return "", {}, "", [], [], False
+        overview = ""
+        merged_items: Dict[str, Dict[str, Any]] = {}
+        errors: List[str] = []
+        raw_responses: List[str] = []
+        metadata_log: List[Dict[str, Any]] = []
+        blocking_error = False
+        call_number = 0
+
+        while queue:
+            batch = queue.pop(0)
+            call_number += 1
+            user_prompt = self._environment_user_prompt(
+                batch,
+                overview_stats,
+                render_evidence_for_prompt,
+                render_overview_stats_for_prompt,
+            )
+            if self.debug:
+                print(f"[AI 调试] environment batch {call_number}\n{user_prompt}")
+
+            try:
+                if hasattr(self.client, "last_response_metadata"):
+                    self.client.last_response_metadata = {}
+                response = self._call_ai(user_prompt)
+            except Exception as exc:
+                blocking_error = True
+                errors.append(f"AI 批次调用失败 ({type(exc).__name__}): {str(exc)[:160]}")
+                continue
+
+            response = str(response or "")
+            raw_responses.append(response)
+            metadata = copy.deepcopy(
+                getattr(self.client, "last_response_metadata", {}) or {}
+            )
+            metadata["call"] = call_number
+            metadata["topic_groups"] = sorted(self._batch_topics(batch, section_order))
+            metadata_log.append(metadata)
+            usage = metadata.get("usage", {}) if isinstance(metadata.get("usage"), dict) else {}
+            details = (
+                usage.get("completion_tokens_details", {})
+                if isinstance(usage.get("completion_tokens_details"), dict)
+                else {}
+            )
+            thought_tokens = (
+                usage.get("thoughts_token_count")
+                or usage.get("reasoning_tokens")
+                or details.get("reasoning_tokens")
+                or 0
+            )
+            print(
+                f"[AI] DR batch {call_number}: "
+                f"finish={metadata.get('finish_reason') or '-'}, "
+                f"prompt={usage.get('prompt_tokens', 0)}, "
+                f"completion={usage.get('completion_tokens', 0)}, "
+                f"thoughts={thought_tokens}"
+            )
+
+            if self._is_token_truncation(metadata):
+                total_evidence = sum(
+                    len(item.get("sample_titles") or [])
+                    for label in section_order
+                    for item in batch.get(label, [])
+                )
+                smaller = self._chunk_environment_prompt_buckets(
+                    batch, section_order, max(1, total_evidence // 2)
+                )
+                if total_evidence > 1 and len(smaller) > 1:
+                    metadata["discarded"] = True
+                    metadata["retry_split"] = len(smaller)
+                    queue = smaller + queue
+                    continue
+                blocking_error = True
+                metadata["discarded"] = True
+                errors.append("AI 输出因 MAX_TOKENS 截断；已拒绝残缺结果")
+                continue
+
+            batch_overview, batch_items, _background, parse_error = (
+                self._parse_environment_response(response)
+            )
+            if parse_error:
+                blocking_error = True
+                errors.append(parse_error)
+                continue
+
+            expected = self._batch_topics(batch, section_order)
+            returned = set(batch_items)
+            if expected != returned:
+                blocking_error = True
+                missing = "、".join(sorted(expected - returned)) or "-"
+                extra = "、".join(sorted(returned - expected)) or "-"
+                errors.append(f"AI 批次覆盖不完整：缺失={missing}，额外={extra}")
+            if any(not batch_items.get(topic, {}).get("events") for topic in expected):
+                blocking_error = True
+                errors.append("AI 批次存在空 events；已使用程序事件 fallback")
+            expected_ids = {
+                str(sample.get("evidence_id", ""))
+                for label in section_order
+                for item in batch.get(label, [])
+                for sample in (item.get("sample_titles") or [])
+                if sample.get("evidence_id")
+            }
+            returned_id_list = [
+                str(evidence_id)
+                for payload in batch_items.values()
+                for event in payload.get("events", [])
+                for evidence_id in (event.get("evidence_ids") or [])
+            ]
+            returned_ids = set(returned_id_list)
+            if expected_ids != returned_ids:
+                blocking_error = True
+                missing_count = len(expected_ids - returned_ids)
+                extra_count = len(returned_ids - expected_ids)
+                errors.append(
+                    f"AI 批次 evidence 覆盖不完整：缺失={missing_count}，额外={extra_count}"
+                )
+                metadata["missing_evidence_ids"] = sorted(expected_ids - returned_ids)
+                metadata["extra_evidence_ids"] = sorted(returned_ids - expected_ids)
+            if len(returned_id_list) != len(returned_ids):
+                blocking_error = True
+                errors.append("AI 批次重复使用 evidence_id；重复事件已拒绝")
+            expected_by_topic: Dict[str, set[str]] = {}
+            for label in section_order:
+                for item in batch.get(label, []):
+                    topic = str(item.get("topic_group", ""))
+                    expected_by_topic.setdefault(topic, set()).update(
+                        str(sample.get("evidence_id"))
+                        for sample in (item.get("sample_titles") or [])
+                        if sample.get("evidence_id")
+                    )
+            returned_by_topic: Dict[str, List[str]] = {
+                topic: [
+                    str(evidence_id)
+                    for event in payload.get("events", [])
+                    for evidence_id in (event.get("evidence_ids") or [])
+                ]
+                for topic, payload in batch_items.items()
+            }
+            for topic in expected | returned:
+                topic_expected = expected_by_topic.get(topic, set())
+                topic_returned_list = returned_by_topic.get(topic, [])
+                topic_returned = set(topic_returned_list)
+                if topic_expected != topic_returned:
+                    blocking_error = True
+                    errors.append(f"AI 批次议题 {topic} 的 evidence_ids 绑定错误")
+                if len(topic_returned_list) != len(topic_returned):
+                    blocking_error = True
+                    errors.append(f"AI 批次议题 {topic} 重复使用 evidence_id")
+
+            if not overview and batch_overview:
+                overview = batch_overview
+            self._merge_environment_items(merged_items, batch_items)
+
+        if not metadata_log:
+            blocking_error = True
+            errors.append("未完成任何 AI 批次")
+        # 任一 blocking error 都切换到全量程序 fallback；不能在 success=False
+        # 的“仅展示程序采集内容”通知下继续混入部分 AI prose。
+        safe_overview = "" if blocking_error else overview
+        safe_items = {} if blocking_error else merged_items
+        return (
+            safe_overview,
+            safe_items,
+            "；".join(dict.fromkeys(errors)),
+            raw_responses,
+            metadata_log,
+            blocking_error,
+        )
 
     @staticmethod
     def _platforms_str(item: Dict) -> str:
@@ -371,19 +998,8 @@ class AIAnalyzer:
         if not response or not response.strip():
             return "", {}, [], "AI 返回空响应"
 
-        # 提取 JSON 文本（去 markdown 代码块标记）
-        json_str = response
-        if "```json" in response:
-            parts = response.split("```json", 1)
-            if len(parts) > 1:
-                code_block = parts[1]
-                end_idx = code_block.find("```")
-                json_str = code_block[:end_idx] if end_idx != -1 else code_block
-        elif "```" in response:
-            parts = response.split("```", 2)
-            if len(parts) >= 2:
-                json_str = parts[1]
-        json_str = json_str.strip()
+        # Structured Output 必须直接返回标准 JSON；markdown 包裹也视为协议错误。
+        json_str = response.strip()
 
         data = None
         error = ""
@@ -391,36 +1007,58 @@ class AIAnalyzer:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             error = f"JSON 解析错误: {e.msg}"
-            try:
-                from json_repair import repair_json
-                repaired = repair_json(json_str, return_objects=True)
-                if isinstance(repaired, dict):
-                    data = repaired
-                    error = ""
-                    print("[AI] 环境监测 JSON 本地修复成功（json_repair）")
-            except Exception:
-                pass
+            # environment 使用 Structured Output。非标准 JSON 可能是 provider
+            # 未暴露 finish_reason 时的截断，禁止 json_repair 后伪装成成功。
 
         if not isinstance(data, dict):
             return "", {}, [], (error or "AI 响应非 JSON 对象")
 
+        schema_version = str(data.get("schema_version", "") or "")
+        if schema_version != ENVIRONMENT_SCHEMA_VERSION:
+            return (
+                "",
+                {},
+                [],
+                f"AI 响应 schema_version 不匹配: {schema_version or '缺失'}",
+            )
+
         overview = str(data.get("overview", "") or "").strip()
 
-        items = {}
-        raw_items = data.get("items", {})
-        if isinstance(raw_items, dict):
-            for k, v in raw_items.items():
-                if isinstance(v, dict):
-                    items[str(k)] = {
-                        "summary": str(v.get("summary", "") or "").strip(),
-                        "analysis": str(v.get("analysis", "") or "").strip(),
-                    }
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list):
+            return "", {}, [], "AI 响应 items 必须为数组"
+        items: Dict[str, Dict[str, Any]] = {}
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                return "", {}, [], "AI 响应 items 包含非对象元素"
+            topic = str(raw_item.get("topic_group", "") or "").strip()
+            raw_events = raw_item.get("events")
+            if not topic or not isinstance(raw_events, list) or topic in items:
+                return "", {}, [], "AI 响应 topic_group 缺失、重复或 events 非数组"
+            events: List[Dict[str, Any]] = []
+            for raw_event in raw_events:
+                if not isinstance(raw_event, dict):
+                    return "", {}, [], f"议题 {topic} 包含非对象 event"
+                raw_ids = raw_event.get("evidence_ids")
+                if not isinstance(raw_ids, list):
+                    return "", {}, [], f"议题 {topic} 的 evidence_ids 非数组"
+                evidence_ids = [str(value).strip() for value in raw_ids if str(value).strip()]
+                title = str(raw_event.get("title", "") or "").strip()
+                if not title or not evidence_ids:
+                    return "", {}, [], f"议题 {topic} 的 event 缺少 title/evidence_ids"
+                events.append({
+                    "title": title,
+                    "summary": str(raw_event.get("summary", "") or "").strip(),
+                    "analysis": str(raw_event.get("analysis", "") or "").strip(),
+                    "evidence_ids": evidence_ids,
+                })
+            items[topic] = {"events": events}
 
         background = []
         raw_bg = data.get("background_notes", [])
         if isinstance(raw_bg, list):
             background = [str(x) for x in raw_bg if x]
-        elif isinstance(raw_bg, str) and raw_bg.strip():
-            background = [raw_bg.strip()]
+        else:
+            return "", {}, [], "AI 响应 background_notes 必须为数组"
 
         return overview, items, background, error
