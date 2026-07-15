@@ -57,6 +57,8 @@ ENVIRONMENT_RESPONSE_FORMAT: Dict[str, Any] = {
                                         "analysis": {"type": "string"},
                                         "evidence_ids": {
                                             "type": "array",
+                                            "minItems": 1,
+                                            "maxItems": 3,
                                             "items": {"type": "string"},
                                         },
                                     },
@@ -67,6 +69,7 @@ ENVIRONMENT_RESPONSE_FORMAT: Dict[str, Any] = {
                 },
                 "background_notes": {
                     "type": "array",
+                    "maxItems": 0,
                     "items": {"type": "string"},
                 },
             },
@@ -168,12 +171,16 @@ class AIAnalyzer:
             merged_extra.update(analysis_extra)
         merged_extra.setdefault("response_format", copy.deepcopy(ENVIRONMENT_RESPONSE_FORMAT))
         model_name = str(client_config.get("MODEL", "")).lower()
-        if "gemini-3" in model_name:
+        provider, _, provider_model = model_name.partition("/")
+        native_gemini_3 = (
+            provider in {"gemini", "vertex_ai"} and "gemini-3" in provider_model
+        )
+        if native_gemini_3:
             merged_extra.setdefault("reasoning_effort", "low")
         client_config["EXTRA_PARAMS"] = merged_extra
         # Gemini 3.x 的默认采样已针对 thinking 调优；DR 仅指定 low reasoning，
         # 不再额外发送全局 temperature。
-        if "gemini-3" in model_name:
+        if native_gemini_3:
             client_config["TEMPERATURE"] = None
 
         # 创建 AI 客户端（基于 LiteLLM）
@@ -431,7 +438,24 @@ class AIAnalyzer:
 
         for label, rendered in rendered_by_label.items():
             setattr(result, label, rendered)
-        result.overview_stats = build_overview_stats(event_buckets)
+        final_overview_stats = build_overview_stats(event_buckets)
+        # The model wrote its overview from keyword-group statistics, while the
+        # published report is classified again at event granularity.  Keep the
+        # prose only when both views describe the same structural categories;
+        # renderers can otherwise generate a deterministic brief from the final
+        # program-owned counts.
+        def presence_snapshot(stats_value: Dict[str, Any]) -> tuple:
+            counts = stats_value.get("label_counts", {}) or {}
+            layers = stats_value.get("layer_distribution", {}) or {}
+            return (
+                tuple(bool(counts.get(label, 0)) for label in BUCKET_ORDER),
+                bool(stats_value.get("background_count", 0)),
+                tuple(bool(layers.get(tier, 0)) for tier in ("A", "B", "C", "D")),
+            )
+
+        if presence_snapshot(overview_stats) != presence_snapshot(final_overview_stats):
+            result.overview = ""
+        result.overview_stats = final_overview_stats
         result.background_notes = bg_notes
 
         return result
@@ -1050,7 +1074,10 @@ class AIAnalyzer:
                 f"AI 响应 schema_version 不匹配: {schema_version or '缺失'}",
             )
 
-        overview = str(data.get("overview", "") or "").strip()
+        raw_overview = data.get("overview")
+        if not isinstance(raw_overview, str):
+            return "", {}, [], "AI 响应 overview 必须为字符串"
+        overview = raw_overview.strip()
 
         raw_items = data.get("items")
         if not isinstance(raw_items, list):
@@ -1059,7 +1086,10 @@ class AIAnalyzer:
         for raw_item in raw_items:
             if not isinstance(raw_item, dict):
                 return "", {}, [], "AI 响应 items 包含非对象元素"
-            topic = str(raw_item.get("topic_group", "") or "").strip()
+            raw_topic = raw_item.get("topic_group")
+            if not isinstance(raw_topic, str):
+                return "", {}, [], "AI 响应 topic_group 必须为字符串"
+            topic = raw_topic.strip()
             raw_events = raw_item.get("events")
             if not topic or not isinstance(raw_events, list) or topic in items:
                 return "", {}, [], "AI 响应 topic_group 缺失、重复或 events 非数组"
@@ -1067,26 +1097,42 @@ class AIAnalyzer:
             for raw_event in raw_events:
                 if not isinstance(raw_event, dict):
                     return "", {}, [], f"议题 {topic} 包含非对象 event"
+                for field_name in ("title", "summary", "analysis"):
+                    if not isinstance(raw_event.get(field_name), str):
+                        return (
+                            "",
+                            {},
+                            [],
+                            f"议题 {topic} 的 event {field_name} 必须为字符串",
+                        )
                 raw_ids = raw_event.get("evidence_ids")
                 if not isinstance(raw_ids, list):
                     return "", {}, [], f"议题 {topic} 的 evidence_ids 非数组"
-                evidence_ids = [str(value).strip() for value in raw_ids if str(value).strip()]
-                title = str(raw_event.get("title", "") or "").strip()
-                if not title or not evidence_ids:
-                    return "", {}, [], f"议题 {topic} 的 event 缺少 title/evidence_ids"
+                if not 1 <= len(raw_ids) <= 3:
+                    return "", {}, [], f"议题 {topic} 的 event 必须绑定 1 至 3 个 evidence_id"
+                if any(
+                    not isinstance(value, str) or not value.strip()
+                    for value in raw_ids
+                ):
+                    return "", {}, [], f"议题 {topic} 的 evidence_ids 必须为非空字符串"
+                evidence_ids = [value.strip() for value in raw_ids]
+                if len(set(evidence_ids)) != len(evidence_ids):
+                    return "", {}, [], f"议题 {topic} 的 event 重复使用 evidence_id"
+                title = raw_event["title"].strip()
+                if not title:
+                    return "", {}, [], f"议题 {topic} 的 event 缺少 title"
                 events.append({
                     "title": title,
-                    "summary": str(raw_event.get("summary", "") or "").strip(),
-                    "analysis": str(raw_event.get("analysis", "") or "").strip(),
+                    "summary": raw_event["summary"].strip(),
+                    "analysis": raw_event["analysis"].strip(),
                     "evidence_ids": evidence_ids,
                 })
             items[topic] = {"events": events}
 
-        background = []
-        raw_bg = data.get("background_notes", [])
-        if isinstance(raw_bg, list):
-            background = [str(x) for x in raw_bg if x]
-        else:
+        raw_bg = data.get("background_notes")
+        if not isinstance(raw_bg, list):
             return "", {}, [], "AI 响应 background_notes 必须为数组"
+        if raw_bg:
+            return "", {}, [], "AI 响应 background_notes 必须为空数组"
 
-        return overview, items, background, error
+        return overview, items, [], error

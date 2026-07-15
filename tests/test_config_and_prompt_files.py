@@ -75,6 +75,8 @@ class TestEnvironmentPromptFile(unittest.TestCase):
         self.assertIn("传播对象、涉及主体或地点、当前可见进展", self.text)
         self.assertIn("不要用类别背景凑字数", self.text)
         self.assertIn("summary 输出空字符串", self.text)
+        self.assertIn("source_excerpt", self.text)
+        self.assertIn("不得扩大到摘录之外", self.text)
 
     def test_event_output_binds_stable_evidence_ids(self):
         self.assertIn('"schema_version": "environment-events-v1"', self.text)

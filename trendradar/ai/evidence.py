@@ -14,6 +14,7 @@
 """
 
 import hashlib
+import html
 import re
 from typing import Any, Callable, Dict, List, Optional
 
@@ -90,6 +91,7 @@ _EMOTION_RE = re.compile("|".join(re.escape(w) for w in _EMOTION_WORDS), re.IGNO
 _HIGH_D_PLATFORM_COUNT = 2
 # 任一 D 层 rank <= 此值视为"高热"之一
 _HIGH_D_RANK = 10
+_SOURCE_EXCERPT_MAX_CHARS = 600
 
 
 def _min_rank(title: Dict[str, Any]) -> Optional[int]:
@@ -128,6 +130,15 @@ def _evidence_id(title: Dict[str, Any]) -> str:
         or ""
     )
     return _stable_identifier("ev", source, title.get("title", ""), _title_url(title))
+
+
+def _source_excerpt(value: Any) -> str:
+    """Normalize a bounded publisher-supplied excerpt for the AI evidence prompt."""
+    if not isinstance(value, str):
+        return ""
+    without_tags = re.sub(r"<[^>]+>", " ", value)
+    normalized = re.sub(r"\s+", " ", html.unescape(without_tags)).strip()
+    return normalized[:_SOURCE_EXCERPT_MAX_CHARS]
 
 
 def build_evidence(
@@ -301,15 +312,27 @@ def _pick_samples(titles: List[Dict], resolver, limit: int = 3) -> List[Dict[str
         if not title or dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        result.append({
+        tier = resolver.tier_of(name) if name else "unknown"
+        sample = {
             "evidence_id": _evidence_id(t),
             "title": title,
             "source": name,
-            "tier": resolver.tier_of(name) if name else "unknown",
+            "tier": tier,
             "trend": _rank_trend(t),
             "rank": _min_rank(t),
             "sentiment_flag": bool(_EMOTION_RE.search(title)),
-        })
+        }
+        # A/B/C publisher excerpts can support a concrete event summary.  D
+        # layer text remains a propagation signal and is never promoted into a
+        # factual excerpt merely because a source supplied a description.
+        excerpt = (
+            _source_excerpt(t.get("summary"))
+            if tier in {"A", "B", "C"}
+            else ""
+        )
+        if excerpt:
+            sample["source_excerpt"] = excerpt
+        result.append(sample)
         if limit > 0 and len(result) >= limit:
             break
     return result
@@ -500,11 +523,15 @@ def _format_sample_line(sample: Dict[str, Any]) -> str:
     tier_tag = f"[{tier}]" if tier and tier != "unknown" else ""
     rank = sample.get("rank")
     rank_text = f"，第{rank}名" if isinstance(rank, int) and rank > 0 else ""
-    return (
+    line = (
         f"    · evidence_id={sample.get('evidence_id', '-')} "
         f"{tier_tag}[{src}] {sample.get('title', '')}"
         f"（{sample.get('trend', '')}{rank_text}）"
     )
+    excerpt = str(sample.get("source_excerpt", "") or "").strip()
+    if excerpt:
+        line += f"\n      来源摘录（仅支持本事件摘要）：{excerpt}"
+    return line
 
 
 def render_evidence_for_prompt(

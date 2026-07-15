@@ -180,6 +180,8 @@ class TestEventReclassification(unittest.TestCase):
         self.assertEqual(len(result.silence_gap), 1)
         self.assertEqual(result.silence_gap[0]["factual_boundary"], EV.LABELS["silence_gap"]["factual_boundary"])
         self.assertEqual(len(result.high_heat_unverified), 3)
+        self.assertEqual(result.overview_stats["label_counts"]["cross_layer_verified"], 0)
+        self.assertEqual(result.overview, "")
 
     def test_overview_stats_are_recomputed_from_split_events(self):
         first_id = evidence_id("低位传播甲", "微博")
@@ -289,6 +291,37 @@ class TestEnvironmentFailures(unittest.TestCase):
         )
         self.assertFalse(result.success)
         self.assertIn("JSON 解析错误", result.error)
+
+    def test_event_protocol_limits_and_program_owned_background_are_enforced(self):
+        az = make_analyzer()
+        too_many_ids = response({
+            "X": [event("合并过宽", "摘要", "分析", "ev_1", "ev_2", "ev_3", "ev_4")]
+        })
+        _, _, _, ids_error = az._parse_environment_response(too_many_ids)
+        self.assertIn("1 至 3", ids_error)
+
+        repeated_id = response({
+            "X": [event("重复绑定", "摘要", "分析", "ev_1", "ev_1")]
+        })
+        _, _, _, duplicate_error = az._parse_environment_response(repeated_id)
+        self.assertIn("重复使用 evidence_id", duplicate_error)
+
+        with_background = json.loads(response({"X": []}))
+        with_background["background_notes"] = ["模型不应写背景项"]
+        _, _, _, background_error = az._parse_environment_response(
+            json.dumps(with_background, ensure_ascii=False)
+        )
+        self.assertIn("必须为空数组", background_error)
+
+    def test_response_schema_caps_event_evidence_and_background(self):
+        schema = B.analyzer.ENVIRONMENT_RESPONSE_FORMAT["json_schema"]["schema"]
+        event_ids = (
+            schema["properties"]["items"]["items"]["properties"]["events"]
+            ["items"]["properties"]["evidence_ids"]
+        )
+        self.assertEqual(event_ids["minItems"], 1)
+        self.assertEqual(event_ids["maxItems"], 3)
+        self.assertEqual(schema["properties"]["background_notes"]["maxItems"], 0)
 
     def test_max_tokens_is_rejected_and_metadata_preserved(self):
         az = make_analyzer(BATCH_MAX_EVIDENCE=1)
@@ -410,9 +443,15 @@ class TestProviderSpecificConfig(unittest.TestCase):
 
     def test_low_reasoning_is_automatic_only_for_gemini_3(self):
         gemini = self._client_config("gemini/gemini-3.5-flash")
+        vertex = self._client_config("vertex_ai/gemini-3.5-flash")
+        openai_proxy = self._client_config("openai/gemini-3.5-flash")
         deepseek = self._client_config("deepseek/deepseek-v4-flash")
         self.assertEqual(gemini["EXTRA_PARAMS"]["reasoning_effort"], "low")
         self.assertIsNone(gemini["TEMPERATURE"])
+        self.assertEqual(vertex["EXTRA_PARAMS"]["reasoning_effort"], "low")
+        self.assertIsNone(vertex["TEMPERATURE"])
+        self.assertNotIn("reasoning_effort", openai_proxy["EXTRA_PARAMS"])
+        self.assertNotIn("TEMPERATURE", openai_proxy)
         self.assertNotIn("reasoning_effort", deepseek["EXTRA_PARAMS"])
 
 
