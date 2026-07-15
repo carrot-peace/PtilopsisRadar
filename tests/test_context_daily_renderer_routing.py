@@ -123,7 +123,7 @@ class _RoutingTestBase(unittest.TestCase):
         self.assertEqual(len(self.dv2_calls), 1, "应调用 render_daily_report_v2")
         self.assertEqual(len(self.nl_calls), 0, "daily route 不应调用 render_newsletter_report")
         self.assertIn("<!DOCTYPE html>", out)
-        self.assertIn("<h1>每日盘面 · v2</h1>", out)
+        self.assertIn("<h1>信息环境日报</h1>", out)
 
 
 class TestDailyUsesDailyReportV2(_RoutingTestBase):
@@ -192,7 +192,7 @@ class TestDailyUsesDailyReportV2(_RoutingTestBase):
             self.assertTrue(os.path.exists(path), path)
             with open(path, encoding="utf-8") as f:
                 content = f.read()
-            self.assertIn("<h1>每日盘面 · v2</h1>", content)
+            self.assertIn("<h1>信息环境日报</h1>", content)
             self.assertIn("日报路径总览", content)
         self.assertFalse(os.path.exists(os.path.join("output", "public", "current", "full.html")))
 

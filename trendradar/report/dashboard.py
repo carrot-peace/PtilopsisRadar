@@ -24,8 +24,9 @@ from typing import Any, Dict, List, Optional
 
 from trendradar.ai.evidence import SECTION_ORDER, derive_radar_readout
 
-# state.json schema 版本（future /now 据此读取）
-DASHBOARD_SCHEMA_VERSION = 1
+# state.json schema 版本（future /now 据此读取）。v2 将 ``label``
+# 从关键词组 bucket 改为事件自身的读者状态。
+DASHBOARD_SCHEMA_VERSION = 2
 
 # 发布根落地页 output/public/index.html：静态、幂等。
 # 路由：current → dashboard（current/index.html）；daily → full report（daily/full.html）。
@@ -41,11 +42,11 @@ PUBLIC_LANDING_HTML = """<!DOCTYPE html>
 body{background:#fff;color:#111;padding:0 20px;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;line-height:1.6}
 .wrap{max-width:680px;margin:0 auto;padding-top:48px}
-.brand{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#999}
-h1{font-size:22px;font-weight:700;margin:6px 0 28px;border-bottom:2px solid #111;padding-bottom:18px}
-a.card{display:block;border:1px solid #e5e5e5;padding:18px 20px;margin-bottom:12px;
+.brand{font-size:12px;font-weight:600;color:#555}
+h1{font-size:25px;font-weight:650;margin:10px 0 26px}
+a.card{display:block;padding:8px 0;margin-bottom:10px;
   text-decoration:none;color:#111}
-a.card:hover{border-color:#111}
+a.card:hover .t{text-decoration:underline;text-underline-offset:3px}
 a.card .t{font-size:16px;font-weight:700}
 a.card .d{font-size:13px;color:#777;margin-top:4px}
 </style>
@@ -66,12 +67,21 @@ a.card .d{font-size:13px;color:#777;margin-top:4px}
 </body>
 </html>"""
 
-# 呈现层栏目标签（异常信号分类）
-_DASH_CAT_LABELS: Dict[str, str] = {
-    "cross_layer_verified": "跨层",
-    "high_heat_unverified": "高热",
-    "chinese_only_hot": "中文独热",
-    "silence_gap": "沉默温差",
+# bucket 只是历史产物的兼容兜底；新事件优先使用自身
+# ``verification_status``，避免拆分后仍被旧议题组标签覆盖。
+_BUCKET_STATUS_FALLBACKS: Dict[str, str] = {
+    "cross_layer_verified": "多层来源呼应",
+    "high_heat_unverified": "单点高热，来源待补",
+    "chinese_only_hot": "中文平台热度上升",
+    "silence_gap": "社交端响应偏弱",
+}
+
+_READER_STATUS_LABELS: Dict[str, str] = {
+    "跨层有呼应": "多层来源呼应",
+    "高热待核实": "单点高热，来源待补",
+    "情绪聚集": "情绪传播集中",
+    "沉默温差": "社交端响应偏弱",
+    "中文源呼应(缺A/B背景)": "中文平台热度上升",
 }
 
 # top_items / state.json 允许透出的字段白名单（发布安全：绝不 dump bucket 原始 dict）
@@ -88,51 +98,56 @@ _SAFE_ITEM_FIELDS = (
 _DASHBOARD_CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#fff;--text:#111;--muted:#555;--faint:#999;
-  --border:#e5e5e5;--risk:#b91c1c;
-  --max:680px;
+  --paper:#fff;--ink:#202327;--text:#454a51;--muted:#747b84;--faint:#9da2a9;--risk:#8a3b3b;
+  --reading-size:15px;--max:720px;
 }
 body{
-  background:var(--bg);color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--paper);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   font-size:15px;line-height:1.72;padding:0 20px;
 }
-.wrap{max-width:var(--max);margin:0 auto;padding-top:0}
-
-.cur-head{padding:24px 0 18px;border-bottom:2px solid var(--text);margin-bottom:22px;
-  display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px}
-.cur-brand{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text)}
+.wrap{max-width:var(--max);margin:0 auto;padding-bottom:28px}
+.cur-head{display:grid;grid-template-columns:1fr auto;grid-template-areas:"brand date" "title title";
+  column-gap:24px;align-items:end;padding:34px 0 8px;margin-bottom:28px}
+.cur-brand{grid-area:brand;font-size:12px;font-weight:600;color:var(--ink)}
 .cur-ts{font-size:11px;color:var(--faint)}
+.cur-head h1{grid-area:title;font-size:25px;font-weight:650;letter-spacing:-.02em;line-height:1.25;margin-top:12px}
 
-.cur-lead{font-size:13px;color:var(--muted);margin-bottom:20px}
-.cur-lead strong{font-size:20px;font-weight:700;color:var(--text);margin-right:4px;vertical-align:baseline}
+.cur-lead{font-size:var(--reading-size);color:var(--text);margin-bottom:24px}
+.cur-lead strong{font-size:var(--reading-size);font-weight:650;color:var(--ink)}
+.cur-overview{margin-bottom:28px}
+.cur-overview .sec-label{margin-bottom:4px}
+.cur-overview p{font-size:var(--reading-size);line-height:1.8;color:var(--text)}
 
-.sec-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--faint);margin-bottom:8px}
+.sec-label{font-size:20px;font-weight:600;color:var(--ink);line-height:1.4;margin-bottom:10px}
 
-.cur-signals{border-top:1px solid var(--border)}
-.cur-row{display:grid;grid-template-columns:52px 1fr;gap:0 12px;
-  padding:11px 0;border-bottom:1px solid var(--border)}
-.cur-row:last-child{border-bottom:none}
-.cur-cat{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
-  color:var(--muted);padding-top:3px;line-height:1.3}
-.cur-cat.dim{text-transform:none;font-weight:400;color:var(--faint)}
-.cur-topic{font-size:14px;font-weight:600;color:var(--text);line-height:1.4;margin-bottom:3px}
-.cur-topic.plain{font-weight:400}
-.cur-heat{font-size:11px;color:var(--faint);line-height:1.4}
-.cur-risk{font-size:11px;color:var(--risk);margin-top:5px}
-.cur-risk::before{content:"\\2691  "}
+.cur-row+.cur-row{margin-top:18px}
+.cur-topic{font-size:var(--reading-size);font-weight:650;color:var(--ink);line-height:1.45}
+.cur-summary{font-size:var(--reading-size);color:var(--text);line-height:1.68}
+.cur-meta{font-size:11px;color:var(--faint);line-height:1.45;margin-top:6px}
+.cur-risk{font-size:11px;color:var(--muted);line-height:1.55;margin-top:5px}
 .t-new{font-size:9px;font-weight:700;color:var(--risk);padding:0 3px;
   border:1px solid var(--risk);border-radius:2px}
 
-.cur-track{margin-top:20px;border-top:1px solid var(--border);padding-top:4px}
+.cur-track{margin-top:26px}
+.cur-track>summary{font-size:var(--reading-size);font-weight:400;color:var(--muted);cursor:pointer;list-style:none}
+.cur-track>summary::-webkit-details-marker{display:none}
+.cur-track>summary::marker{content:""}
+.track-body{margin-top:9px}
+.track-row+.track-row{margin-top:12px}
+.track-title{font-size:var(--reading-size);font-weight:600;color:var(--ink);line-height:1.5}
+.track-meta{font-size:10px;color:var(--faint);line-height:1.5;margin-top:2px}
 
-.cur-sup{font-size:11px;color:var(--faint);margin-top:22px;padding-top:14px;
-  border-top:1px solid var(--border);line-height:1.7}
+.cur-sup{font-size:11px;color:var(--faint);margin-top:24px;line-height:1.7}
 
-.cur-empty{font-size:13px;color:var(--faint);padding:20px 0}
+.cur-empty{font-size:var(--reading-size);color:var(--muted);padding:4px 0}
 
-a{color:var(--text);text-decoration:underline}
+a{color:var(--ink);text-decoration:underline}
+@media(max-width:560px){
+  body{padding:0 18px}
+  .cur-head{grid-template-columns:1fr;grid-template-areas:"brand" "title" "date";padding-top:25px}
+  .cur-ts{margin-top:7px}
+}
 """
 
 
@@ -149,18 +164,94 @@ def _group_for_mode(mode: str) -> str:
 
 
 def _is_environment(ai_analysis: Optional[Any]) -> bool:
+    """Accept deterministic event fallbacks as environment results.
+
+    ``success`` gates AI-authored prose, not analyzer-owned evidence entries.
+    """
     return bool(
         ai_analysis is not None
-        and getattr(ai_analysis, "success", False) is True
         and getattr(ai_analysis, "report_style", "") == "environment"
     )
 
 
-def _safe_item(item: Dict[str, Any], label: str) -> Dict[str, Any]:
+def _is_ai_backed(ai_analysis: Optional[Any]) -> bool:
+    return bool(
+        _is_environment(ai_analysis)
+        and getattr(ai_analysis, "success", False) is True
+    )
+
+
+def _program_overview(radar: Dict[str, Any]) -> str:
+    """Build a deterministic lead without reusing partial model prose."""
+    anomaly = int(radar.get("anomaly", 0) or 0)
+    parts: List[str] = []
+    for key, label in (
+        ("cross_layer", "多层来源呼应"),
+        ("chinese_only", "中文源内部升温"),
+        ("high_heat", "社交平台单点高热"),
+        ("silence_gap", "背景源热、社交端静"),
+    ):
+        count = int(radar.get(key, 0) or 0)
+        if count:
+            parts.append(f"{count} 个{label}")
+    detail = "、".join(parts) if parts else "未发现达到异常阈值的主信号"
+    return f"本轮识别 {anomaly} 个异常事件：{detail}。"
+
+
+def _reader_status(item: Dict[str, Any], bucket: str) -> str:
+    """使用事件自身核验状态；仅对旧产物回退到 bucket。"""
+    detail = item.get("evidence_detail") or {}
+    if isinstance(detail, dict):
+        present = set(detail.get("source_tiers_present") or [])
+        by_tier = detail.get("sources_by_tier") or {}
+        if isinstance(by_tier, dict):
+            present.update(tier for tier in ("A", "B", "C", "D") if by_tier.get(tier))
+        if not present.intersection({"A", "B"}) and {"C", "D"}.issubset(present):
+            d_count = int(detail.get("d_tier_platform_count", 0) or 0)
+            platform_count = int(detail.get("platform_count", 0) or 0)
+            if d_count >= 3 or platform_count >= 5:
+                return "中文多源覆盖"
+            if d_count >= 2 or platform_count >= 3:
+                return "中文多平台覆盖"
+            return "中文源有呼应"
+
+    raw = str(item.get("verification_status", "") or "").strip()
+    if raw:
+        return _READER_STATUS_LABELS.get(raw, raw)
+    return _BUCKET_STATUS_FALLBACKS.get(bucket, "")
+
+
+def _event_bucket(item: Dict[str, Any], fallback: str) -> str:
+    """把事件状态映射回统计维度，不继承错置的议题组 bucket。"""
+    status = str(item.get("verification_status", "") or "").strip()
+    return {
+        "跨层有呼应": "cross_layer_verified",
+        "高热待核实": "high_heat_unverified",
+        "中文源呼应(缺A/B背景)": "chinese_only_hot",
+        "中文专业来源": "chinese_only_hot",
+        "沉默温差": "silence_gap",
+    }.get(status, fallback)
+
+
+def _event_summary(item: Dict[str, Any]) -> str:
+    """只返回事件级摘要，拒绝旧的分类组统一文案。"""
+    for key in ("summary", "analysis"):
+        text = str(item.get(key, "") or "").strip()
+        if text and not text.startswith(("本组", "该组", "此组")):
+            return text
+    return ""
+
+
+def _safe_item(item: Dict[str, Any], bucket: str) -> Dict[str, Any]:
     """从 bucket item 中**按白名单**挑出发布安全字段，绝不透传原始 dict。"""
-    out: Dict[str, Any] = {"label": label}
+    out: Dict[str, Any] = {"label": _reader_status(item, bucket)}
     for key in _SAFE_ITEM_FIELDS:
         if key == "label":
+            continue
+        if key == "summary":
+            summary = _event_summary(item)
+            if summary:
+                out[key] = summary
             continue
         if key in item:
             out[key] = item.get(key)
@@ -170,11 +261,34 @@ def _safe_item(item: Dict[str, Any], label: str) -> Dict[str, Any]:
 def _collect_safe_items(ai_analysis: Any) -> List[Dict[str, Any]]:
     """按 SECTION_ORDER 收集各栏目 item 的发布安全摘要（扁平，带 label）。"""
     items: List[Dict[str, Any]] = []
-    for label in SECTION_ORDER:
-        for item in (getattr(ai_analysis, label, None) or []):
+    for bucket in SECTION_ORDER:
+        for item in (getattr(ai_analysis, bucket, None) or []):
             if isinstance(item, dict):
-                items.append(_safe_item(item, label))
+                items.append(_safe_item(item, bucket))
     return items
+
+
+def _event_radar(ai_analysis: Any) -> Dict[str, Any]:
+    """从实际事件条目重算可见计数，避免沿用拆分前议题组数。"""
+    radar = derive_radar_readout(getattr(ai_analysis, "overview_stats", {}) or {})
+    counts = {bucket: 0 for bucket in SECTION_ORDER}
+    total = 0
+    for fallback in SECTION_ORDER:
+        for item in (getattr(ai_analysis, fallback, None) or []):
+            if not isinstance(item, dict):
+                continue
+            total += 1
+            bucket = _event_bucket(item, fallback)
+            if bucket in counts:
+                counts[bucket] += 1
+    radar.update({
+        "anomaly": total,
+        "cross_layer": counts.get("cross_layer_verified", 0),
+        "high_heat": counts.get("high_heat_unverified", 0),
+        "chinese_only": counts.get("chinese_only_hot", 0),
+        "silence_gap": counts.get("silence_gap", 0),
+    })
+    return radar
 
 
 def _fmt_display(generated_at: datetime) -> str:
@@ -209,8 +323,12 @@ def build_dashboard_state(
     top_items: List[Dict[str, Any]] = []
 
     if _is_environment(ai_analysis):
-        radar = derive_radar_readout(getattr(ai_analysis, "overview_stats", {}) or {})
-        overview = (getattr(ai_analysis, "overview", "") or "").strip()
+        radar = _event_radar(ai_analysis)
+        overview = (
+            (getattr(ai_analysis, "overview", "") or "").strip()
+            if _is_ai_backed(ai_analysis)
+            else _program_overview(radar)
+        )
         top_items = _collect_safe_items(ai_analysis)
 
     return {
@@ -233,23 +351,33 @@ def build_dashboard_state(
 
 
 def _render_signal_rows(ai_analysis: Any) -> str:
-    """异常信号列表：每条 = 分类标签 + topic（可换行）+ 热度 + 风险提示。"""
+    """事件列表：逐条标题 + 详细摘要，状态放入次要元数据。"""
     rows: List[str] = []
-    for key in SECTION_ORDER:
-        cat_label = _DASH_CAT_LABELS.get(key, key)
-        for item in (getattr(ai_analysis, key, None) or []):
+    for bucket in SECTION_ORDER:
+        for item in (getattr(ai_analysis, bucket, None) or []):
             if not isinstance(item, dict):
                 continue
             topic = _esc(item.get("topic", ""))
+            summary = _esc(_event_summary(item))
             heat = _esc(item.get("highest_heat", ""))
             risk = item.get("risk_note")
-            heat_html = f'<div class="cur-heat">{heat}</div>' if heat else ""
+            status = _esc(_reader_status(item, bucket))
+            count = item.get("platform_count")
+            meta_parts = [status] if status else []
+            if isinstance(count, int) and count > 0:
+                meta_parts.append(f"{count} 个来源")
+            if heat and heat != "-":
+                meta_parts.append(heat)
+            meta_html = (
+                f'<div class="cur-meta">{" · ".join(meta_parts)}</div>'
+                if any(meta_parts)
+                else ""
+            )
+            summary_html = f'<div class="cur-summary">{summary}</div>' if summary else ""
             risk_html = f'<div class="cur-risk">{_esc(risk)}</div>' if risk else ""
             rows.append(
-                f'<div class="cur-row">'
-                f'<div class="cur-cat">{_esc(cat_label)}</div>'
-                f'<div><div class="cur-topic">{topic}</div>{heat_html}{risk_html}</div>'
-                f"</div>"
+                f'<article class="cur-row"><h3 class="cur-topic">{topic}</h3>'
+                f'{summary_html}{meta_html}{risk_html}</article>'
             )
     return "\n".join(rows)
 
@@ -277,10 +405,8 @@ def _render_hotlist_rows(stats: Optional[List[Dict[str, Any]]]) -> str:
         )
         src_line = " · ".join(src_parts) + extra
         rows.append(
-            f'<div class="cur-row">'
-            f'<div class="cur-cat dim">{word}</div>'
-            f'<div><div class="cur-topic plain">{top_title}</div>'
-            f'<div class="cur-heat">{src_line}</div></div>'
+            f'<div class="track-row"><div class="track-title">{top_title}</div>'
+            f'<div class="track-meta">{word} · {src_line}</div>'
             f"</div>"
         )
     return "\n".join(rows)
@@ -304,10 +430,8 @@ def _render_rss_rows(rss_items: Optional[List[Dict[str, Any]]]) -> str:
             else ""
         )
         rows.append(
-            f'<div class="cur-row">'
-            f'<div class="cur-cat dim">{word}</div>'
-            f'<div><div class="cur-topic plain">{top_title}</div>'
-            f'<div class="cur-heat">{src}&nbsp;{time_d}{extra}</div></div>'
+            f'<div class="track-row"><div class="track-title">{top_title}</div>'
+            f'<div class="track-meta">{word} · {src}&nbsp;{time_d}{extra}</div>'
             f"</div>"
         )
     return "\n".join(rows)
@@ -334,29 +458,45 @@ def render_current_dashboard_html(
     """
     group = _group_for_mode(mode)
     title = "每日盘面" if group == "daily" else "当前盘面"
+    page_title = "信息环境日报" if group == "daily" else "信息环境盘面"
     display_time = _fmt_display(generated_at)
 
     # ── lead + 异常信号区 ──
     anomaly = 0
     signal_section = ""
     sup_html = ""
+    overview_html = ""
     if _is_environment(ai_analysis):
-        radar = derive_radar_readout(getattr(ai_analysis, "overview_stats", {}) or {})
+        radar = _event_radar(ai_analysis)
         anomaly = radar.get("anomaly", 0)
         suppressed_n = radar.get("suppressed", 0)
+        overview = (
+            str(getattr(ai_analysis, "overview", "") or "").strip()
+            if _is_ai_backed(ai_analysis)
+            else _program_overview(radar)
+        )
+        if overview:
+            overview_html = (
+                '<section class="cur-overview"><h2 class="sec-label">导读</h2>'
+                f'<p>{_esc(overview)}</p></section>'
+            )
 
         if anomaly > 0:
             signals_html = _render_signal_rows(ai_analysis)
             signal_section = (
-                '<div class="sec-label">异常信号</div>'
-                f'<div class="cur-signals">{signals_html}</div>'
+                '<section><h2 class="sec-label">重点</h2>'
+                f'<div class="cur-signals">{signals_html}</div></section>'
             )
             lead_html = (
-                f'<div class="cur-lead"><strong>{anomaly}</strong>个异常信号'
-                f" · {_esc(title)}</div>"
+                f'<div class="cur-lead">{_esc(title)}共有 <strong>{anomaly} 个事件</strong>进入重点。</div>'
             )
-        else:
+        elif _is_ai_backed(ai_analysis) or bool(getattr(ai_analysis, "skipped", False)):
             lead_html = f'<div class="cur-lead">{_esc(title)} · 未检测到异常信号</div>'
+        else:
+            lead_html = (
+                f'<div class="cur-lead">{_esc(title)} · '
+                "AI 摘要不可用，当前没有可展示的事件</div>"
+            )
 
         # 已抑制脚注
         sup_names: List[str] = []
@@ -387,8 +527,8 @@ def render_current_dashboard_html(
     if hotlist_rows or rss_rows:
         inner = "\n".join(x for x in (hotlist_rows, rss_rows) if x)
         tracking_html = (
-            '<div class="cur-track"><div class="cur-signals">'
-            f"{inner}</div></div>"
+            '<details class="cur-track"><summary>数据附录 · 原始热榜</summary>'
+            f'<div class="track-body">{inner}</div></details>'
         )
 
     # 完全无内容时的兜底
@@ -409,8 +549,10 @@ def render_current_dashboard_html(
   <div class="cur-head">
     <span class="cur-brand">Ptilopsis Radar</span>
     <span class="cur-ts">{_esc(display_time)}</span>
+    <h1>{_esc(page_title)}</h1>
   </div>
   {lead_html}
+  {overview_html}
   {signal_section}
   {tracking_html}
   {sup_html}

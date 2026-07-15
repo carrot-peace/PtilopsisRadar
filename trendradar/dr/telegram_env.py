@@ -49,7 +49,7 @@ def build_dr_telegram_sink_config_from_env(
     )
 
     timeout_raw = env.get("PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS")
-    if timeout_raw is None:
+    if timeout_raw is None or not timeout_raw.strip():
         timeout_seconds = DRTelegramSinkConfig.timeout_seconds  # type: ignore[attr-defined]
     else:
         try:
@@ -69,7 +69,7 @@ def build_dr_telegram_sink_config_from_env(
         parse_mode = None
 
     attach_raw = env.get("PTILOPSIS_DR_TELEGRAM_ATTACH_HTML")
-    attach_html = True if attach_raw is None else _parse_bool_like(
+    attach_html = True if attach_raw is None or not attach_raw.strip() else _parse_bool_like(
         attach_raw, "PTILOPSIS_DR_TELEGRAM_ATTACH_HTML"
     )
 

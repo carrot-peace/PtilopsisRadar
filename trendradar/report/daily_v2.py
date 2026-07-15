@@ -45,6 +45,7 @@ from trendradar.ai.evidence import (
     LABELS,
     RISK_NOTE_HIGH_HEAT,
     SECTION_ORDER,
+    derive_radar_readout,
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -53,7 +54,7 @@ from trendradar.ai.evidence import (
 
 #: Shown when an AI-backed report is missing its overview (Rule 1).
 DEGRADED_OVERVIEW_NOTICE = (
-    "本次日报缺少可用总览，以下内容仅作为结构化候选与证据附录展示。"
+    "AI 总览不可用；今日盘面改由程序统计生成，议题正文仅展示可核对的传播文本与元数据。"
 )
 
 #: Shown when there is no usable environment AI result at all (no-AI artifact).
@@ -71,16 +72,26 @@ DOMESTIC_HIGH_CONFIDENCE = "domestic_high_confidence"
 DOMESTIC_PUBLIC_EVENT = "domestic_public_event"
 
 _DOMESTIC_STATUS_LABELS: Dict[str, str] = {
-    DOMESTIC_CONFIRMED: "国内已确认",
-    DOMESTIC_HIGH_CONFIDENCE: "国内高可信",
-    DOMESTIC_PUBLIC_EVENT: "国内公共事件",
+    # Evidence is aggregated at topic-group level, so user-facing labels must
+    # describe source coverage rather than imply event-level confirmation.
+    DOMESTIC_CONFIRMED: "中文多源覆盖",
+    DOMESTIC_HIGH_CONFIDENCE: "中文多平台覆盖",
+    DOMESTIC_PUBLIC_EVENT: "中文源有呼应",
 }
 
-_SECTION_TITLES: Dict[str, str] = {
-    "cross_layer_verified": "跨层来源共振",
-    "high_heat_unverified": "高热待核实",
-    "chinese_only_hot": "中文独热",
-    "silence_gap": "沉默温差",
+_READER_STATUS_LABELS: Dict[str, str] = {
+    "跨层有呼应": "多层来源呼应",
+    "高热待核实": "单点高热，来源待补",
+    "情绪聚集": "情绪传播集中",
+    "沉默温差": "社交端响应偏弱",
+    "中文源呼应(缺A/B背景)": "中文平台热度上升",
+}
+
+_BUCKET_STATUS_FALLBACKS: Dict[str, str] = {
+    "cross_layer_verified": "多层来源呼应",
+    "high_heat_unverified": "单点高热，来源待补",
+    "chinese_only_hot": "中文平台热度上升",
+    "silence_gap": "社交端响应偏弱",
 }
 
 # Caps (Rule 6 / Rule 7).
@@ -121,6 +132,14 @@ def _program_template_texts() -> frozenset:
 
 _PROGRAM_TEMPLATE_TEXTS = _program_template_texts()
 
+_NEWSLETTER_REDUNDANT_RISK_FRAGMENTS = (
+    "当前仅能确认传播正在发生",
+    "缺少一手或国际背景源",
+    "不宜直接视为同一项重大事件",
+    "不宜直接视为事实性重大事件",
+    "背景源有信息，但中文社交平台未明显响应",
+)
+
 
 def is_generic_risk_template(text: Optional[str]) -> bool:
     """True if ``text`` is empty or only a generic risk/factual-boundary template.
@@ -133,6 +152,11 @@ def is_generic_risk_template(text: Optional[str]) -> bool:
     body = (text or "").strip()
     if not body:
         return True
+    # Old category-first prose is not an event summary.  Treat it as degraded
+    # so the renderer falls back to one evidence headline per event instead of
+    # leaking "group" language into the newsletter.
+    if body.startswith(("本组", "该组", "此组")):
+        return True
     if body in _PROGRAM_TEMPLATE_TEXTS:
         return True
     for frag in _GENERIC_RISK_FRAGMENTS:
@@ -142,6 +166,14 @@ def is_generic_risk_template(text: Optional[str]) -> bool:
             if len(stripped) <= 4:
                 return True
     return False
+
+
+def _show_item_risk(text: str) -> bool:
+    """Keep concrete cautions inline; leave repeated method caveats to the footer."""
+    note = (text or "").strip()
+    if not note or note in _PROGRAM_TEMPLATE_TEXTS:
+        return False
+    return not any(fragment in note for fragment in _NEWSLETTER_REDUNDANT_RISK_FRAGMENTS)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -160,7 +192,9 @@ _SPORTS_WORDS = (
 )
 _ESPORTS_WORDS = (
     "电竞", "LPL", "LCK", "S赛", "全球总决赛", "战队", "选手", "英雄联盟",
-    "KPL", "DOTA", "CSGO", "无畏契约", "出装", "对线", "团战", "Ban",
+    "KPL", "MSI", "季中冠军赛", "DOTA", "CSGO", "无畏契约", "出装", "对线",
+    "团战", "Ban", "BLG", "HLE", "T1", "G2", "TES", "EDG", "GEN", "LYON",
+    "Bin", "赛后数据", "数据雷达图", "Steam夏促", "游戏攻略",
 )
 
 # Structural-relevance overrides: when present, an item may be promoted even if
@@ -232,7 +266,14 @@ def is_noise_item(topic: str, samples: Optional[List[Dict]] = None) -> bool:
     geopolitical/institutional conflict, coordinated manipulation) keeps the
     item out of the noise bucket so it can be promoted.
     """
-    blob = _item_blob(topic, samples)
+    # Broad keyword groups can contain unrelated sample titles.  Classifying
+    # the whole group from one incidental sports title incorrectly suppresses
+    # useful entries such as a local-affairs group.  Samples are therefore
+    # consulted only for explicit unclassified single-story topics.
+    raw_topic = topic or ""
+    blob = raw_topic
+    if raw_topic.startswith(("高热未归类·", "未归类·")):
+        blob = _item_blob(raw_topic, samples)
     if structural_reason(blob):
         return False
     return classify_category(blob) is not None
@@ -297,12 +338,15 @@ class DailyItem:
 
     topic: str
     summary: str = ""          # what happened (concrete; never a risk template)
+    analysis: str = ""         # propagation structure; separate from summary
     risk_note: str = ""        # why verification/propagation risk exists
     evidence_note: str = ""    # source/platform spread
     status: str = ""           # confidence / status label
     next_watch: str = ""       # why it matters / next watch (when available)
     section: str = ""          # originating section key
     degraded: bool = False     # no concrete summary available
+    samples: List[Dict[str, Any]] = field(default_factory=list)
+    source_links: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -334,6 +378,7 @@ class DailyReportV2:
     degraded: bool = False
     degraded_notice: str = ""
     overview: str = ""
+    radar: Dict[str, Any] = field(default_factory=dict)
     main_items: List[DailyItem] = field(default_factory=list)
     suppressed: List[SuppressedGroup] = field(default_factory=list)
     raw_appendix: RawAppendix = field(default_factory=RawAppendix)
@@ -360,6 +405,19 @@ def _is_usable_environment_ai(ai_analysis: Any) -> bool:
     )
 
 
+def _is_environment_result(ai_analysis: Any) -> bool:
+    """Return true for both AI-backed and deterministic event results.
+
+    A failed/truncated model response can still carry analyzer-owned event
+    fallbacks.  Rendering those entries is safe; only AI-authored prose is
+    gated by ``success``.
+    """
+    return bool(
+        ai_analysis is not None
+        and getattr(ai_analysis, "report_style", "") == "environment"
+    )
+
+
 def _evidence_note(entry: Dict[str, Any]) -> str:
     parts: List[str] = []
     layers = (entry.get("source_layers") or "").strip()
@@ -376,39 +434,141 @@ def _evidence_note(entry: Dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
-def _status_for(entry: Dict[str, Any]) -> str:
+def _status_for(entry: Dict[str, Any], section: str = "") -> str:
     """Status label, upgraded to a domestic-confidence status when applicable."""
     detail = entry.get("evidence_detail") or {}
     domestic = _domestic_status_from_evidence(detail)
     if domestic:
         return _DOMESTIC_STATUS_LABELS.get(domestic, domestic)
     status = (entry.get("verification_status") or "").strip()
-    return status
+    if status:
+        return _READER_STATUS_LABELS.get(status, status)
+    return _BUCKET_STATUS_FALLBACKS.get(section, "")
+
+
+def _program_overview(radar: Dict[str, Any]) -> str:
+    """Render a deterministic brief from program-owned counts only."""
+    if not radar:
+        return ""
+    anomaly = int(radar.get("anomaly", 0) or 0)
+    parts: List[str] = []
+    for key, label in (
+        ("cross_layer", "多层来源呼应"),
+        ("chinese_only", "中文源内部升温"),
+        ("high_heat", "社交平台单点高热"),
+        ("silence_gap", "背景源热、社交端静"),
+    ):
+        count = int(radar.get(key, 0) or 0)
+        if count:
+            parts.append(f"{count} 个{label}")
+    detail = "、".join(parts) if parts else "未发现达到异常阈值的主信号"
+    suppressed = int(radar.get("suppressed", 0) or 0)
+    suffix = f"；另有 {suppressed} 个非重点项已折叠" if suppressed else ""
+    return f"今日识别 {anomaly} 个异常信号：{detail}{suffix}。"
+
+
+def _copy_samples(detail: Dict[str, Any]) -> List[Dict[str, Any]]:
+    samples: List[Dict[str, Any]] = []
+    for raw in detail.get("sample_titles", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title", "") or "").strip()
+        if not title:
+            continue
+        samples.append({
+            "title": title,
+            "source": str(raw.get("source", "") or "").strip(),
+            "tier": str(raw.get("tier", "") or "").strip(),
+            "trend": str(raw.get("trend", "") or "").strip(),
+        })
+        if len(samples) >= 3:
+            break
+    return samples
+
+
+def _copy_source_links(detail: Dict[str, Any]) -> List[Dict[str, Any]]:
+    links: List[Dict[str, Any]] = []
+    for raw in detail.get("source_links", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        url = str(raw.get("url", "") or "").strip()
+        title = str(raw.get("title", "") or "").strip()
+        if not url or not title:
+            continue
+        links.append({
+            "title": title,
+            "url": url,
+            "source": str(raw.get("source", "") or "").strip(),
+            "tier": str(raw.get("tier", "") or "").strip(),
+            "rank": raw.get("rank"),
+            "time": str(raw.get("time", "") or "").strip(),
+        })
+        if len(links) >= 5:
+            break
+    return links
 
 
 def _build_main_item(entry: Dict[str, Any], section: str) -> DailyItem:
     topic = str(entry.get("topic", "")).strip()
-    # Rule 2: concrete body only from summary/analysis — never factual_boundary.
-    body = (entry.get("summary") or entry.get("analysis") or "").strip()
+    # Rule 2: the event/propagation summary and structural interpretation are
+    # separate.  A generic risk boundary is accepted in neither field.
+    body = (entry.get("summary") or "").strip()
     degraded = is_generic_risk_template(body)
     if degraded:
         body = ""
+    analysis = (entry.get("analysis") or "").strip()
+    if is_generic_risk_template(analysis):
+        analysis = ""
     # Rule 3: risk/boundary text is a separate field.
     risk = (entry.get("risk_note") or entry.get("factual_boundary") or "").strip()
+    detail = entry.get("evidence_detail") or {}
     return DailyItem(
         topic=topic,
         summary=body,
+        analysis=analysis,
         risk_note=risk,
         evidence_note=_evidence_note(entry),
-        status=_status_for(entry),
+        status=_status_for(entry, section),
         section=section,
         degraded=degraded,
+        samples=_copy_samples(detail),
+        source_links=_copy_source_links(detail),
     )
 
 
 def _samples_of(entry: Dict[str, Any]) -> List[Dict]:
     detail = entry.get("evidence_detail") or {}
     return detail.get("sample_titles") or []
+
+
+def _refresh_radar_from_visible_content(model: DailyReportV2) -> None:
+    """Make DR dashboard counts reflect post-filter visible content."""
+    counts = {section: 0 for section in SECTION_ORDER}
+    status_sections = {
+        "多层来源呼应": "cross_layer_verified",
+        "单点高热，来源待补": "high_heat_unverified",
+        "中文平台热度上升": "chinese_only_hot",
+        "中文专业来源": "chinese_only_hot",
+        "中文多源覆盖": "chinese_only_hot",
+        "中文多平台覆盖": "chinese_only_hot",
+        "中文源有呼应": "chinese_only_hot",
+        "社交端响应偏弱": "silence_gap",
+    }
+    for item in model.main_items:
+        section = status_sections.get(item.status, item.section)
+        if section in counts:
+            counts[section] += 1
+    model.radar.update({
+        "anomaly": len(model.main_items),
+        "cross_layer": counts.get("cross_layer_verified", 0),
+        "high_heat": counts.get("high_heat_unverified", 0),
+        "chinese_only": counts.get("chinese_only_hot", 0),
+        "silence_gap": counts.get("silence_gap", 0),
+        "suppressed": max(
+            int(model.radar.get("suppressed", 0) or 0),
+            model.suppressed_count,
+        ),
+    })
 
 
 def build_daily_report_v2(
@@ -425,17 +585,33 @@ def build_daily_report_v2(
     model = DailyReportV2()
     model.failed_ids = list(report_data.get("failed_ids") or [])
 
+    environment_result = _is_environment_result(ai_analysis)
     ai_backed = _is_usable_environment_ai(ai_analysis)
     model.ai_backed = ai_backed
+    overview_stats = (
+        (getattr(ai_analysis, "overview_stats", {}) or {}) if ai_analysis else {}
+    )
+    if isinstance(overview_stats, dict) and overview_stats:
+        model.radar = derive_radar_readout(overview_stats)
 
-    if ai_backed:
-        model.method_note = (getattr(ai_analysis, "method_note", "") or "").strip()
-        overview = (getattr(ai_analysis, "overview", "") or "").strip()
-        model.overview = overview
-        # Rule 1: AI-backed reports require an overview.
-        if not overview:
-            model.degraded = True
-            model.degraded_notice = DEGRADED_OVERVIEW_NOTICE
+    if environment_result:
+        if ai_backed:
+            model.method_note = (getattr(ai_analysis, "method_note", "") or "").strip()
+            overview = (getattr(ai_analysis, "overview", "") or "").strip()
+            model.overview = overview
+            # Rule 1: AI-backed reports require an overview.
+            if not overview:
+                model.degraded = True
+                model.degraded_notice = DEGRADED_OVERVIEW_NOTICE
+                model.overview = _program_overview(model.radar)
+        else:
+            # Preserve analyzer-owned event fallbacks, but never present a
+            # partial/invalid model overview as completed AI analysis.
+            overview = ""
+            model.degraded = not bool(getattr(ai_analysis, "skipped", False))
+            if model.degraded:
+                model.degraded_notice = NO_AI_NOTICE
+            model.overview = _program_overview(model.radar)
 
         # Per-category noise tally: real total count + capped examples. The
         # count must reflect every suppressed noise item, not just the examples.
@@ -459,10 +635,14 @@ def build_daily_report_v2(
                 model.main_items.append(_build_main_item(entry, section))
 
         model.suppressed = _build_suppressed(ai_analysis, noise)
+        _refresh_radar_from_visible_content(model)
+        if not overview:
+            model.overview = _program_overview(model.radar)
     else:
         # No usable AI result: artifact-only, evidence/appendix shown, no
         # fabricated conclusions. This is distinct from the degraded state.
         model.degraded_notice = NO_AI_NOTICE
+        model.overview = _program_overview(model.radar)
 
     model.raw_appendix = _build_raw_appendix(report_data.get("stats"))
     return model
@@ -565,51 +745,76 @@ _MODE_LABELS = {
 _DR2_CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#fff;--text:#111;--muted:#555;--faint:#999;
-  --border:#e5e5e5;--risk:#b91c1c;--warn:#b45309;--link:#1d4ed8;--max:680px;
+  --paper:#fff;--ink:#202327;--text:#454a51;--muted:#747b84;--faint:#9da2a9;
+  --link:#1d4ed8;--reading-size:15px;--max:720px;
 }
-body{background:var(--bg);color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
+html,body{background:var(--paper)}
+body{color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   font-size:15px;line-height:1.72;padding:0 20px}
-.wrap{max-width:var(--max);margin:0 auto}
-header{padding:32px 0 22px;border-bottom:2px solid var(--text);margin-bottom:36px}
-.brand{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
-header h1{font-size:20px;font-weight:700;line-height:1.3;margin-top:6px}
-.dateline{font-size:12px;color:var(--faint);margin-top:5px}
-.degraded-notice{font-size:13px;color:var(--warn);margin-bottom:28px;padding:10px 12px;
-  border:1px solid var(--warn);border-radius:3px;line-height:1.6}
-.no-ai-notice{font-size:12px;color:var(--faint);margin-bottom:28px;padding:10px 0;border-bottom:1px solid var(--border)}
-.overview-text{font-size:15px;line-height:1.8;color:var(--muted);margin-bottom:26px}
-.sec{border-top:1px solid var(--border);padding-top:28px;margin-top:34px}
-.sec-label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:14px}
-.item{padding:16px 0;border-bottom:1px solid var(--border)}
-.item:last-child{border-bottom:none}
-.item-topic{font-weight:700;font-size:15px;line-height:1.4;margin-bottom:3px}
-.item-status{font-size:11px;color:var(--faint);margin-bottom:6px}
-.item-summary{font-size:14px;color:var(--muted);line-height:1.65}
-.item-degraded{font-size:13px;color:var(--faint);font-style:italic;line-height:1.6}
-.item-evidence{font-size:11px;color:var(--faint);margin-top:6px}
-.item-risk{font-size:12px;color:var(--risk);margin-top:6px}
-.item-risk::before{content:"\\2691  "}
-.item-watch{font-size:12px;color:var(--muted);margin-top:6px}
-.sup-row{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:5px 0;border-bottom:1px solid #f5f5f5}
-.sup-row:last-child{border-bottom:none}
-.sup-cat{font-weight:600;color:var(--text);flex-shrink:0;min-width:88px}
-.sup-count{font-size:11px;color:var(--faint);flex-shrink:0}
-.sup-detail{flex:1;color:var(--muted)}
-details.raw{margin-top:34px;border-top:1px solid var(--border);padding-top:20px}
-details.raw summary{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);cursor:pointer}
-.raw-trunc{font-size:11px;color:var(--faint);margin-top:10px}
-.kw-group{margin-top:16px}
-.kw-label{font-weight:600;font-size:13px;margin-bottom:5px}
-.kw-count{font-size:11px;color:var(--faint);font-weight:400;margin-left:6px}
-.title-row{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:3px 0;border-bottom:1px solid #f5f5f5}
-.t-title{flex:1;color:var(--muted)}
-.t-source{font-size:10px;color:var(--faint);flex-shrink:0}
-.notes-zone{margin-top:36px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--faint);line-height:1.7}
-footer{margin-top:40px;padding:16px 0 28px;border-top:1px solid var(--border);
-  font-size:11px;color:var(--faint);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
-a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:var(--max);margin:0 auto;padding-bottom:28px}
+.page-header{display:grid;grid-template-columns:1fr auto;grid-template-areas:"brand date" "title title";
+  column-gap:24px;align-items:end;padding:34px 0 8px;margin-bottom:30px}
+.brand{grid-area:brand;font-size:12px;font-weight:600;color:var(--ink)}
+.page-header h1{grid-area:title;font-size:27px;font-weight:650;letter-spacing:-.025em;line-height:1.22;margin-top:13px}
+.dateline{grid-area:date;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.degraded-notice,.no-ai-notice{font-size:var(--reading-size);color:var(--text);margin:0 0 34px;line-height:1.75}
+.degraded-notice::before,.no-ai-notice::before{content:"编者说明";display:inline-block;margin-right:9px;color:var(--text);font-weight:600}
+.overview-label,.sec-label{font-size:20px;font-weight:600;color:var(--ink);line-height:1.4}
+.overview-label{margin-bottom:4px}
+.overview-text{font-size:var(--reading-size);line-height:1.8;color:var(--text)}
+.sec{margin-top:30px}
+.sec-label{margin-bottom:10px}
+.item{padding:0}
+.item+.item{margin-top:18px}
+.item-topic{font-weight:650;font-size:var(--reading-size);line-height:1.45}
+.item-summary{font-size:var(--reading-size);color:var(--text);line-height:1.65;margin-top:0}
+.item-degraded{font-size:var(--reading-size);color:var(--text);line-height:1.65}
+.item-details{margin-top:7px}
+.item-details>summary{font-size:11px;font-weight:500;line-height:1.4;color:var(--muted);cursor:pointer;list-style:none}
+.item-details>summary::-webkit-details-marker{display:none}
+.item-details>summary::marker{content:""}
+.item-details>summary:hover{color:var(--ink)}
+.item-meta{font-size:11px;color:var(--faint);margin-top:10px;font-variant-numeric:tabular-nums}
+.item-analysis{font-size:12px;color:var(--text);margin-top:9px;line-height:1.65}
+.item-label{display:inline-block;font-size:11px;font-weight:500;color:var(--muted);margin-right:8px}
+.item-risk,.item-watch{font-size:12px;color:var(--muted);margin-top:9px;line-height:1.65}
+.signals,.source-links{margin-top:13px}
+.signals-label{font-size:11px;font-weight:500;color:var(--muted);margin-bottom:5px}
+.signal-row,.source-row{font-size:12px;color:var(--text);line-height:1.55;padding:4px 0}
+.signal-row+.signal-row,.source-row+.source-row{margin-top:5px}
+.signal-meta,.source-meta{display:block;font-size:10px;color:var(--faint);margin-top:2px}
+.source-links-label{font-size:11px;font-weight:500;color:var(--muted);margin-bottom:5px}
+details.raw summary,.cut-details summary{font-size:var(--reading-size);font-weight:400;color:var(--muted);cursor:pointer;list-style:none}
+details.raw summary::-webkit-details-marker,.cut-details summary::-webkit-details-marker{display:none}
+details.raw summary::marker,.cut-details summary::marker{content:""}
+details.raw summary:hover,.cut-details summary:hover{color:var(--text)}
+.editorial-cut{font-size:var(--reading-size);color:var(--text);line-height:1.8}
+.cut-details{margin-top:3px}
+.cut-item{padding:4px 0}
+.cut-item+.cut-item{margin-top:9px}
+.cut-title{font-size:var(--reading-size);font-weight:600;color:var(--ink)}
+.cut-detail{font-size:var(--reading-size);color:var(--text);line-height:1.75;margin-top:3px}
+details.raw{margin-top:12px}
+.raw-trunc{font-size:11px;color:var(--faint);margin-top:8px}
+.kw-group{margin-top:18px}
+.kw-label{font-weight:600;font-size:var(--reading-size);margin-bottom:5px}
+.kw-count{font-size:10px;color:var(--faint);font-weight:400;margin-left:6px}
+.title-row{font-size:var(--reading-size);padding:4px 0}
+.title-row+.title-row{margin-top:5px}
+.t-title{display:block;color:var(--text);line-height:1.55}
+.t-source{display:block;font-size:10px;color:var(--faint);margin-top:2px}
+.notes-zone{margin-top:34px;font-size:11px;color:var(--faint);line-height:1.7}
+footer{margin-top:34px;padding-bottom:18px;font-size:10px;color:var(--faint);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}
+@media(max-width:560px){
+  body{padding:0 18px}
+  .page-header{grid-template-areas:"brand" "title" "date";grid-template-columns:1fr;padding-top:25px}
+  .page-header h1{font-size:21px;margin-top:10px}
+  .dateline{margin-top:7px}
+}
+@media print{body{padding:0}.wrap{max-width:none;padding:0 22px}details{break-inside:avoid}}
 """
 
 
@@ -619,48 +824,147 @@ def _e(text: Any) -> str:
     return _html_lib.escape(str(text))
 
 
+def _display_topic(topic: str) -> str:
+    for prefix in ("高热未归类·", "未归类·", "背景-"):
+        if topic.startswith(prefix):
+            return topic[len(prefix):].strip() or topic
+    return topic
+
+
+def _render_samples(item: DailyItem) -> str:
+    if not item.samples:
+        return ""
+    rows: List[str] = []
+    for sample in item.samples:
+        meta = " · ".join(
+            part for part in (
+                sample.get("source", ""),
+                sample.get("trend", ""),
+            ) if part
+        )
+        meta_html = f'<span class="signal-meta">{_e(meta)}</span>' if meta else ""
+        rows.append(
+            f'<div class="signal-row">{_e(sample.get("title", ""))}{meta_html}</div>'
+        )
+    return (
+        f'<div class="signals"><div class="signals-label">代表性传播文本 · {len(rows)}</div>'
+        f'{"".join(rows)}</div>'
+    )
+
+
+def _render_source_links(
+    item: DailyItem,
+    source_links: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    links = item.source_links if source_links is None else source_links
+    if not links:
+        return ""
+    rows: List[str] = []
+    for source in links:
+        url = str(source.get("url", "") or "").strip()
+        if not url.lower().startswith(("http://", "https://")):
+            continue
+        meta = " · ".join(
+            str(part) for part in (
+                source.get("source", ""),
+                f"第{source.get('rank')}名" if source.get("rank") else "",
+                source.get("time", ""),
+            ) if part
+        )
+        meta_html = f'<span class="source-meta">{_e(meta)}</span>' if meta else ""
+        rows.append(
+            f'<div class="source-row"><a href="{_e(url)}" target="_blank" rel="noopener noreferrer">'
+            f'{_e(source.get("title", ""))}</a>{meta_html}</div>'
+        )
+    if not rows:
+        return ""
+    return (
+        f'<div class="source-links"><div class="source-links-label">证据链接 · {len(rows)}</div>'
+        f'{"".join(rows)}</div>'
+    )
+
+
+def _render_item_details(
+    item: DailyItem,
+    *,
+    include_samples: bool = True,
+    source_links: Optional[List[Dict[str, Any]]] = None,
+    extra_meta: Optional[List[str]] = None,
+) -> str:
+    meta_parts = [
+        part for part in [*(extra_meta or []), item.status, item.evidence_note]
+        if part
+    ]
+    meta = f'<div class="item-meta">{_e(" · ".join(meta_parts))}</div>' if meta_parts else ""
+    analysis = (
+        f'<div class="item-analysis"><span class="item-label">传播结构：</span>{_e(item.analysis)}</div>'
+        if item.analysis
+        else ""
+    )
+    risk = (
+        f'<div class="item-risk"><span class="item-label">核验提示：</span>{_e(item.risk_note)}</div>'
+        if _show_item_risk(item.risk_note)
+        else ""
+    )
+    watch = (
+        f'<div class="item-watch"><span class="item-label">后续关注：</span>{_e(item.next_watch)}</div>'
+        if item.next_watch
+        else ""
+    )
+    samples = _render_samples(item) if include_samples else ""
+    links = _render_source_links(item, source_links)
+    content = f"{meta}{analysis}{risk}{watch}{samples}{links}"
+    if not content:
+        return ""
+    return f'<details class="item-details"><summary>来源与核验</summary>{content}</details>'
+
+
 def _render_item(item: DailyItem) -> str:
-    topic = f'<div class="item-topic">{_e(item.topic)}</div>'
-    status = f'<div class="item-status">{_e(item.status)}</div>' if item.status else ""
+    if (item.degraded or not item.summary) and item.samples:
+        articles: List[str] = []
+        for sample in item.samples:
+            sample_title = str(sample.get("title", "") or "").strip()
+            if not sample_title:
+                continue
+            matching_links = [
+                source for source in item.source_links
+                if str(source.get("title", "") or "").strip() == sample_title
+            ]
+            sample_meta = [
+                str(part) for part in (sample.get("source", ""), sample.get("trend", ""))
+                if part
+            ]
+            details = _render_item_details(
+                item,
+                include_samples=False,
+                source_links=matching_links,
+                extra_meta=sample_meta,
+            )
+            articles.append(
+                f'<article class="item"><h3 class="item-topic">{_e(sample_title)}</h3>'
+                f'<div class="item-summary">暂无可用摘要；仅保留平台原标题供核对。</div>'
+                f'{details}</article>'
+            )
+        if articles:
+            return "".join(articles)
+
+    topic = f'<h3 class="item-topic">{_e(_display_topic(item.topic))}</h3>'
     if item.degraded or not item.summary:
         body = f'<div class="item-degraded">{_e(DEGRADED_ITEM_NOTICE)}</div>'
     else:
         body = f'<div class="item-summary">{_e(item.summary)}</div>'
-    evidence = (
-        f'<div class="item-evidence">{_e(item.evidence_note)}</div>'
-        if item.evidence_note
-        else ""
-    )
-    risk = (
-        f'<div class="item-risk">{_e(item.risk_note)}</div>'
-        if item.risk_note
-        else ""
-    )
-    watch = (
-        f'<div class="item-watch">{_e(item.next_watch)}</div>'
-        if item.next_watch
-        else ""
-    )
-    return (
-        f'<div class="item">{topic}{status}{body}{evidence}{risk}{watch}</div>'
-    )
+    details = _render_item_details(item)
+    return f'<article class="item">{topic}{body}{details}</article>'
 
 
 def _render_main_sections(model: DailyReportV2) -> str:
     if not model.main_items:
         return ""
-    by_section: Dict[str, List[DailyItem]] = {}
-    for it in model.main_items:
-        by_section.setdefault(it.section, []).append(it)
-    out: List[str] = []
-    for section in SECTION_ORDER:
-        items = by_section.get(section)
-        if not items:
-            continue
-        label = _SECTION_TITLES.get(section, section)
-        rows = "".join(_render_item(it) for it in items)
-        out.append(f'<div class="sec"><div class="sec-label">{_e(label)}</div>{rows}</div>')
-    return "\n".join(out)
+    # Reader-facing content is one event stream.  Program buckets remain on
+    # the model for evidence policy and counting, but never become categories
+    # in the newsletter.
+    rows = "".join(_render_item(it) for it in model.main_items)
+    return f'<section class="sec"><h2 class="sec-label">重点</h2>{rows}</section>'
 
 
 def _render_suppressed(model: DailyReportV2) -> str:
@@ -668,18 +972,21 @@ def _render_suppressed(model: DailyReportV2) -> str:
         return ""
     rows: List[str] = []
     for g in model.suppressed:
-        detail = "；".join(g.examples) if g.examples else g.reason
+        examples = "；".join(g.examples)
+        detail = g.reason
+        if examples:
+            detail = f"{g.reason}。例：{examples}" if g.reason else examples
         rows.append(
-            f'<div class="sup-row">'
-            f'<span class="sup-cat">{_e(g.category)}</span>'
-            f'<span class="sup-count">{g.count}</span>'
-            f'<span class="sup-detail">{_e(detail)}</span>'
-            f"</div>"
+            f'<article class="cut-item">'
+            f'<h3 class="cut-title">{_e(g.category)} · {g.count} 条</h3>'
+            f'<p class="cut-detail">{_e(detail)}</p>'
+            f"</article>"
         )
     body = "".join(rows)
     return (
-        f'<div class="sec"><div class="sec-label">已抑制 · 合计 {model.suppressed_count}</div>'
-        f"{body}</div>"
+        f'<section class="sec"><h2 class="sec-label">编辑取舍</h2>'
+        f'<p class="editorial-cut">今日另有 {model.suppressed_count} 个条目未进入正文。它们以常规娱乐、体育、电竞内容或未达异常阈值的背景项为主。</p>'
+        f'<details class="cut-details"><summary>查看折叠原因与示例</summary>{body}</details></section>'
     )
 
 
@@ -708,7 +1015,7 @@ def _render_raw_appendix(raw: RawAppendix) -> str:
         else ""
     )
     return (
-        f'<details class="raw"><summary>原始热榜（已折叠 · 附录）</summary>'
+        f'<details class="raw"><summary>数据附录 · 原始热榜</summary>'
         f"{''.join(parts)}{trunc}</details>"
     )
 
@@ -744,6 +1051,7 @@ def render_daily_report_v2(
         editorial += f'<div class="no-ai-notice">{_e(model.degraded_notice)}</div>\n'
 
     if model.overview:
+        editorial += '<h2 class="overview-label">导读</h2>\n'
         editorial += f'<div class="overview-text">{_e(model.overview)}</div>\n'
 
     editorial += _render_main_sections(model)
@@ -773,9 +1081,9 @@ def render_daily_report_v2(
 </head>
 <body>
 <div class="wrap">
-<header>
+<header class="page-header">
   <div class="brand">Ptilopsis Radar · 信息环境监测</div>
-  <h1>{_e(mode_label)} · v2</h1>
+  <h1>信息环境日报</h1>
   <div class="dateline">{_e(date_str)}</div>
 </header>
 {editorial}
