@@ -386,7 +386,12 @@ class AIAnalyzer:
             f"{item['topic_group']}（{item['source_layers']}）"
             for item in buckets.get("background", [])
         ]
-        for label in BUCKET_ORDER:
+        # Use the same reader-facing priority as prompt selection.  This makes
+        # ownership deterministic when one captured headline matched multiple
+        # keyword groups: the group shown to the AI is also the group allowed
+        # to claim that evidence in the final event stream.
+        assembly_order = list(dict.fromkeys([*SECTION_ORDER, *BUCKET_ORDER]))
+        for label in assembly_order:
             for item in buckets.get(label, []):
                 topic = item["topic_group"]
                 prose = ai_items.get(topic) if isinstance(ai_items.get(topic), dict) else {}
@@ -679,6 +684,7 @@ class AIAnalyzer:
         limited = {k: [] for k in buckets.keys()}
         remaining_groups = group_limit or 10 ** 9
         remaining_evidence = event_limit or 10 ** 9
+        selected_evidence_ids: set[str] = set()
         # background / suppressed 项不需要 AI 文字，盘面计数已通过 overview_stats
         # 单独提供；不再用它们占据输入容量。
         ordered_keys = list(section_order)
@@ -692,7 +698,17 @@ class AIAnalyzer:
             for item in buckets.get(key, []):
                 if remaining_groups <= 0 or remaining_evidence <= 0:
                     break
-                samples = list(item.get("sample_titles") or [])[:remaining_evidence]
+                samples: List[Dict[str, Any]] = []
+                for sample in item.get("sample_titles") or []:
+                    if not isinstance(sample, dict):
+                        continue
+                    evidence_id = str(sample.get("evidence_id", "") or "").strip()
+                    if not evidence_id or evidence_id in selected_evidence_ids:
+                        continue
+                    samples.append(sample)
+                    selected_evidence_ids.add(evidence_id)
+                    if len(samples) >= remaining_evidence:
+                        break
                 if not samples:
                     continue
                 selected = self._copy_evidence_with_samples(item, samples)

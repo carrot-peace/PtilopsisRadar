@@ -213,6 +213,46 @@ class TestEventReclassification(unittest.TestCase):
         self.assertEqual(result.overview_stats["background_count"], 2)
         self.assertEqual(result.overview_stats["layer_distribution"]["D"], 2)
 
+    def test_duplicate_evidence_across_groups_is_sent_and_rendered_once(self):
+        duplicate_id = evidence_id("重复命中标题", "微博")
+        stats = [
+            {"word": "先命中组", "titles": [T("重复命中标题", "微博", 1)]},
+            {"word": "后命中组", "titles": [T("重复命中标题", "微博", 1)]},
+        ]
+        for batch_size in (12, 1):
+            with self.subTest(batch_size=batch_size):
+                az = make_analyzer(BATCH_MAX_EVIDENCE=batch_size)
+                prompts = []
+
+                def fake_call(prompt):
+                    prompts.append(prompt)
+                    return response({
+                        "先命中组": [
+                            event(
+                                "重复标题只生成一个事件",
+                                "微博出现相关标题。",
+                                "单一 D 层。",
+                                duplicate_id,
+                            )
+                        ]
+                    })
+
+                az._call_ai = fake_call
+                result = az.analyze(
+                    stats=stats,
+                    source_tier_resolver=_bootstrap.make_resolver(B),
+                )
+
+                self.assertTrue(result.success, result.error)
+                self.assertEqual(len(prompts), 1)
+                self.assertIn("先命中组", prompts[0])
+                self.assertNotIn("议题名: 后命中组", prompts[0])
+                self.assertEqual(len(result.high_heat_unverified), 1)
+                self.assertEqual(
+                    result.high_heat_unverified[0]["topic"],
+                    "重复标题只生成一个事件",
+                )
+
 
 class TestEnvironmentFailures(unittest.TestCase):
     def test_call_failure_is_not_scheduler_success_but_keeps_event_fallback(self):
