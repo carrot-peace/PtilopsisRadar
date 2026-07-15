@@ -823,7 +823,11 @@ class NewsAnalyzer:
         dr_dispatch_hook = getattr(self, "_run_dr_dispatch_hook", None)
         if mode == "daily" and html_file and callable(dr_dispatch_hook):
             try:
-                dr_dispatch_hook(ai_result=ai_result, html_file=html_file)
+                dr_dispatch_hook(
+                    ai_result=ai_result,
+                    html_file=html_file,
+                    schedule=schedule,
+                )
             except Exception as _dr_exc:
                 print(f"[DR] dispatch hook error (non-fatal): {_dr_exc}")
 
@@ -1055,6 +1059,7 @@ class NewsAnalyzer:
         *,
         ai_result: Optional[AIAnalysisResult],
         html_file: str,
+        schedule: Optional[ResolvedSchedule] = None,
     ) -> None:
         """Run the explicit DR dispatch hook after daily artifact generation."""
         from trendradar.dr.dispatch_mode import (
@@ -1067,6 +1072,29 @@ class NewsAnalyzer:
         dispatch_mode = resolve_dr_dispatch_mode(os.environ)
         if dispatch_mode == DR_DISPATCH_OFF:
             return
+
+        schedule_scheduler = None
+        date_str = self.ctx.format_date()
+        once_live_period = bool(
+            dispatch_mode == DR_DISPATCH_LIVE
+            and schedule is not None
+            and getattr(schedule, "once_analyze", False)
+            and getattr(schedule, "period_key", None)
+        )
+        if once_live_period:
+            from trendradar.dr.dispatch_schedule import (
+                should_run_scheduled_live_dispatch,
+            )
+
+            schedule_scheduler = self.ctx.create_scheduler()
+            if not should_run_scheduled_live_dispatch(
+                schedule=schedule,
+                scheduler=schedule_scheduler,
+                date_str=date_str,
+                has_analysis_result=ai_result is not None,
+            ):
+                print("[DR] live dispatch skipped: once-only period already handled")
+                return
 
         from trendradar.dr.artifacts import write_dr_dispatch_artifacts
         from trendradar.dr.dispatch_executor import (
@@ -1081,7 +1109,6 @@ class NewsAnalyzer:
         from trendradar.dr.formatter import render_dr_telegram_text
 
         now = self.ctx.get_time()
-        date_str = self.ctx.format_date()
         run_label = f"dr-{now:%Y%m%d-%H%M%S}"
         public_html_path = Path("output/public/daily/full.html")
         text = render_dr_telegram_text(ai_result, date=date_str, now=now)
@@ -1113,6 +1140,22 @@ class NewsAnalyzer:
                 f"[DR] dispatch live result: {execution.reason}, "
                 f"accepted={execution.accepted_count}"
             )
+            if execution.accepted_count > 0 and schedule_scheduler is not None:
+                from trendradar.dr.dispatch_schedule import (
+                    record_scheduled_live_dispatch,
+                )
+
+                try:
+                    record_scheduled_live_dispatch(
+                        schedule=schedule,
+                        scheduler=schedule_scheduler,
+                        date_str=date_str,
+                    )
+                except Exception as exc:
+                    print(
+                        f"[DR] failed to record live dispatch dedupe: {exc}",
+                        file=sys.stderr,
+                    )
 
         created_at = now.isoformat()
         plan_json = dr_dispatch_plan_to_json_dict(
