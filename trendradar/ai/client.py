@@ -110,6 +110,8 @@ class AIClient:
         temperature = kwargs.get("temperature", self.temperature)
         if temperature is not None:
             params["temperature"] = temperature
+        else:
+            params.pop("temperature", None)
 
         # 添加 API Key
         if self.api_key:
@@ -123,6 +125,8 @@ class AIClient:
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
         if max_tokens and max_tokens > 0:
             params["max_tokens"] = max_tokens
+        else:
+            params.pop("max_tokens", None)
 
         # 添加 fallback 模型（如果配置了）
         if self.fallback_models:

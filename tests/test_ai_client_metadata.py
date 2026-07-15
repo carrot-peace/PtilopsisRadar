@@ -92,6 +92,26 @@ class TestAIClientMetadata(unittest.TestCase):
         self.assertEqual(self.captured["timeout"], 30)
         self.assertEqual(self.captured["max_tokens"], 8000)
 
+    def test_explicitly_disabled_values_remove_extra_param_defaults(self):
+        client = self.module.AIClient(
+            {
+                "MODEL": "test/model",
+                "API_KEY": "k",
+                "TEMPERATURE": 0.5,
+                "MAX_TOKENS": 16000,
+                "EXTRA_PARAMS": {"temperature": 0.7, "max_tokens": 999},
+            }
+        )
+
+        client.chat(
+            [{"role": "user", "content": "x"}],
+            temperature=None,
+            max_tokens=0,
+        )
+
+        self.assertNotIn("temperature", self.captured)
+        self.assertNotIn("max_tokens", self.captured)
+
 
 if __name__ == "__main__":
     unittest.main()
