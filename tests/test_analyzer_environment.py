@@ -181,6 +181,38 @@ class TestEventReclassification(unittest.TestCase):
         self.assertEqual(result.silence_gap[0]["factual_boundary"], EV.LABELS["silence_gap"]["factual_boundary"])
         self.assertEqual(len(result.high_heat_unverified), 3)
 
+    def test_overview_stats_are_recomputed_from_split_events(self):
+        first_id = evidence_id("低位传播甲", "微博")
+        second_id = evidence_id("低位传播乙", "抖音")
+        stats = [{
+            "word": "同组低位传播",
+            "titles": [
+                T("低位传播甲", "微博", 11),
+                T("低位传播乙", "抖音", 12),
+            ],
+        }]
+        az = make_analyzer()
+        az._call_ai = lambda _: response({
+            "同组低位传播": [
+                event("微博低位传播甲", "微博出现相关标题。", "单一 D 层。", first_id),
+                event("抖音低位传播乙", "抖音出现相关标题。", "单一 D 层。", second_id),
+            ]
+        })
+
+        result = az.analyze(
+            stats=stats,
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.high_heat_unverified, [])
+        self.assertEqual(result.overview_stats["total_items"], 0)
+        self.assertEqual(
+            result.overview_stats["label_counts"]["high_heat_unverified"], 0
+        )
+        self.assertEqual(result.overview_stats["background_count"], 2)
+        self.assertEqual(result.overview_stats["layer_distribution"]["D"], 2)
+
 
 class TestEnvironmentFailures(unittest.TestCase):
     def test_call_failure_is_not_scheduler_success_but_keeps_event_fallback(self):

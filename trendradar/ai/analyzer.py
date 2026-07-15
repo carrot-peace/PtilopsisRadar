@@ -374,6 +374,13 @@ class AIAnalyzer:
         rendered_by_label: Dict[str, List[Dict[str, Any]]] = {
             label: [] for label in BUCKET_ORDER
         }
+        # overview_stats initially describes the keyword groups sent to the AI.
+        # The published report is event-first, so keep a second set of buckets
+        # for the exact event evidence that survives program reclassification.
+        event_buckets: Dict[str, List[Dict[str, Any]]] = {
+            label: [] for label in BUCKET_ORDER
+        }
+        event_buckets["background"] = list(buckets.get("background", []))
         claimed_evidence_ids: set[str] = set()
         bg_notes: List[str] = [
             f"{item['topic_group']}（{item['source_layers']}）"
@@ -406,15 +413,20 @@ class AIAnalyzer:
 
                 for entry in event_entries:
                     event_label = entry.pop("_bucket_label", None)
+                    detail = entry.get("evidence_detail")
+                    event_evidence = detail if isinstance(detail, dict) else {}
                     if event_label in rendered_by_label:
                         rendered_by_label[event_label].append(entry)
+                        event_buckets[event_label].append(event_evidence)
                     else:
+                        event_buckets["background"].append(event_evidence)
                         bg_notes.append(
                             f"{entry.get('topic', topic)}（{entry.get('source_layers', '-')}）"
                         )
 
         for label, rendered in rendered_by_label.items():
             setattr(result, label, rendered)
+        result.overview_stats = build_overview_stats(event_buckets)
         result.background_notes = bg_notes
 
         return result
