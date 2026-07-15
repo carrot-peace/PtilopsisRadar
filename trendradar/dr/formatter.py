@@ -15,6 +15,8 @@ import unicodedata
 from datetime import datetime
 from typing import Any
 
+from trendradar.content_policy import is_reader_noise
+
 
 DR_TITLE = "Ptilopsis Radar｜DR"
 DR_FALLBACK_TEXT = (
@@ -47,25 +49,14 @@ _READER_STATUS_LABELS = {
 
 _MAX_ITEMS = 5
 _MAX_SUMMARY = 240
+_MAX_TOPIC = 160
+_MAX_STATUS = 64
+_MAX_HEAT = 80
+_MAX_SOURCE_LAYERS = 48
+_MAX_DATE = 32
+_TELEGRAM_MAX_CHARS = 4096
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _UNCLASSIFIED_PREFIX_RE = re.compile(r"^(?:高热未归类|未归类)\s*[·:：|｜-]\s*")
-
-# DR is not a generic hotlist.  Routine entertainment, sports, and esports
-# results are suppressed unless the title also contains a structural public-
-# interest reason.  The vocabulary is deliberately conservative and only
-# applies to the topic title, never to an unrelated sample in a broad group.
-_NOISE_RE = re.compile(
-    r"明星|综艺|电视剧|电影|演唱会|偶像|饭圈|恋情|官宣|新歌|新剧|票房|颁奖|"
-    r"足球|篮球|世界杯|联赛|球员|夺冠|进球|比分|球队|中超|欧冠|网球|羽毛球|"
-    r"乒乓球|马拉松|C罗|哈兰德|VAR|"
-    r"电竞|英雄联盟|季中冠军赛|赛后数据|数据雷达图|Steam夏促|游戏攻略|"
-    r"(?<![A-Z0-9])(?:LPL|LCK|MSI|KPL|DOTA|CSGO|BLG|HLE|T1|G2|TES|EDG|GEN|LYON|Bin)(?![A-Z0-9])",
-    re.IGNORECASE,
-)
-_STRUCTURAL_RE = re.compile(
-    r"监管|审查|处罚|罚款|约谈|整治|封禁|下架|警方|刑事|立案|安全事故|"
-    r"踩踏|伤亡|死亡|政策|外交|制裁|操纵|水军|造假|造谣|网信办|调查"
-)
 _GENERIC_SUMMARIES = {
     "该事件存在传播风险",
     "事实仍待核验",
@@ -115,9 +106,22 @@ def _display_topic(topic: str) -> str:
     return cleaned or raw
 
 
-def _is_noise_topic(topic: str) -> bool:
-    text = _display_topic(topic)
-    return bool(_NOISE_RE.search(text)) and not bool(_STRUCTURAL_RE.search(text))
+def _is_noise_topic(topic: str, samples: list[str] | None = None) -> bool:
+    return is_reader_noise(_strip_urls(str(topic or "").strip()), samples)
+
+
+def _bounded_item_count(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _MAX_ITEMS
+    return max(0, min(parsed, _MAX_ITEMS))
+
+
+def _telegram_visible_length(text: str) -> int:
+    """Telegram's 4096 limit is measured after HTML entities are parsed."""
+    without_tags = re.sub(r"<[^>]+>", "", text or "")
+    return len(html.unescape(without_tags))
 
 
 def _is_generic_summary(text: str) -> bool:
@@ -232,7 +236,9 @@ def _deterministic_brief(ai_result: Any) -> str:
             for item in getattr(ai_result, bucket, []) or []:
                 if not isinstance(item, dict):
                     continue
-                if _is_noise_topic(str(item.get("topic", "") or "")):
+                if _is_noise_topic(
+                    str(item.get("topic", "") or ""), _sample_titles(item)
+                ):
                     noise_count += 1
                 else:
                     status_bucket = _event_bucket(bucket, item)
@@ -272,9 +278,7 @@ def _deterministic_brief(ai_result: Any) -> str:
 
 def _topic_entry(bucket: str, item: dict[str, Any]) -> dict[str, str]:
     status = _reader_status(bucket, item)
-    raw_summary = _strip_urls(
-        str(item.get("summary") or item.get("analysis") or "").strip()
-    )
+    raw_summary = _strip_urls(str(item.get("summary") or "").strip())
     summary = (
         _fallback_topic_summary(bucket, item)
         if _is_generic_summary(raw_summary)
@@ -282,20 +286,28 @@ def _topic_entry(bucket: str, item: dict[str, Any]) -> dict[str, str]:
     )
     platform_count = item.get("platform_count")
     return {
-        "topic": _display_topic(str(item.get("topic", "") or "")),
-        "status_label": status,
-        "source_layers": str(item.get("source_layers", "") or "").strip(),
-        "highest_heat": str(item.get("highest_heat", "") or "").strip(),
-        "platform_count": str(platform_count) if isinstance(platform_count, int) else "",
+        "topic": _truncate_text(
+            _display_topic(str(item.get("topic", "") or "")), _MAX_TOPIC
+        ),
+        "status_label": _truncate_text(status, _MAX_STATUS),
+        "source_layers": _truncate_text(
+            str(item.get("source_layers", "") or "").strip(), _MAX_SOURCE_LAYERS
+        ),
+        "highest_heat": _truncate_text(
+            str(item.get("highest_heat", "") or "").strip(), _MAX_HEAT
+        ),
+        "platform_count": (
+            _truncate_text(str(platform_count), 16)
+            if isinstance(platform_count, int)
+            else ""
+        ),
         "summary": summary,
     }
 
 
 def _topic_entries(bucket: str, item: dict[str, Any]) -> list[dict[str, str]]:
     """Return event-first entries, including a non-AI per-headline fallback."""
-    raw_summary = _strip_urls(
-        str(item.get("summary") or item.get("analysis") or "").strip()
-    )
+    raw_summary = _strip_urls(str(item.get("summary") or "").strip())
     samples = _sample_titles(item)
     if not _is_generic_summary(raw_summary) or not samples:
         return [_topic_entry(bucket, item)]
@@ -305,7 +317,7 @@ def _topic_entries(bucket: str, item: dict[str, Any]) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for title in samples:
         entry = dict(base)
-        entry["topic"] = title
+        entry["topic"] = _truncate_text(title, _MAX_TOPIC)
         if _is_high_heat_event(bucket, item):
             where = f"进入{heat}" if heat and heat != "-" else "形成高热传播"
             entry["summary"] = (
@@ -334,13 +346,19 @@ def select_dr_digest_topics(
     if getattr(ai_result, "report_style", "environment") != "environment":
         return []
 
+    max_items = _bounded_item_count(max_items)
+    if max_items == 0:
+        return []
+
     candidates: list[tuple[int, int, dict[str, str]]] = []
     sequence = 0
     for bucket in _TOPIC_BUCKET_ORDER:
         for item in getattr(ai_result, bucket, []) or []:
             if not isinstance(item, dict):
                 continue
-            if _is_noise_topic(str(item.get("topic", "") or "")):
+            if _is_noise_topic(
+                str(item.get("topic", "") or ""), _sample_titles(item)
+            ):
                 continue
             for entry in _topic_entries(bucket, item):
                 if _is_noise_topic(entry["topic"]) or not _topic_key(entry["topic"]):
@@ -380,7 +398,8 @@ def render_dr_telegram_text(
     Text deliberately omits URLs, source links, expanded evidence, and Decision
     language.  HTML details live in the attached DR artifact.
     """
-    lines = [f"<b>{_escape(DR_TITLE)}</b>", f"日期：{_escape(date)}", ""]
+    safe_date = _truncate_text(str(date or ""), _MAX_DATE)
+    lines = [f"<b>{_escape(DR_TITLE)}</b>", f"日期：{_escape(safe_date)}", ""]
 
     usable_ai = (
         ai_result is not None
@@ -393,7 +412,7 @@ def render_dr_telegram_text(
     if usable_ai:
         lines.append(_escape(_truncate_text(str(ai_result.overview), 700)))
     else:
-        program_brief = _deterministic_brief(ai_result)
+        program_brief = _truncate_text(_deterministic_brief(ai_result), 700)
         lines.append(_escape(program_brief))
         if (
             program_brief != DR_FALLBACK_TEXT
@@ -402,11 +421,16 @@ def render_dr_telegram_text(
             lines.append(_escape(DR_FALLBACK_TEXT))
     lines.append("")
 
-    topics = select_dr_digest_topics(ai_result, max_items=max_items)
+    topics = select_dr_digest_topics(
+        ai_result, max_items=_bounded_item_count(max_items)
+    )
+    ts = (now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+    footer = ["完整报告：见随附 HTML", f"更新：{_escape(ts)}"]
     if topics:
         lines.append("<b>重点</b>")
+        added = 0
         for idx, item in enumerate(topics, 1):
-            lines.append(f"{idx}. <b>{_escape(item['topic'])}</b>")
+            block = [f"{idx}. <b>{_escape(item['topic'])}</b>"]
             meta_parts = [
                 part
                 for part in (
@@ -417,10 +441,17 @@ def render_dr_telegram_text(
                 if part
             ]
             if meta_parts:
-                lines.append(_escape(" | ".join(meta_parts)))
+                block.append(_escape(" | ".join(meta_parts)))
             if item["summary"]:
-                lines.append(_escape(_truncate_text(item["summary"], _MAX_SUMMARY)))
-            lines.append("")
+                block.append(_escape(_truncate_text(item["summary"], _MAX_SUMMARY)))
+            block.append("")
+            candidate = "\n".join([*lines, *block, *footer]).rstrip()
+            if _telegram_visible_length(candidate) > _TELEGRAM_MAX_CHARS:
+                break
+            lines.extend(block)
+            added += 1
+        if not added:
+            lines.extend(["重点事件文本过长，完整内容见随附报告。", ""])
     else:
         lines.extend(
             [
@@ -430,7 +461,26 @@ def render_dr_telegram_text(
             ]
         )
 
-    lines.append("完整报告：见随附 HTML")
-    ts = (now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
-    lines.append(f"更新：{_escape(ts)}")
-    return "\n".join(lines).rstrip()
+    lines.extend(footer)
+    rendered = "\n".join(lines).rstrip()
+    if _telegram_visible_length(rendered) <= _TELEGRAM_MAX_CHARS:
+        return rendered
+
+    # Defensive final guard for pathological program metadata.  Every HTML tag
+    # is rebuilt rather than truncating markup in-place, so parse mode remains
+    # valid while the full event detail stays available in the attachment.
+    compact_brief = _escape(
+        _truncate_text(_deterministic_brief(ai_result), _MAX_SUMMARY)
+    )
+    return "\n".join([
+        f"<b>{_escape(DR_TITLE)}</b>",
+        f"日期：{_escape(safe_date)}",
+        "",
+        "<b>导读</b>",
+        compact_brief,
+        "",
+        "<b>重点</b>",
+        "正文已压缩，完整事件与证据见随附报告。",
+        "",
+        *footer,
+    ]).rstrip()

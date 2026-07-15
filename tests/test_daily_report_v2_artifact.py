@@ -373,7 +373,9 @@ class TestGenericRiskTemplateRejected(unittest.TestCase):
 class TestNoiseHandling(unittest.TestCase):
     def test_classify_category(self):
         self.assertEqual(DV2.classify_category("某明星新剧官宣"), "entertainment")
+        self.assertEqual(DV2.classify_category("爱豆粉丝见面会"), "entertainment")
         self.assertEqual(DV2.classify_category("世界杯决赛进球集锦"), "sports")
+        self.assertEqual(DV2.classify_category("哈兰德赛后发言"), "sports")
         self.assertEqual(DV2.classify_category("LPL 战队晋级全球总决赛"), "esports")
         self.assertIsNone(DV2.classify_category("某地发布防汛通告"))
 
@@ -533,6 +535,7 @@ class TestReadableEvidence(unittest.TestCase):
         self.assertIn("details.raw summary::marker,.cut-details summary::marker{content:\"\"}", html)
         self.assertIn(".cut-details{margin-top:3px}", html)
         self.assertIn("details.raw{margin-top:12px}", html)
+        self.assertIn("overflow-wrap:anywhere", html)
 
     def test_summary_analysis_samples_and_links_are_distinct(self):
         detail = _detail(
@@ -572,6 +575,17 @@ class TestReadableEvidence(unittest.TestCase):
         self.assertIn("传播结构：", html)
         self.assertIn("证据链接 · 1", html)
         self.assertIn('href="https://example.test/flood"', html)
+
+    def test_non_mapping_evidence_detail_degrades_without_crashing(self):
+        for malformed in ([], "not-an-object"):
+            with self.subTest(malformed=malformed):
+                entry = _entry("结构漂移事件", summary="仍可展示的事件摘要")
+                entry["evidence_detail"] = malformed
+                ai = _ai(high_heat_unverified=[entry])
+                model = DV2.build_daily_report_v2(ai, {"stats": []})
+                self.assertEqual(len(model.main_items), 1)
+                self.assertEqual(model.main_items[0].samples, [])
+                self.assertEqual(model.main_items[0].source_links, [])
 
     def test_missing_ai_summary_shows_raw_signal_instead_of_empty_card(self):
         ai = _ai(

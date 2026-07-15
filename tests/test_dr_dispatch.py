@@ -29,6 +29,7 @@ from trendradar.dr.dispatch_plan import (
 )
 from trendradar.dr.formatter import (
     DR_FALLBACK_TEXT,
+    _telegram_visible_length,
     render_dr_telegram_text,
     select_dr_digest_topics,
 )
@@ -169,6 +170,8 @@ class TestDRFormatter(unittest.TestCase):
                     "source_layers": "D",
                     "highest_heat": "微博 第2名",
                 },
+                {"topic": "爱豆粉丝见面会", "summary": "娱乐活动传播"},
+                {"topic": "哈兰德赛后发言", "summary": "体育赛后传播"},
             ],
             chinese_only_hot=[],
         )
@@ -176,6 +179,8 @@ class TestDRFormatter(unittest.TestCase):
         self.assertNotIn("BLG", text)
         self.assertNotIn("高热未归类", text)
         self.assertIn("某地发布防汛红色预警", text)
+        self.assertNotIn("爱豆", text)
+        self.assertNotIn("哈兰德", text)
         self.assertNotIn("high_heat_unverified", text)
         self.assertNotIn("highest_heat", text)
 
@@ -213,6 +218,48 @@ class TestDRFormatter(unittest.TestCase):
             ["海南陵水失联女生已找到", "河北宽城多个小区被淹"],
         )
         self.assertNotIn("本组", " ".join(topic["summary"] for topic in topics))
+
+    def test_analysis_is_never_published_as_an_event_summary(self) -> None:
+        result = _ai_result(
+            cross_layer_verified=[],
+            high_heat_unverified=[{
+                "topic": "宽泛内部组名",
+                "summary": "",
+                "analysis": "单一 D 层来源，无上游来源呼应。",
+                "evidence_detail": {
+                    "sample_titles": [{"title": "某地发布暴雨红色预警"}]
+                },
+            }],
+            chinese_only_hot=[],
+        )
+        topics = select_dr_digest_topics(result)
+        self.assertEqual(topics[0]["topic"], "某地发布暴雨红色预警")
+        self.assertNotIn("单一 D 层来源", topics[0]["summary"])
+
+    def test_telegram_output_has_a_hard_visible_character_limit(self) -> None:
+        items = []
+        for index in range(10):
+            marker = chr(0x4E00 + index)
+            items.append({
+                "topic": f"事件{index}" + marker * 500 + "&" * 100,
+                "summary": "详细摘要" * 300,
+                "highest_heat": "平台排名" * 100,
+                "verification_status": "高热待核实",
+            })
+        result = _ai_result(
+            overview="盘面导读" * 500,
+            cross_layer_verified=[],
+            high_heat_unverified=items,
+            chinese_only_hot=[],
+        )
+
+        text = render_dr_telegram_text(
+            result, date="2026-06-18", max_items=999
+        )
+
+        self.assertLessEqual(_telegram_visible_length(text), 4096)
+        self.assertEqual(text.count("<b>"), text.count("</b>"))
+        self.assertLessEqual(len(select_dr_digest_topics(result, max_items=999)), 5)
 
     def test_event_status_wins_over_originating_bucket(self) -> None:
         result = _ai_result(

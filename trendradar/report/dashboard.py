@@ -18,11 +18,13 @@ Current Dashboard 模块（newsletter 风格）
 
 import html as _html_lib
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from trendradar.ai.evidence import SECTION_ORDER, derive_radar_readout
+from trendradar.content_policy import is_reader_noise
 
 # state.json schema 版本（future /now 据此读取）。v2 将 ``label``
 # 从关键词组 bucket 改为事件自身的读者状态。
@@ -84,16 +86,7 @@ _READER_STATUS_LABELS: Dict[str, str] = {
     "中文源呼应(缺A/B背景)": "中文平台热度上升",
 }
 
-# top_items / state.json 允许透出的字段白名单（发布安全：绝不 dump bucket 原始 dict）
-_SAFE_ITEM_FIELDS = (
-    "topic",
-    "label",
-    "summary",
-    "highest_heat",
-    "platform_count",
-    "source_layers",
-    "sentiment_flag",
-)
+_ABSOLUTE_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 _DASHBOARD_CSS = """
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -122,8 +115,10 @@ body{
 .sec-label{font-size:20px;font-weight:600;color:var(--ink);line-height:1.4;margin-bottom:10px}
 
 .cur-row+.cur-row{margin-top:18px}
+.cur-row,.track-row{min-width:0}
 .cur-topic{font-size:var(--reading-size);font-weight:650;color:var(--ink);line-height:1.45}
 .cur-summary{font-size:var(--reading-size);color:var(--text);line-height:1.68}
+.cur-topic,.cur-summary,.track-title{overflow-wrap:anywhere}
 .cur-meta{font-size:11px;color:var(--faint);line-height:1.45;margin-top:6px}
 .cur-risk{font-size:11px;color:var(--muted);line-height:1.55;margin-top:5px}
 .t-new{font-size:9px;font-weight:700;color:var(--risk);padding:0 3px;
@@ -158,6 +153,13 @@ def _esc(text: Any) -> str:
     return _html_lib.escape(str(text))
 
 
+def _public_text(text: Any) -> str:
+    """Normalize a scalar for public HTML/state and remove absolute URLs."""
+    if text is None:
+        return ""
+    return _ABSOLUTE_URL_RE.sub("", str(text)).strip()
+
+
 def _group_for_mode(mode: str) -> str:
     """run mode → 发布 group。current/incremental → current；daily → daily。"""
     return "daily" if mode == "daily" else "current"
@@ -178,7 +180,18 @@ def _is_ai_backed(ai_analysis: Optional[Any]) -> bool:
     return bool(
         _is_environment(ai_analysis)
         and getattr(ai_analysis, "success", False) is True
+        and str(getattr(ai_analysis, "overview", "") or "").strip()
     )
+
+
+def _analysis_status(ai_analysis: Optional[Any]) -> str:
+    if not _is_environment(ai_analysis):
+        return "unavailable"
+    if bool(getattr(ai_analysis, "skipped", False)):
+        return "skipped"
+    if _is_ai_backed(ai_analysis):
+        return "ok"
+    return "degraded"
 
 
 def _program_overview(radar: Dict[str, Any]) -> str:
@@ -235,37 +248,66 @@ def _event_bucket(item: Dict[str, Any], fallback: str) -> str:
 
 def _event_summary(item: Dict[str, Any]) -> str:
     """只返回事件级摘要，拒绝旧的分类组统一文案。"""
-    for key in ("summary", "analysis"):
-        text = str(item.get(key, "") or "").strip()
-        if text and not text.startswith(("本组", "该组", "此组")):
-            return text
+    text = _public_text(item.get("summary", ""))
+    if text and not text.startswith(("本组", "该组", "此组")):
+        return text
     return ""
+
+
+def _evidence_samples(item: Dict[str, Any]) -> List[Any]:
+    detail = item.get("evidence_detail")
+    if not isinstance(detail, dict):
+        return []
+    samples = detail.get("sample_titles") or []
+    return samples if isinstance(samples, list) else []
+
+
+def _iter_environment_items(ai_analysis: Any):
+    for bucket in SECTION_ORDER:
+        for item in (getattr(ai_analysis, bucket, None) or []):
+            if isinstance(item, dict):
+                yield bucket, item
+
+
+def _is_visible_item(item: Dict[str, Any]) -> bool:
+    return not is_reader_noise(
+        str(item.get("topic", "") or ""), _evidence_samples(item)
+    )
+
+
+def _iter_visible_items(ai_analysis: Any):
+    for bucket, item in _iter_environment_items(ai_analysis):
+        if _is_visible_item(item):
+            yield bucket, item
 
 
 def _safe_item(item: Dict[str, Any], bucket: str) -> Dict[str, Any]:
     """从 bucket item 中**按白名单**挑出发布安全字段，绝不透传原始 dict。"""
-    out: Dict[str, Any] = {"label": _reader_status(item, bucket)}
-    for key in _SAFE_ITEM_FIELDS:
-        if key == "label":
-            continue
-        if key == "summary":
-            summary = _event_summary(item)
-            if summary:
-                out[key] = summary
-            continue
-        if key in item:
-            out[key] = item.get(key)
+    out: Dict[str, Any] = {"label": _public_text(_reader_status(item, bucket))}
+    topic = _public_text(item.get("topic", ""))
+    if topic:
+        out["topic"] = topic
+    summary = _event_summary(item)
+    if summary:
+        out["summary"] = summary
+    for key in ("highest_heat", "source_layers"):
+        value = _public_text(item.get(key, ""))
+        if value:
+            out[key] = value
+    platform_count = item.get("platform_count")
+    if isinstance(platform_count, int) and not isinstance(platform_count, bool):
+        out["platform_count"] = platform_count
+    if "sentiment_flag" in item:
+        out["sentiment_flag"] = bool(item.get("sentiment_flag"))
     return out
 
 
 def _collect_safe_items(ai_analysis: Any) -> List[Dict[str, Any]]:
     """按 SECTION_ORDER 收集各栏目 item 的发布安全摘要（扁平，带 label）。"""
-    items: List[Dict[str, Any]] = []
-    for bucket in SECTION_ORDER:
-        for item in (getattr(ai_analysis, bucket, None) or []):
-            if isinstance(item, dict):
-                items.append(_safe_item(item, bucket))
-    return items
+    return [
+        _safe_item(item, bucket)
+        for bucket, item in _iter_visible_items(ai_analysis)
+    ]
 
 
 def _event_radar(ai_analysis: Any) -> Dict[str, Any]:
@@ -273,20 +315,22 @@ def _event_radar(ai_analysis: Any) -> Dict[str, Any]:
     radar = derive_radar_readout(getattr(ai_analysis, "overview_stats", {}) or {})
     counts = {bucket: 0 for bucket in SECTION_ORDER}
     total = 0
-    for fallback in SECTION_ORDER:
-        for item in (getattr(ai_analysis, fallback, None) or []):
-            if not isinstance(item, dict):
-                continue
-            total += 1
-            bucket = _event_bucket(item, fallback)
-            if bucket in counts:
-                counts[bucket] += 1
+    noise_count = 0
+    for fallback, item in _iter_environment_items(ai_analysis):
+        if not _is_visible_item(item):
+            noise_count += 1
+            continue
+        total += 1
+        bucket = _event_bucket(item, fallback)
+        if bucket in counts:
+            counts[bucket] += 1
     radar.update({
         "anomaly": total,
         "cross_layer": counts.get("cross_layer_verified", 0),
         "high_heat": counts.get("high_heat_unverified", 0),
         "chinese_only": counts.get("chinese_only_hot", 0),
         "silence_gap": counts.get("silence_gap", 0),
+        "suppressed": int(radar.get("suppressed", 0) or 0) + noise_count,
     })
     return radar
 
@@ -321,6 +365,7 @@ def build_dashboard_state(
     radar: Dict[str, Any] = {}
     overview = ""
     top_items: List[Dict[str, Any]] = []
+    analysis_status = _analysis_status(ai_analysis)
 
     if _is_environment(ai_analysis):
         radar = _event_radar(ai_analysis)
@@ -329,6 +374,7 @@ def build_dashboard_state(
             if _is_ai_backed(ai_analysis)
             else _program_overview(radar)
         )
+        overview = _public_text(overview)
         top_items = _collect_safe_items(ai_analysis)
 
     return {
@@ -336,6 +382,7 @@ def build_dashboard_state(
         "mode": mode,
         "group": _group_for_mode(mode),
         "generated_at": generated_at.isoformat(),
+        "analysis_status": analysis_status,
         "report_style": getattr(ai_analysis, "report_style", "environment")
         if ai_analysis is not None
         else "none",
@@ -353,32 +400,30 @@ def build_dashboard_state(
 def _render_signal_rows(ai_analysis: Any) -> str:
     """事件列表：逐条标题 + 详细摘要，状态放入次要元数据。"""
     rows: List[str] = []
-    for bucket in SECTION_ORDER:
-        for item in (getattr(ai_analysis, bucket, None) or []):
-            if not isinstance(item, dict):
-                continue
-            topic = _esc(item.get("topic", ""))
-            summary = _esc(_event_summary(item))
-            heat = _esc(item.get("highest_heat", ""))
-            risk = item.get("risk_note")
-            status = _esc(_reader_status(item, bucket))
-            count = item.get("platform_count")
-            meta_parts = [status] if status else []
-            if isinstance(count, int) and count > 0:
-                meta_parts.append(f"{count} 个来源")
-            if heat and heat != "-":
-                meta_parts.append(heat)
-            meta_html = (
-                f'<div class="cur-meta">{" · ".join(meta_parts)}</div>'
-                if any(meta_parts)
-                else ""
-            )
-            summary_html = f'<div class="cur-summary">{summary}</div>' if summary else ""
-            risk_html = f'<div class="cur-risk">{_esc(risk)}</div>' if risk else ""
-            rows.append(
-                f'<article class="cur-row"><h3 class="cur-topic">{topic}</h3>'
-                f'{summary_html}{meta_html}{risk_html}</article>'
-            )
+    for bucket, item in _iter_visible_items(ai_analysis):
+        safe = _safe_item(item, bucket)
+        topic = _esc(safe.get("topic", ""))
+        summary = _esc(safe.get("summary", ""))
+        heat = _esc(safe.get("highest_heat", ""))
+        risk = _public_text(item.get("risk_note", ""))
+        status = _esc(safe.get("label", ""))
+        count = safe.get("platform_count")
+        meta_parts = [status] if status else []
+        if isinstance(count, int) and count > 0:
+            meta_parts.append(f"{count} 个来源")
+        if heat and heat != "-":
+            meta_parts.append(heat)
+        meta_html = (
+            f'<div class="cur-meta">{" · ".join(meta_parts)}</div>'
+            if any(meta_parts)
+            else ""
+        )
+        summary_html = f'<div class="cur-summary">{summary}</div>' if summary else ""
+        risk_html = f'<div class="cur-risk">{_esc(risk)}</div>' if risk else ""
+        rows.append(
+            f'<article class="cur-row"><h3 class="cur-topic">{topic}</h3>'
+            f'{summary_html}{meta_html}{risk_html}</article>'
+        )
     return "\n".join(rows)
 
 
@@ -386,14 +431,14 @@ def _render_hotlist_rows(stats: Optional[List[Dict[str, Any]]]) -> str:
     """热榜追踪：每个关键词组取最热标题 + 来源摘要行（source #rank [新]）。"""
     rows: List[str] = []
     for grp in (stats or []):
-        word = _esc(grp.get("word", ""))
+        word = _esc(_public_text(grp.get("word", "")))
         titles = grp.get("titles", []) or []
         if not titles:
             continue
-        top_title = _esc(titles[0].get("title", ""))
+        top_title = _esc(_public_text(titles[0].get("title", "")))
         src_parts: List[str] = []
         for t in titles[:3]:
-            src = _esc(t.get("source_name", ""))
+            src = _esc(_public_text(t.get("source_name", "")))
             rank = _rep_rank(t)
             rank_str = f"&nbsp;#{rank}" if rank is not None else ""
             badge = ' <span class="t-new">新</span>' if t.get("is_new") else ""
@@ -416,14 +461,14 @@ def _render_rss_rows(rss_items: Optional[List[Dict[str, Any]]]) -> str:
     """RSS 追踪：每个 RSS 关键词组取最新一条 + 来源/时间。"""
     rows: List[str] = []
     for grp in (rss_items or []):
-        word = _esc(grp.get("word", ""))
+        word = _esc(_public_text(grp.get("word", "")))
         titles = grp.get("titles", []) or []
         if not titles:
             continue
         top = titles[0]
-        top_title = _esc(top.get("title", ""))
-        src = _esc(top.get("source_name", ""))
-        time_d = _esc(top.get("time_display", ""))
+        top_title = _esc(_public_text(top.get("title", "")))
+        src = _esc(_public_text(top.get("source_name", "")))
+        time_d = _esc(_public_text(top.get("time_display", "")))
         extra = (
             f" <span style=\"color:var(--faint)\">+{len(titles) - 1}条</span>"
             if len(titles) > 1
@@ -467,6 +512,7 @@ def render_current_dashboard_html(
     sup_html = ""
     overview_html = ""
     if _is_environment(ai_analysis):
+        analysis_status = _analysis_status(ai_analysis)
         radar = _event_radar(ai_analysis)
         anomaly = radar.get("anomaly", 0)
         suppressed_n = radar.get("suppressed", 0)
@@ -475,6 +521,7 @@ def render_current_dashboard_html(
             if _is_ai_backed(ai_analysis)
             else _program_overview(radar)
         )
+        overview = _public_text(overview)
         if overview:
             overview_html = (
                 '<section class="cur-overview"><h2 class="sec-label">导读</h2>'
@@ -487,10 +534,16 @@ def render_current_dashboard_html(
                 '<section><h2 class="sec-label">重点</h2>'
                 f'<div class="cur-signals">{signals_html}</div></section>'
             )
-            lead_html = (
-                f'<div class="cur-lead">{_esc(title)}共有 <strong>{anomaly} 个事件</strong>进入重点。</div>'
+            degraded_note = (
+                " AI 摘要不可用，当前正文为程序证据回退。"
+                if analysis_status == "degraded"
+                else ""
             )
-        elif _is_ai_backed(ai_analysis) or bool(getattr(ai_analysis, "skipped", False)):
+            lead_html = (
+                f'<div class="cur-lead">{_esc(title)}共有 '
+                f'<strong>{anomaly} 个事件</strong>进入重点。{degraded_note}</div>'
+            )
+        elif analysis_status in {"ok", "skipped"}:
             lead_html = f'<div class="cur-lead">{_esc(title)} · 未检测到异常信号</div>'
         else:
             lead_html = (
@@ -500,12 +553,17 @@ def render_current_dashboard_html(
 
         # 已抑制脚注
         sup_names: List[str] = []
+        for _bucket, item in _iter_environment_items(ai_analysis):
+            if not _is_visible_item(item):
+                topic = _public_text(item.get("topic", ""))
+                if topic:
+                    sup_names.append(_esc(topic))
         for item in (getattr(ai_analysis, "sentiment_heavy", None) or []):
-            t = (item.get("topic", "") or "").strip()
+            t = _public_text(item.get("topic", "")) if isinstance(item, dict) else ""
             if t:
                 sup_names.append(_esc(t))
         for note in (getattr(ai_analysis, "background_notes", None) or []):
-            note = (note or "").strip()
+            note = _public_text(note)
             if note:
                 short = note[:28] + ("…" if len(note) > 28 else "")
                 sup_names.append(_esc(short))

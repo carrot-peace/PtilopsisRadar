@@ -47,6 +47,13 @@ from trendradar.ai.evidence import (
     SECTION_ORDER,
     derive_radar_readout,
 )
+from trendradar.content_policy import (
+    CATEGORY_LABELS as _CATEGORY_LABELS,
+    classify_reader_category as classify_category,
+    is_reader_noise as is_noise_item,
+    reader_category as _category_for_item,
+    reader_structural_reason as structural_reason,
+)
 
 # ─────────────────────────────────────────────────────────────
 # Deterministic notices / labels (sober, not Telegram fallback text)
@@ -177,109 +184,6 @@ def _show_item_risk(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# Rule 4: entertainment / sports / esports noise classification
-# ─────────────────────────────────────────────────────────────
-
-_ENTERTAINMENT_WORDS = (
-    "明星", "综艺", "电视剧", "电影", "演唱会", "爱豆", "偶像", "粉丝",
-    "饭圈", "塌房", "恋情", "官宣", "选秀", "晋级", "出道", "网红", "主播",
-    "热恋", "分手", "结婚", "离婚", "代言", "新歌", "新剧", "票房", "颁奖",
-)
-_SPORTS_WORDS = (
-    "足球", "篮球", "NBA", "世界杯", "联赛", "球员", "夺冠", "进球", "奥运",
-    "金牌", "比分", "球队", "中超", "欧冠", "决赛", "晋级八强", "羽毛球",
-    "乒乓球", "网球", "马拉松", "教练",
-)
-_ESPORTS_WORDS = (
-    "电竞", "LPL", "LCK", "S赛", "全球总决赛", "战队", "选手", "英雄联盟",
-    "KPL", "MSI", "季中冠军赛", "DOTA", "CSGO", "无畏契约", "出装", "对线",
-    "团战", "Ban", "BLG", "HLE", "T1", "G2", "TES", "EDG", "GEN", "LYON",
-    "Bin", "赛后数据", "数据雷达图", "Steam夏促", "游戏攻略",
-)
-
-# Structural-relevance overrides: when present, an item may be promoted even if
-# it is entertainment / sports / esports (platform governance, public safety,
-# state/media policy, major censorship, geopolitical/institutional conflict,
-# large-scale coordinated manipulation).
-_STRUCTURAL_PROMOTION_WORDS = (
-    "封禁", "封号", "下架", "监管", "审查", "处罚", "罚款", "约谈", "整治",
-    "禁赛", "官方通报", "通报", "警方", "刑事", "立案", "安全事故", "踩踏",
-    "伤亡", "死亡", "政策", "国家", "外交", "制裁", "操纵", "水军", "控评",
-    "大规模", "造假", "造谣", "谣言", "网信办", "停播", "停职", "调查",
-)
-
-_CATEGORY_WORDS = {
-    "entertainment": _ENTERTAINMENT_WORDS,
-    "sports": _SPORTS_WORDS,
-    "esports": _ESPORTS_WORDS,
-}
-
-_CATEGORY_LABELS = {
-    "entertainment": "娱乐",
-    "sports": "体育",
-    "esports": "电竞",
-}
-
-
-def _contains_any(text: str, words) -> bool:
-    low = text.lower()
-    for w in words:
-        if w.lower() in low:
-            return True
-    return False
-
-
-def classify_category(text: str) -> Optional[str]:
-    """Return ``entertainment`` / ``sports`` / ``esports`` for ``text`` or None."""
-    blob = text or ""
-    # esports before sports/entertainment: it overlaps with both vocabularies.
-    if _contains_any(blob, _ESPORTS_WORDS):
-        return "esports"
-    if _contains_any(blob, _SPORTS_WORDS):
-        return "sports"
-    if _contains_any(blob, _ENTERTAINMENT_WORDS):
-        return "entertainment"
-    return None
-
-
-def structural_reason(text: str) -> Optional[str]:
-    """Return the first structural-promotion keyword found in ``text`` or None."""
-    blob = (text or "").lower()
-    for w in _STRUCTURAL_PROMOTION_WORDS:
-        if w.lower() in blob:
-            return w
-    return None
-
-
-def _item_blob(topic: str, samples: Optional[List[Dict]]) -> str:
-    parts = [topic or ""]
-    for s in samples or []:
-        if isinstance(s, dict):
-            parts.append(str(s.get("title", "")))
-    return " ".join(parts)
-
-
-def is_noise_item(topic: str, samples: Optional[List[Dict]] = None) -> bool:
-    """True if the item is entertainment/sports/esports noise with no structural reason.
-
-    A structural reason (governance, public safety, policy, censorship,
-    geopolitical/institutional conflict, coordinated manipulation) keeps the
-    item out of the noise bucket so it can be promoted.
-    """
-    # Broad keyword groups can contain unrelated sample titles.  Classifying
-    # the whole group from one incidental sports title incorrectly suppresses
-    # useful entries such as a local-affairs group.  Samples are therefore
-    # consulted only for explicit unclassified single-story topics.
-    raw_topic = topic or ""
-    blob = raw_topic
-    if raw_topic.startswith(("高热未归类·", "未归类·")):
-        blob = _item_blob(raw_topic, samples)
-    if structural_reason(blob):
-        return False
-    return classify_category(blob) is not None
-
-
-# ─────────────────────────────────────────────────────────────
 # Rule 5: domestic public-event confidence
 # ─────────────────────────────────────────────────────────────
 
@@ -314,7 +218,9 @@ def domestic_confidence_status(
     return DOMESTIC_PUBLIC_EVENT
 
 
-def _domestic_status_from_evidence(detail: Dict[str, Any]) -> Optional[str]:
+def _domestic_status_from_evidence(detail: Any) -> Optional[str]:
+    if not isinstance(detail, dict):
+        return None
     present = set(detail.get("source_tiers_present", []) or [])
     by_tier = detail.get("sources_by_tier", {}) or {}
     return domestic_confidence_status(
@@ -436,7 +342,8 @@ def _evidence_note(entry: Dict[str, Any]) -> str:
 
 def _status_for(entry: Dict[str, Any], section: str = "") -> str:
     """Status label, upgraded to a domestic-confidence status when applicable."""
-    detail = entry.get("evidence_detail") or {}
+    raw_detail = entry.get("evidence_detail")
+    detail = raw_detail if isinstance(raw_detail, dict) else {}
     domestic = _domestic_status_from_evidence(detail)
     if domestic:
         return _DOMESTIC_STATUS_LABELS.get(domestic, domestic)
@@ -467,7 +374,9 @@ def _program_overview(radar: Dict[str, Any]) -> str:
     return f"今日识别 {anomaly} 个异常信号：{detail}{suffix}。"
 
 
-def _copy_samples(detail: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _copy_samples(detail: Any) -> List[Dict[str, Any]]:
+    if not isinstance(detail, dict):
+        return []
     samples: List[Dict[str, Any]] = []
     for raw in detail.get("sample_titles", []) or []:
         if not isinstance(raw, dict):
@@ -486,7 +395,9 @@ def _copy_samples(detail: Dict[str, Any]) -> List[Dict[str, Any]]:
     return samples
 
 
-def _copy_source_links(detail: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _copy_source_links(detail: Any) -> List[Dict[str, Any]]:
+    if not isinstance(detail, dict):
+        return []
     links: List[Dict[str, Any]] = []
     for raw in detail.get("source_links", []) or []:
         if not isinstance(raw, dict):
@@ -521,7 +432,8 @@ def _build_main_item(entry: Dict[str, Any], section: str) -> DailyItem:
         analysis = ""
     # Rule 3: risk/boundary text is a separate field.
     risk = (entry.get("risk_note") or entry.get("factual_boundary") or "").strip()
-    detail = entry.get("evidence_detail") or {}
+    raw_detail = entry.get("evidence_detail")
+    detail = raw_detail if isinstance(raw_detail, dict) else {}
     return DailyItem(
         topic=topic,
         summary=body,
@@ -537,8 +449,11 @@ def _build_main_item(entry: Dict[str, Any], section: str) -> DailyItem:
 
 
 def _samples_of(entry: Dict[str, Any]) -> List[Dict]:
-    detail = entry.get("evidence_detail") or {}
-    return detail.get("sample_titles") or []
+    detail = entry.get("evidence_detail")
+    if not isinstance(detail, dict):
+        return []
+    samples = detail.get("sample_titles") or []
+    return samples if isinstance(samples, list) else []
 
 
 def _refresh_radar_from_visible_content(model: DailyReportV2) -> None:
@@ -626,7 +541,7 @@ def build_daily_report_v2(
                 samples = _samples_of(entry)
                 # Rule 4: entertainment/sports/esports → noise unless structural.
                 if is_noise_item(topic, samples):
-                    cat = classify_category(_item_blob(topic, samples)) or "noise"
+                    cat = _category_for_item(topic, samples) or "noise"
                     bucket = noise.setdefault(cat, {"count": 0, "examples": []})
                     bucket["count"] += 1
                     if len(bucket["examples"]) < SUPPRESSED_EXAMPLE_CAP and topic:
@@ -768,6 +683,7 @@ body{color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sy
 .item+.item{margin-top:18px}
 .item-topic{font-weight:650;font-size:var(--reading-size);line-height:1.45}
 .item-summary{font-size:var(--reading-size);color:var(--text);line-height:1.65;margin-top:0}
+.item-topic,.item-summary,.signal-row,.source-row{overflow-wrap:anywhere}
 .item-degraded{font-size:var(--reading-size);color:var(--text);line-height:1.65}
 .item-details{margin-top:7px}
 .item-details>summary{font-size:11px;font-weight:500;line-height:1.4;color:var(--muted);cursor:pointer;list-style:none}
