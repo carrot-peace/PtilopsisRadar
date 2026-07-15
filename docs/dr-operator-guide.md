@@ -57,17 +57,20 @@ PTILOPSIS_DR_TELEGRAM_CHAT_ID 已配置
 
 可选 Telegram 参数：`PTILOPSIS_DR_TELEGRAM_ATTACH_HTML`、`PTILOPSIS_DR_TELEGRAM_API_BASE_URL`、`PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS`、`PTILOPSIS_DR_TELEGRAM_PARSE_MODE`。未设置或传入空值时，附件开关、API 地址和超时时间分别回退为开启、官方 API 地址和 10 秒。通过 Docker 或 GitHub Actions 部署且未配置 `PARSE_MODE` 时默认为 HTML；若在直接调用中显式传入空值，则视为不启用 parse mode。
 
-主要产物：
+日报与 current 运行产物：
 
 - `output/public/daily/full.html`
-- `output/dr/dispatch/latest/dispatch_plan.json`
-- `output/dr/dispatch/latest/dispatch_receipts.json`
 - `output/public/current/index.html`
 - `output/public/current/state.json`
 
+仅当 dispatch mode 为 `artifact` 或 `live` 时，另外生成：
+
+- `output/dr/dispatch/latest/dispatch_plan.json`
+- `output/dr/dispatch/latest/dispatch_receipts.json`
+
 ## 部署要求
 
-Docker compose 只挂载 `config` 与 `output`，源码来自镜像。因此不能只修改挂载的 Prompt；事件 schema、Prompt、解析器、渲染器和测试必须进入同一个镜像版本。`docker/docker-compose.yml` 是纯 image 运行配置，不会自动构建本地代码；本地发布前先在仓库根目录执行：
+Docker compose 将 `config` 与 `output` 挂载到容器，其中 Prompt 来自宿主机的只读 `config`，Python、事件 schema、解析器和渲染器来自镜像，测试不进入生产镜像。因此镜像代码与宿主配置必须来自同一 revision，不能只更新 Prompt 或只更新镜像。`docker/docker-compose.yml` 是纯 image 运行配置，不会自动构建本地代码；本地发布前先确认 worktree 干净，再在仓库根目录执行：
 
 ```bash
 scripts/docker/build-image.sh wantcat/trendradar:latest
@@ -78,8 +81,8 @@ docker compose up -d --force-recreate
 
 部署后至少核对：
 
-1. 运行代码 commit 与验收 commit 相同。
-2. Prompt 和 parser 都声明 `environment-events-v1`。
+1. 镜像中的 `PTILOPSIS_BUILD_COMMIT` 与验收 commit 相同，且没有 `-dirty` 后缀。
+2. 宿主 `config` 来自同一 commit，Prompt 和 parser 都声明 `environment-events-v1`。
 3. 日报日志能看到批次数、结束原因和 token 用量。
 4. `full.html` 不出现“本组”“该类目”等内部组织语言。
 5. 同一次 daily 运行生成的 HTML 与 Telegram 使用相同的事件标题和验证状态；独立的 current/incremental 运行与 daily 共用相同 schema、证据绑定和状态规则。

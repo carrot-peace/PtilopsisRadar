@@ -59,8 +59,9 @@ They are out of scope when they require PtilopsisRadar to become a market dashbo
 ```
 hotlist/RSS crawling
 → source tiers
-→ evidence summary / evidence labels / bucketize
-→ environment AI analysis
+→ evidence IDs / candidate groups
+→ evidence-bound event generation or deterministic fallback
+→ event-level labels / bucketize
 → current dashboard / daily report artifacts
 ```
 
@@ -242,7 +243,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-`docker-compose.yml` runs the tagged image; it does not build local Prompt or Python changes automatically. Re-run the build script before recreating containers whenever the DR pipeline changes.
+`docker-compose.yml` runs the tagged image; it does not build local changes automatically. Python, schema, and renderer changes require rebuilding the image. Prompt and other configuration files come from the host-mounted `config/` directory, so the image code and mounted configuration must be deployed from the same revision before the container is recreated. Production builds should start from a clean worktree; the build helper marks local dirty builds with a `-dirty` commit suffix.
 
 ### GitHub Actions Deployment
 

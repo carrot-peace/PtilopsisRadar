@@ -59,8 +59,9 @@ PtilopsisRadar 只优化一个更窄的雷达功能：检测中文信息环境�
 ```
 热榜/RSS 抓取
 → 来源分层 source tiers
-→ evidence summary / evidence labels / bucketize
-→ environment AI analysis
+→ evidence_id / 候选关键词组
+→ 证据绑定的事件生成或程序化降级
+→ 按事件证据重算 labels / bucketize
 → current dashboard / daily report artifacts
 ```
 
@@ -239,7 +240,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-`docker-compose.yml` 直接运行镜像，不会自动把本地 Prompt 和 Python 修改构建进去。更新 DR 管线时必须先执行上述构建脚本，再重建容器。
+`docker-compose.yml` 直接运行镜像，不会自动纳入本地修改。Python、schema 与渲染器变更需要重建镜像；Prompt 和其他配置来自宿主机挂载的 `config/`，因此重建容器前必须确保镜像代码与挂载配置来自同一 revision。生产构建应使用干净 worktree；构建脚本会给本地 dirty build 的 commit 标识追加 `-dirty`。
 
 ### GitHub Actions 部署
 

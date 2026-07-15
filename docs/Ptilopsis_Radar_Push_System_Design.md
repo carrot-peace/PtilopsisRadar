@@ -33,7 +33,9 @@ MVP push channel is Telegram bot only. Email may be considered later, but is not
 
 Every push must have text. HTML is an artifact and may be attached to Telegram, served through GitHub Pages, served through a private service, or retained locally. Markdown is archive-only unless explicitly extended later.
 
-System-level interaction uses English. Hotspot/topic content keeps its native language.
+CR system terms and operator/audit interaction use English. DR reader-facing
+section labels, evidence status, and program-owned fallback copy use concise
+Chinese. Hotspot/event content keeps its native language.
 
 Examples of system-level terms:
 
@@ -107,7 +109,7 @@ CR-A is triggered by deterministic scoring and decision policy.
 
 DR is the daily report system.
 
-DR may use the current environment newsletter / AI overview direction in the repository. AI can be used for AI Brief, daily overview, topic brief generation, and editorial interpretation.
+DR may use the current environment newsletter direction in the repository. AI can organize evidence-bound events and write a daily overview plus event-level summaries, but program-owned evidence rules remain authoritative.
 
 DR must not be treated as CR-A. DR is a scheduled daily product, not a realtime alert decision.
 
@@ -233,12 +235,15 @@ CR Markdown = permanent per-run audit archive
 
 ### 4.2 DR Artifacts
 
-Every DR run produces:
+Every scheduled daily DR run produces:
 
 ```text
 DR HTML
-DR Telegram text
 ```
+
+`artifact` and `live` dispatch modes additionally produce DR Telegram text and
+dispatch plan / receipt artifacts. `off` mode returns before dispatch artifact
+generation.
 
 DR does not generate Markdown in MVP. DR HTML is the permanent daily report.
 
@@ -1821,15 +1826,15 @@ suppress: never enters text
 
 DR is the daily report product.
 
-DR can use AI according to the current project positioning. AI is allowed for AI Brief, daily overview, and topic-level daily interpretation.
+DR can use AI according to the current project positioning. AI is allowed to organize evidence-bound events and write the daily overview, event titles, summaries, and propagation notes.
 
 DR Telegram text is:
 
 ```text
-AI Brief + Topics
+导读 + 事件重点
 ```
 
-AI Brief is the main content of DR text. MVP directly reuses the existing generated AI overview / AI Brief from DR HTML or the environment newsletter result. A dedicated DR text summarizer can be designed later.
+The daily overview and highlights are rendered from the same event result used by DR HTML. The formatter does not regroup topics or substitute propagation analysis for an event summary.
 
 If the AI overview is unavailable, DR text renders a Chinese, program-owned brief from the post-filter signal counts. It must not replace the brief with a generic English failure message. Routine entertainment, sports, esports, and near-duplicate headlines are removed from the text selection unless they carry a structural public-interest reason.
 
@@ -2179,7 +2184,6 @@ Cross-layer Raw Score formula
 Background Support Raw Score future design
 CR-A multi-message chunking details
 CR HTML / Markdown path naming
-DR AI Brief source field mapping
 CR-P bot command runtime
 ```
 
@@ -2252,8 +2256,8 @@ PR9g: CR-A formatter + delivery adapter
 - do not extend AI realtime branch as decision logic
 
 PR9h: DR Telegram formatter alignment
-- AI Brief from existing overview source
-- Topics only
+- daily overview and event highlights from the shared event result
+- event title + concise event summary
 - no links in text
 - attach DR HTML
 
