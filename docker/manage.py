@@ -321,9 +321,20 @@ def show_config():
         # AI 分析配置
         "AI_ANALYSIS_ENABLED",
         "AI_API_KEY",
-        "AI_PROVIDER",
         "AI_MODEL",
-        "AI_BASE_URL",
+        "AI_API_BASE",
+        "AI_ANALYSIS_MAX_OUTPUT_TOKENS",
+        "AI_ANALYSIS_MAX_EVENTS",
+        "AI_ANALYSIS_BATCH_MAX_EVIDENCE",
+        # DR 独立发送门控
+        "PTILOPSIS_DR_DISPATCH_MODE",
+        "PTILOPSIS_DR_TELEGRAM_SEND",
+        "PTILOPSIS_DR_TELEGRAM_BOT_TOKEN",
+        "PTILOPSIS_DR_TELEGRAM_CHAT_ID",
+        "PTILOPSIS_DR_TELEGRAM_ATTACH_HTML",
+        "PTILOPSIS_DR_TELEGRAM_API_BASE_URL",
+        "PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS",
+        "PTILOPSIS_DR_TELEGRAM_PARSE_MODE",
         # 远程存储配置
         "S3_BUCKET_NAME",
         "S3_ACCESS_KEY_ID",

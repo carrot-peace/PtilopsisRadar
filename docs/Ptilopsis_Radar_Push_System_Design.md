@@ -1831,6 +1831,8 @@ AI Brief + Topics
 
 AI Brief is the main content of DR text. MVP directly reuses the existing generated AI overview / AI Brief from DR HTML or the environment newsletter result. A dedicated DR text summarizer can be designed later.
 
+If the AI overview is unavailable, DR text renders a Chinese, program-owned brief from the post-filter signal counts. It must not replace the brief with a generic English failure message. Routine entertainment, sports, esports, and near-duplicate headlines are removed from the text selection unless they carry a structural public-interest reason.
+
 DR and CR share the same underlying source data family, but at different time scales. DR should not be expected to mirror every CR Decision. DR is a daily-scale product that may aggregate, reinterpret, or omit topics according to daily report logic.
 
 ### 20.1 DR Text Grammar
@@ -1839,42 +1841,46 @@ Template:
 
 ```text
 Ptilopsis Radar｜DR
-Date: YYYY-MM-DD
+日期：YYYY-MM-DD
 
-AI Brief
-{existing AI overview}
+导读
+{模型概述，或程序根据事件证据生成的概述}
 
-Topics
-1. Topic A
-2. Topic B
-3. Topic C
+重点
+1. {事件标题}
+   {事件摘要}
+2. {事件标题}
+   {事件摘要}
 
-DR HTML: attached
+完整报告：见随附 HTML
 ```
 
 Rules:
 
 ```text
 no emoji
-system terms in English
+message section labels and evidence status use concise Chinese reader-facing language
 topic content in native language
 no Decision in DR text
 no links in DR text
+internal classifier prefixes are not user-facing
+status metadata uses readable language rather than raw bucket keys
+generic risk boundaries are not used as topic summaries
 ```
 
-DR text only lists topic names after AI Brief. Briefs, source links, evidence, and details live in DR HTML.
+DR text lists an event title and its concise event-level summary after the brief. Source links, expanded evidence, and detailed boundaries live in DR HTML.
 
 ### 20.2 DR HTML
 
-DR HTML follows daily sections, not CR four-level sections.
+DR HTML follows a single event stream, not CR four-level sections and not internal keyword categories.
 
 Suggested structure:
 
 ```text
-Mini Dashboard / AI Brief
-Key Topics
-Background & Evidence
-Raw Hotlist / Appendix
+导读
+重点（事件标题 + 详细摘要）
+来源与核验（逐事件点击展开）
+数据附录 · 原始热榜
 ```
 
 DR HTML quality rules:
@@ -1885,19 +1891,26 @@ topic entries must not be title-only
 topic entries should include simple brief / introduction
 source links must be included in HTML
 source links may be collapsed by default
+the mini dashboard reflects post-filter visible signals
+summary and propagation-structure analysis are rendered separately
+when AI prose is missing, representative propagation text is shown with an explicit non-factual label
+keyword groups containing unrelated headlines must present them as independent signals, not one synthesized event
 ```
 
 ### 20.3 DR Fallback
 
 If AI or DR text rendering fails, the system must not fabricate AI conclusions.
 
-Fallback should use system-level English.
+Fallback uses concise Chinese and must distinguish model prose from program-owned evidence. Analyzer-owned event fallbacks remain visible even when the model response is truncated or invalid.
 
 Example:
 
 ```text
 Ptilopsis Radar｜DR
-Daily text is temporarily unavailable. DR HTML has been generated and attached when available.
+本轮 AI 摘要不可用；以下内容仅依据程序统计与已采集证据整理。
+重点
+1. {程序保留的事件标题}
+   {可核对的传播摘要}
 ```
 
 DR HTML should still be attached when available.

@@ -101,22 +101,22 @@ Ptilopsis Radar 的价值是把这些来源放进同一套观察框架里，看"
 
 ### 程序化证据归类
 
-程序（`trendradar/ai/evidence.py`）在 AI 介入之前，对每个主题组执行以下步骤：
+程序（`trendradar/ai/evidence.py`）先把关键词主题组作为候选容器，再按每个事件实际绑定的证据完成最终裁定：
 
 1. 按来源层级归集该主题命中了哪些 A / B / C / D 来源
 2. 计算 D 层热度（平台数量、最高排名）
 3. 检测情绪信号（标题中的强情绪词）
-4. 根据规则裁定唯一的 `evidence_label`（验证状态）
-5. 将主题组分配到唯一栏目（bucket）
+4. 为每条传播文本生成稳定 `evidence_id`，通过事件返回的 `evidence_ids` 精确绑定来源
+5. 根据事件自己的证据子集重新计算唯一 `event_label`、验证状态、事实边界与栏目
 
-**验证状态由程序唯一裁定，AI 不得更改。**
+**关键词组不直接面向读者。验证状态与栏目由事件自己的证据子集唯一裁定，AI 不得更改。**
 
 ### AI 克制补写
 
-AI（可选，需配置 API Key）的唯一任务是基于程序生成的 evidence summary，为每个已分栏的议题补写克制的日报文字。AI 不负责：
+AI（可选，需配置 API Key）的唯一任务是把候选传播文本整理为具体事件，并为证据绑定成功的事件补写克制、详细的标题、摘要与传播结构说明。AI 不负责：
 
 - 引入证据摘要中没有的新事实、新数字、新人物
-- 更改验证状态或栏目归属
+- 更改事件的验证状态、事实边界或栏目归属
 - 把 D 层传播改写成事实事件
 - 输出投资建议、行动指南或趋势预测
 
@@ -126,6 +126,8 @@ AI（可选，需配置 API Key）的唯一任务是基于程序生成的 eviden
 dispatch；部署通知与 supervisor 告警是独立的 owner-only 运维通道。旧多渠道
 notification、fallback 和兼容 facade 已完整移除。详见
 [`docs/transport_boundaries.md`](docs/transport_boundaries.md)。
+
+事件 schema、Gemini 预算、发送门控、部署步骤和验收清单详见 [`docs/dr-operator-guide.md`](docs/dr-operator-guide.md)。
 
 ---
 
@@ -228,11 +230,16 @@ launchctl bootstrap gui/$(id -u) scripts/apple-container/com.carrot-peace.ptilop
 ### Docker 部署
 
 ```bash
+# 若要运行当前仓库中的修改，先在仓库根目录构建带版本标识的镜像
+scripts/docker/build-image.sh wantcat/trendradar:latest
+
 cd docker
 cp .env.example .env
 # 编辑 .env 配置环境变量
 docker compose up -d
 ```
+
+`docker-compose.yml` 直接运行镜像，不会自动把本地 Prompt 和 Python 修改构建进去。更新 DR 管线时必须先执行上述构建脚本，再重建容器。
 
 ### GitHub Actions 部署
 
@@ -255,6 +262,8 @@ ai:
 ```
 
 支持的模型包括 DeepSeek、OpenAI、Gemini、Claude、Ollama 等，详见 [LiteLLM 文档](https://docs.litellm.ai/docs/providers)。
+
+信息环境日报使用独立容量配置：默认最多向 AI 提交 30 条 evidence、每批 12 条证据、单次输出上限 16,000 tokens；这不会改变翻译等其他 AI 功能的预算。Docker / GitHub Actions 可分别通过 `AI_ANALYSIS_MAX_EVENTS`、`AI_ANALYSIS_BATCH_MAX_EVIDENCE`、`AI_ANALYSIS_MAX_OUTPUT_TOKENS` 覆盖。历史命名 `max_events` 限制的是 AI 输入证据，不是读者最终看到的确定性降级事件数。
 
 ### 诊断命令
 

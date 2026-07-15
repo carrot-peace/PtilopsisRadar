@@ -141,6 +141,19 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
           AI_API_BASE: ${{ secrets.AI_API_BASE }}
+          # DR / 信息环境日报独立容量参数；未配置时使用 config.yaml 的安全默认值
+          AI_ANALYSIS_MAX_OUTPUT_TOKENS: ${{ secrets.AI_ANALYSIS_MAX_OUTPUT_TOKENS }}
+          AI_ANALYSIS_MAX_EVENTS: ${{ secrets.AI_ANALYSIS_MAX_EVENTS }}
+          AI_ANALYSIS_BATCH_MAX_EVIDENCE: ${{ secrets.AI_ANALYSIS_BATCH_MAX_EVIDENCE }}
+          # 新 DR 发送路径保持显式门控；只有同时配置 mode=live 与 send=1 才会发送
+          PTILOPSIS_DR_DISPATCH_MODE: ${{ secrets.PTILOPSIS_DR_DISPATCH_MODE || 'off' }}
+          PTILOPSIS_DR_TELEGRAM_SEND: ${{ secrets.PTILOPSIS_DR_TELEGRAM_SEND || '0' }}
+          PTILOPSIS_DR_TELEGRAM_BOT_TOKEN: ${{ secrets.PTILOPSIS_DR_TELEGRAM_BOT_TOKEN }}
+          PTILOPSIS_DR_TELEGRAM_CHAT_ID: ${{ secrets.PTILOPSIS_DR_TELEGRAM_CHAT_ID }}
+          PTILOPSIS_DR_TELEGRAM_ATTACH_HTML: ${{ secrets.PTILOPSIS_DR_TELEGRAM_ATTACH_HTML || '1' }}
+          PTILOPSIS_DR_TELEGRAM_API_BASE_URL: ${{ secrets.PTILOPSIS_DR_TELEGRAM_API_BASE_URL }}
+          PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS: ${{ secrets.PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS }}
+          PTILOPSIS_DR_TELEGRAM_PARSE_MODE: ${{ secrets.PTILOPSIS_DR_TELEGRAM_PARSE_MODE || 'HTML' }}
           # 远程存储配置
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
           S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
