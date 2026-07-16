@@ -170,6 +170,55 @@ class TestBuildEvidenceEndToEnd(unittest.TestCase):
         self.assertNotIn("https://example.com/openai", prompt)
         self.assertNotIn("https://example.com/weibo", prompt)
 
+    def test_same_headline_from_different_sources_keeps_both_evidence_ids(self):
+        headline = "同一事件出现公开进展"
+        stats = [{"word": "X", "titles": [T(headline, "微博", 3)]}]
+        rss_stats = [{"word": "X", "titles": [T(headline, "OpenAI News", 1)]}]
+        labels, items = label_of(stats, rss_stats)
+        samples = items[0]["sample_titles"]
+        self.assertEqual(labels["X"], "cross_layer_verified")
+        self.assertEqual(len(samples), 2)
+        self.assertEqual(
+            {sample["source"] for sample in samples}, {"微博", "OpenAI News"}
+        )
+        self.assertEqual(len({sample["evidence_id"] for sample in samples}), 2)
+
+    def test_publisher_excerpt_reaches_prompt_but_social_description_does_not(self):
+        stats = [{
+            "word": "X",
+            "titles": [
+                T("社交标题", "微博", 2, summary="D 层描述不应成为正文证据"),
+            ],
+        }]
+        rss_stats = [{
+            "word": "X",
+            "titles": [
+                T(
+                    "来源标题",
+                    "OpenAI News",
+                    1,
+                    summary="  <p>正文摘要包含关键进展</p>  与主体信息。 ",
+                ),
+            ],
+        }]
+
+        _, items = label_of(stats, rss_stats)
+        samples = items[0]["sample_titles"]
+        by_source = {sample["source"]: sample for sample in samples}
+        self.assertEqual(
+            by_source["OpenAI News"]["source_excerpt"],
+            "正文摘要包含关键进展 与主体信息。",
+        )
+        self.assertNotIn("source_excerpt", by_source["微博"])
+
+        buckets = EV.bucketize(items)
+        prompt = EV.render_evidence_for_prompt(
+            buckets, EV.build_overview_stats(buckets)
+        )
+        self.assertIn("来源摘录（仅支持本事件摘要）", prompt)
+        self.assertIn("正文摘要包含关键进展", prompt)
+        self.assertNotIn("D 层描述不应成为正文证据", prompt)
+
 
 class TestBucketizeAndOverview(unittest.TestCase):
     def _items(self):

@@ -9,11 +9,15 @@ import sys
 import importlib.util
 import types
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(__file__))
 import _bootstrap  # noqa: E402
 
 ROOT = _bootstrap.ROOT
+# Install the lightweight real prompt module so this test file is independently
+# runnable instead of relying on another test module's import order.
+_bootstrap.load_all()
 
 
 def read(relpath):
@@ -49,7 +53,7 @@ class TestEnvironmentPromptFile(unittest.TestCase):
 
     def test_role_is_monitor_editor_not_intelligence_analyst(self):
         # 用真实 loader 取出 [system] 段，确保 AI 角色不是旧版"高级情报分析师"
-        import trendradar.ai.prompt_loader as pl
+        pl = sys.modules["trendradar.ai.prompt_loader"]
         system, _ = pl.load_prompt_template("ai_environment_report_prompt.txt", label="AI")
         self.assertIn("信息环境异常监测报告编辑", system)
         # 旧版 classic system 的标志句不应出现在新角色定义中
@@ -60,9 +64,29 @@ class TestEnvironmentPromptFile(unittest.TestCase):
         # 明确约束 sample_titles 不得当事实复述（验收第 4 点）
         self.assertIn("sample_titles", self.text)
 
+    def test_forbids_merging_unrelated_keyword_group_items(self):
+        self.assertIn("必须按具体事件拆分 events", self.text)
+        self.assertIn("不得按类目写总括摘要", self.text)
+        self.assertIn("读者最终只看到 events，不看到议题组名", self.text)
+        self.assertIn("常规娱乐、体育、电竞赛果", self.text)
+
+    def test_item_summary_prefers_detailed_supported_content(self):
+        self.assertIn("50—140 个汉字", self.text)
+        self.assertIn("传播对象、涉及主体或地点、当前可见进展", self.text)
+        self.assertIn("不要用类别背景凑字数", self.text)
+        self.assertIn("summary 输出空字符串", self.text)
+        self.assertIn("source_excerpt", self.text)
+        self.assertIn("不得扩大到摘录之外", self.text)
+
+    def test_event_output_binds_stable_evidence_ids(self):
+        self.assertIn('"schema_version": "environment-events-v1"', self.text)
+        self.assertIn('"items": [', self.text)
+        self.assertIn("evidence_ids 必须逐字复制", self.text)
+        self.assertIn('"title":"具体事件标题"', self.text)
+
     def test_real_prompt_parses_into_system_user(self):
         # 用真实 prompt_loader 解析，确认能拆出非空 system / user
-        import trendradar.ai.prompt_loader as pl
+        pl = sys.modules["trendradar.ai.prompt_loader"]
         system, user = pl.load_prompt_template("ai_environment_report_prompt.txt", label="AI")
         self.assertTrue(system.strip())
         self.assertTrue(user.strip())
@@ -110,6 +134,11 @@ class TestConfigYaml(unittest.TestCase):
         for field in ("report_style", "prompt_file", "include_standalone"):
             with self.subTest(field=field):
                 self.assertNotIn(field, analysis)
+
+    def test_environment_output_capacity_is_explicit(self):
+        self.assertIn("max_output_tokens: 16000", self.text)
+        self.assertIn("max_events: 30", self.text)
+        self.assertIn("batch_max_evidence: 12", self.text)
 
     def test_advanced_notification_fields_are_absent(self):
         advanced = self.config["advanced"]
@@ -182,6 +211,43 @@ class TestConfigLoader(unittest.TestCase):
         )
         self.assertNotIn("DISPLAY_MODE", report)
         self.assertNotIn("STANDALONE", translation["SCOPE"])
+
+    def test_dr_capacity_defaults_and_extra_params(self):
+        cfg = self.loader._load_ai_analysis_config(
+            {"ai_analysis": {"extra_params": {"reasoning_effort": "low"}}}
+        )
+        self.assertEqual(cfg["MAX_OUTPUT_TOKENS"], 16000)
+        self.assertEqual(cfg["MAX_EVENTS"], 30)
+        self.assertEqual(cfg["BATCH_MAX_EVIDENCE"], 12)
+        self.assertEqual(cfg["EXTRA_PARAMS"]["reasoning_effort"], "low")
+
+    def test_dr_capacity_environment_overrides(self):
+        env = {
+            "AI_ANALYSIS_MAX_OUTPUT_TOKENS": "12000",
+            "AI_ANALYSIS_MAX_EVENTS": "24",
+            "AI_ANALYSIS_BATCH_MAX_EVIDENCE": "8",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = self.loader._load_ai_analysis_config({})
+        self.assertEqual(cfg["MAX_OUTPUT_TOKENS"], 12000)
+        self.assertEqual(cfg["MAX_EVENTS"], 24)
+        self.assertEqual(cfg["BATCH_MAX_EVIDENCE"], 8)
+
+    def test_non_positive_and_invalid_capacity_use_safe_defaults(self):
+        for value in (0, -1, "bad", ""):
+            with self.subTest(value=value):
+                cfg = self.loader._load_ai_analysis_config(
+                    {
+                        "ai_analysis": {
+                            "max_output_tokens": value,
+                            "max_events": value,
+                            "batch_max_evidence": value,
+                        }
+                    }
+                )
+                self.assertEqual(cfg["MAX_OUTPUT_TOKENS"], 16000)
+                self.assertEqual(cfg["MAX_EVENTS"], 30)
+                self.assertEqual(cfg["BATCH_MAX_EVIDENCE"], 12)
 
     def test_rss_max_retries_defaults_to_two(self):
         cfg = self.loader._load_rss_config({})

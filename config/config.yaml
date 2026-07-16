@@ -425,8 +425,10 @@ ai_analysis:
                                     # follow_report = 跟随 report.mode（默认）
                                     # daily / current / incremental = 强制使用指定模式
 
-  max_news_for_analysis: 200        # 参与分析的新闻数量上限（控制 token 成本的关键项）
-                                    # 热榜优先占用配额，RSS 使用剩余配额
+  max_news_for_analysis: 200        # 送入 AI 的关键词组上限；程序证据仍保留全量
+  max_output_tokens: 16000          # DR 专用输出上限；不影响翻译/过滤等其他 AI 调用
+  max_events: 30                    # 单期最多送入 AI 的 evidence 候选数
+  batch_max_evidence: 12            # 每个 Structured Output 批次最多包含的 evidence 数
 
   include_rss: true                 # 是否包含 RSS 内容进行分析（true=包含, false=不包含）
 
