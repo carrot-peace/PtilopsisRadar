@@ -29,6 +29,7 @@ class AIClient:
                 - TIMEOUT: 请求超时时间（秒）
                 - NUM_RETRIES: 重试次数（可选）
                 - FALLBACK_MODELS: 备用模型列表（可选）
+                - EXTRA_PARAMS: 透传给 LiteLLM 的额外参数（可选）
         """
         self.model = config.get("MODEL", "deepseek/deepseek-chat")
         self.api_key = config.get("API_KEY") or os.environ.get("AI_API_KEY", "")
@@ -38,6 +39,44 @@ class AIClient:
         self.timeout = config.get("TIMEOUT", 120)
         self.num_retries = config.get("NUM_RETRIES", 2)
         self.fallback_models = config.get("FALLBACK_MODELS", [])
+        configured_extra = config.get("EXTRA_PARAMS", {})
+        self.extra_params = dict(configured_extra) if isinstance(configured_extra, dict) else {}
+        # chat() 仍返回 str 以兼容既有调用方；完整的结束原因和用量保存在这里。
+        self.last_response_metadata: Dict[str, Any] = {}
+
+    @staticmethod
+    def _response_value(response: Any, key: str, default: Any = None) -> Any:
+        if isinstance(response, dict):
+            return response.get(key, default)
+        return getattr(response, key, default)
+
+    @staticmethod
+    def _plain_mapping(value: Any) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return dict(value)
+        for method_name in ("model_dump", "dict"):
+            method = getattr(value, method_name, None)
+            if callable(method):
+                try:
+                    dumped = method()
+                    if isinstance(dumped, dict):
+                        return dumped
+                except Exception:
+                    pass
+        result: Dict[str, Any] = {}
+        for key in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "thoughts_token_count",
+            "reasoning_tokens",
+        ):
+            item = getattr(value, key, None)
+            if item is not None:
+                result[key] = item
+        return result
 
     def chat(
         self,
@@ -57,14 +96,22 @@ class AIClient:
         Raises:
             Exception: API 调用失败时抛出异常
         """
-        # 构建请求参数
-        params = {
+        self.last_response_metadata = {}
+
+        # EXTRA_PARAMS 先作为基底；明确的客户端配置和单次 kwargs 具有更高优先级。
+        params: Dict[str, Any] = dict(self.extra_params)
+        params.update({
             "model": self.model,
             "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
             "timeout": kwargs.get("timeout", self.timeout),
             "num_retries": kwargs.get("num_retries", self.num_retries),
-        }
+        })
+
+        temperature = kwargs.get("temperature", self.temperature)
+        if temperature is not None:
+            params["temperature"] = temperature
+        else:
+            params.pop("temperature", None)
 
         # 添加 API Key
         if self.api_key:
@@ -78,14 +125,17 @@ class AIClient:
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
         if max_tokens and max_tokens > 0:
             params["max_tokens"] = max_tokens
+        else:
+            params.pop("max_tokens", None)
 
         # 添加 fallback 模型（如果配置了）
         if self.fallback_models:
             params["fallbacks"] = self.fallback_models
 
         # 合并其他额外参数
+        consumed = {"temperature", "timeout", "num_retries", "max_tokens"}
         for key, value in kwargs.items():
-            if key not in params:
+            if key not in consumed:
                 params[key] = value
 
         # 调用 LiteLLM
@@ -93,12 +143,28 @@ class AIClient:
 
         # 提取响应内容
         # 某些模型/提供商返回 list（内容块）而非 str，统一转为 str
-        content = response.choices[0].message.content
+        choices = self._response_value(response, "choices", []) or []
+        if not choices:
+            raise ValueError("AI 响应缺少 choices")
+        choice = choices[0]
+        message = self._response_value(choice, "message", {})
+        content = self._response_value(message, "content", "")
         if isinstance(content, list):
             content = "\n".join(
                 item.get("text", str(item)) if isinstance(item, dict) else str(item)
                 for item in content
             )
+
+        finish_reason = self._response_value(choice, "finish_reason", "")
+        if hasattr(finish_reason, "value"):
+            finish_reason = finish_reason.value
+        usage = self._plain_mapping(self._response_value(response, "usage"))
+        self.last_response_metadata = {
+            "finish_reason": str(finish_reason or "").upper(),
+            "usage": usage,
+            "model": str(self._response_value(response, "model", self.model) or self.model),
+            "response_id": str(self._response_value(response, "id", "") or ""),
+        }
         return content or ""
 
     def validate_config(self) -> tuple[bool, str]:
