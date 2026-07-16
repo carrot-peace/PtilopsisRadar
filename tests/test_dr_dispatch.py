@@ -29,6 +29,7 @@ from trendradar.dr.dispatch_plan import (
 )
 from trendradar.dr.formatter import (
     DR_FALLBACK_TEXT,
+    _telegram_visible_length,
     render_dr_telegram_text,
     select_dr_digest_topics,
 )
@@ -89,7 +90,7 @@ class TestDRFormatter(unittest.TestCase):
     def test_ai_overview_rendered(self) -> None:
         text = render_dr_telegram_text(_ai_result(), date="2026-06-18")
         self.assertIn("Ptilopsis Radar｜DR", text)
-        self.assertIn("<b>AI Brief</b>", text)
+        self.assertIn("<b>导读</b>", text)
         self.assertIn("今日 AI Brief 概览", text)
 
     def test_topics_selected_and_deduped(self) -> None:
@@ -99,7 +100,7 @@ class TestDRFormatter(unittest.TestCase):
     def test_no_ai_fallback(self) -> None:
         text = render_dr_telegram_text(None, date="2026-06-18")
         self.assertIn(DR_FALLBACK_TEXT, text)
-        self.assertIn("DR HTML: attached", text)
+        self.assertIn("完整报告：见随附 HTML", text)
 
     def test_failed_ai_fallback(self) -> None:
         failed = AIAnalysisResult(report_style="environment", success=False, error="x")
@@ -112,11 +113,185 @@ class TestDRFormatter(unittest.TestCase):
         self.assertIn(DR_FALLBACK_TEXT, text)
         self.assertEqual(select_dr_digest_topics(unsupported), [])
 
+    def test_failed_ai_keeps_analyzer_event_fallbacks(self) -> None:
+        failed = _ai_result(success=False, overview="不应展示的截断概述")
+        text = render_dr_telegram_text(failed, date="2026-06-18")
+        self.assertIn(DR_FALLBACK_TEXT, text)
+        self.assertIn("Topic A", text)
+        self.assertIn("Topic B", text)
+        self.assertNotIn("不应展示的截断概述", text)
+
+    def test_intentionally_skipped_analysis_is_not_reported_as_ai_failure(self) -> None:
+        skipped = AIAnalysisResult(
+            report_style="environment", success=False, skipped=True
+        )
+        text = render_dr_telegram_text(skipped, date="2026-06-18")
+        self.assertIn("本轮未识别达到异常阈值的事件", text)
+        self.assertNotIn(DR_FALLBACK_TEXT, text)
+
     def test_text_omits_urls_and_decision(self) -> None:
         text = render_dr_telegram_text(_ai_result(), date="2026-06-18")
         self.assertNotIn("https://", text)
         self.assertNotIn("Decision", text)
         self.assertNotIn("source_links", text)
+
+    def test_missing_ai_brief_uses_program_counts(self) -> None:
+        result = _ai_result(
+            overview="",
+            overview_stats={
+                "label_counts": {
+                    "cross_layer_verified": 0,
+                    "high_heat_unverified": 2,
+                    "chinese_only_hot": 1,
+                    "silence_gap": 1,
+                    "sentiment_heavy": 1,
+                },
+                "background_count": 3,
+            },
+        )
+        text = render_dr_telegram_text(result, date="2026-06-18")
+        self.assertIn("今日识别 3 个异常信号", text)
+        self.assertIn("1 个社交平台单点高热", text)
+        self.assertIn(DR_FALLBACK_TEXT, text)
+
+    def test_noise_is_filtered_and_internal_prefix_is_hidden(self) -> None:
+        result = _ai_result(
+            cross_layer_verified=[],
+            high_heat_unverified=[
+                {
+                    "topic": "高热未归类·BLG战胜HLE晋级MSI决赛",
+                    "summary": "电竞赛果讨论",
+                    "source_layers": "D",
+                    "highest_heat": "微博 第1名",
+                },
+                {
+                    "topic": "高热未归类·某地发布防汛红色预警",
+                    "summary": "关于防汛预警的传播进入平台高位",
+                    "source_layers": "D",
+                    "highest_heat": "微博 第2名",
+                },
+                {"topic": "爱豆粉丝见面会", "summary": "娱乐活动传播"},
+                {"topic": "哈兰德赛后发言", "summary": "体育赛后传播"},
+            ],
+            chinese_only_hot=[],
+        )
+        text = render_dr_telegram_text(result, date="2026-06-18")
+        self.assertNotIn("BLG", text)
+        self.assertNotIn("高热未归类", text)
+        self.assertIn("某地发布防汛红色预警", text)
+        self.assertNotIn("爱豆", text)
+        self.assertNotIn("哈兰德", text)
+        self.assertNotIn("high_heat_unverified", text)
+        self.assertNotIn("highest_heat", text)
+
+    def test_near_duplicate_topics_are_collapsed(self) -> None:
+        result = _ai_result(
+            cross_layer_verified=[],
+            high_heat_unverified=[
+                {"topic": "某地暴雨红色预警", "summary": "a"},
+                {"topic": "某地暴雨红色预警最新消息", "summary": "b"},
+            ],
+            chinese_only_hot=[],
+        )
+        topics = select_dr_digest_topics(result)
+        self.assertEqual([t["topic"] for t in topics], ["某地暴雨红色预警"])
+
+    def test_missing_ai_summary_falls_back_to_events_not_topic_group(self) -> None:
+        result = _ai_result(
+            cross_layer_verified=[],
+            high_heat_unverified=[{
+                "topic": "公共安全与社会失序",
+                "summary": "",
+                "highest_heat": "今日头条 第1名",
+                "evidence_detail": {
+                    "sample_titles": [
+                        {"title": "海南陵水失联女生已找到"},
+                        {"title": "河北宽城多个小区被淹"},
+                    ]
+                },
+            }],
+            chinese_only_hot=[],
+        )
+        topics = select_dr_digest_topics(result)
+        self.assertEqual(
+            [topic["topic"] for topic in topics],
+            ["海南陵水失联女生已找到", "河北宽城多个小区被淹"],
+        )
+        self.assertNotIn("本组", " ".join(topic["summary"] for topic in topics))
+
+    def test_analysis_is_never_published_as_an_event_summary(self) -> None:
+        result = _ai_result(
+            cross_layer_verified=[],
+            high_heat_unverified=[{
+                "topic": "宽泛内部组名",
+                "summary": "",
+                "analysis": "单一 D 层来源，无上游来源呼应。",
+                "evidence_detail": {
+                    "sample_titles": [{"title": "某地发布暴雨红色预警"}]
+                },
+            }],
+            chinese_only_hot=[],
+        )
+        topics = select_dr_digest_topics(result)
+        self.assertEqual(topics[0]["topic"], "某地发布暴雨红色预警")
+        self.assertNotIn("单一 D 层来源", topics[0]["summary"])
+
+    def test_telegram_output_has_a_hard_visible_character_limit(self) -> None:
+        items = []
+        for index in range(10):
+            marker = chr(0x4E00 + index)
+            items.append({
+                "topic": f"事件{index}" + marker * 500 + "&" * 100,
+                "summary": "详细摘要" * 300,
+                "highest_heat": "平台排名" * 100,
+                "verification_status": "高热待核实",
+            })
+        result = _ai_result(
+            overview="盘面导读" * 500,
+            cross_layer_verified=[],
+            high_heat_unverified=items,
+            chinese_only_hot=[],
+        )
+
+        text = render_dr_telegram_text(
+            result, date="2026-06-18", max_items=999
+        )
+
+        self.assertLessEqual(_telegram_visible_length(text), 4096)
+        self.assertEqual(text.count("<b>"), text.count("</b>"))
+        self.assertLessEqual(len(select_dr_digest_topics(result, max_items=999)), 5)
+
+    def test_event_status_wins_over_originating_bucket(self) -> None:
+        result = _ai_result(
+            cross_layer_verified=[{
+                "topic": "只有社交层证据的事件",
+                "summary": "相关标题进入平台高位，暂无上游来源呼应。",
+                "verification_status": "高热待核实",
+                "highest_heat": "微博 第1名",
+            }],
+            high_heat_unverified=[],
+            chinese_only_hot=[],
+        )
+        topics = select_dr_digest_topics(result)
+        self.assertEqual(topics[0]["status_label"], "单点高热，来源待补")
+        text = render_dr_telegram_text(result, date="2026-06-18")
+        self.assertIn("单点高热，来源待补", text)
+        self.assertNotIn("多层来源呼应", text)
+
+    def test_program_brief_counts_events_by_status_not_bucket(self) -> None:
+        result = _ai_result(
+            overview="",
+            cross_layer_verified=[{
+                "topic": "只有社交层证据的事件",
+                "summary": "相关标题进入平台高位。",
+                "verification_status": "高热待核实",
+            }],
+            high_heat_unverified=[],
+            chinese_only_hot=[],
+        )
+        text = render_dr_telegram_text(result, date="2026-06-18")
+        self.assertIn("1 个社交平台单点高热", text)
+        self.assertNotIn("1 个多层来源呼应", text)
 
 
 class TestDRPlanExecutor(unittest.TestCase):
@@ -216,6 +391,17 @@ class TestDREnvAndSink(unittest.TestCase):
     def test_disabled_returns_none(self) -> None:
         self.assertIsNone(build_dr_telegram_sink_config_from_env({}))
         self.assertIsNone(build_dr_telegram_sink_from_env({}))
+
+    def test_empty_optional_env_values_use_safe_defaults(self) -> None:
+        config = build_dr_telegram_sink_config_from_env(
+            self._env(
+                PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS="",
+                PTILOPSIS_DR_TELEGRAM_ATTACH_HTML="",
+            )
+        )
+        assert config is not None
+        self.assertEqual(config.timeout_seconds, 10.0)
+        self.assertTrue(config.attach_html)
 
     def test_payload_builders(self) -> None:
         config = build_dr_telegram_sink_config_from_env(self._env())

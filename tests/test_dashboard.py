@@ -108,23 +108,24 @@ class TestRenderEnvironment(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", self.html)
         self.assertIn("<style>", self.html)  # 内联 CSS
         self.assertNotIn("<script", self.html)  # 无外部脚本引用
+        self.assertIn("overflow-wrap:anywhere", self.html)
 
     def test_lead_and_signal_section(self):
         # newsletter 盘面：lead 异常计数 + 异常信号区 + 已抑制脚注 + 生成时间。
         # anomaly = cross_layer(1)+high_heat(1)+silence_gap(1)+chinese_only(0) = 3
         # suppressed = background_count(2) + sentiment_heavy(1) = 3
         self.assertIn("当前盘面", self.html)
-        self.assertIn("个异常信号", self.html)
-        self.assertIn(">3<", self.html)  # lead 异常数
-        self.assertIn("异常信号", self.html)  # sec-label
+        self.assertIn("3 个事件", self.html)
+        self.assertIn("导读", self.html)
+        self.assertIn("重点", self.html)
         self.assertIn("已抑制 3", self.html)
         self.assertIn("2026-06-04 15:30", self.html)  # 生成时间
         self.assertNotIn('href="full.html"', self.html)  # current 盘面无完整报告链接
 
     def test_section_cards_present(self):
-        # 分类标签 + topic（不再用旧卡片标题"跨层呼应"）
-        self.assertIn("跨层", self.html)
-        self.assertIn("高热", self.html)
+        # 事件标题 + 摘要 + 事件自身状态，不呈现 bucket 分类列。
+        self.assertIn("多层来源呼应", self.html)
+        self.assertIn("单点高热，来源待补", self.html)
         self.assertIn("某跨层事件", self.html)
         self.assertIn("高热待核实事件", self.html)
 
@@ -201,19 +202,48 @@ class TestRenderDegraded(unittest.TestCase):
         self.assertIn("每日盘面", html)
         self.assertIn("未生成信息环境监测盘面", html)  # 非 environment 降级
 
-    def test_environment_failure_shows_degraded_not_no_signal(self):
-        """AI failure (success=False, report_style='environment') 走 degraded fallback，
-        不应显示'未检测到异常信号'等 usable environment 语义。"""
+    def test_environment_failure_without_events_is_explicit(self):
         failed = AIAnalysisResult(
             success=False, report_style="environment", error="boom"
         )
         html = DASH.render_current_dashboard_html(failed, META, NOW, mode="current")
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("当前盘面", html)
-        # 必须走 degraded fallback
-        self.assertIn("未生成信息环境监测盘面", html)
-        # 不应出现 usable environment / no-signal 语义
+        self.assertIn("AI 摘要不可用", html)
         self.assertNotIn("未检测到异常信号", html)
+
+    def test_environment_failure_keeps_analyzer_event_fallbacks(self):
+        failed = make_env_result()
+        failed.success = False
+        failed.overview = "不应展示的截断概述"
+        html = DASH.render_current_dashboard_html(failed, META, NOW, mode="current")
+        state = DASH.build_dashboard_state(failed, META, NOW, mode="current")
+        self.assertIn("某跨层事件", html)
+        self.assertIn("AI 摘要不可用", html)
+        self.assertIn("本轮识别 3 个异常事件", html)
+        self.assertNotIn("不应展示的截断概述", html)
+        self.assertEqual(len(state["top_items"]), 3)
+        self.assertNotIn("不应展示的截断概述", state["overview"])
+        self.assertEqual(state["analysis_status"], "degraded")
+
+    def test_success_without_overview_is_explicitly_degraded(self):
+        incomplete = make_env_result()
+        incomplete.overview = ""
+        html = DASH.render_current_dashboard_html(
+            incomplete, META, NOW, mode="current"
+        )
+        state = DASH.build_dashboard_state(incomplete, META, NOW, mode="current")
+        self.assertIn("AI 摘要不可用", html)
+        self.assertTrue(state["overview"])
+        self.assertEqual(state["analysis_status"], "degraded")
+
+    def test_intentionally_skipped_analysis_shows_no_signal(self):
+        skipped = AIAnalysisResult(
+            success=False, skipped=True, report_style="environment"
+        )
+        html = DASH.render_current_dashboard_html(skipped, META, NOW, mode="current")
+        self.assertIn("未检测到异常信号", html)
+        self.assertNotIn("AI 摘要不可用", html)
 
     def test_daily_title(self):
         html = DASH.render_current_dashboard_html(
@@ -233,15 +263,18 @@ class TestBuildState(unittest.TestCase):
             "schema_version",
             "mode",
             "generated_at",
+            "analysis_status",
             "overview",
             "radar",
             "top_items",
             "counts",
         ):
             self.assertIn(key, self.state)
+        self.assertEqual(self.state["schema_version"], 2)
         self.assertEqual(self.state["mode"], "current")
         self.assertEqual(self.state["group"], "current")
         self.assertEqual(self.state["generated_at"], NOW.isoformat())
+        self.assertEqual(self.state["analysis_status"], "ok")
         self.assertEqual(self.state["counts"]["hotlist_total"], 12)
 
     def test_json_serializable(self):
@@ -280,7 +313,71 @@ class TestBuildState(unittest.TestCase):
         state = DASH.build_dashboard_state(None, META, NOW, mode="current")
         self.assertEqual(state["top_items"], [])
         self.assertEqual(state["report_style"], "none")
+        self.assertEqual(state["analysis_status"], "unavailable")
         json.dumps(state, ensure_ascii=False)
+
+    def test_failed_and_skipped_states_remain_distinguishable(self):
+        failed = AIAnalysisResult(report_style="environment", success=False)
+        skipped = AIAnalysisResult(
+            report_style="environment", success=False, skipped=True
+        )
+        failed_state = DASH.build_dashboard_state(failed, META, NOW, mode="current")
+        skipped_state = DASH.build_dashboard_state(skipped, META, NOW, mode="current")
+        self.assertEqual(failed_state["analysis_status"], "degraded")
+        self.assertEqual(skipped_state["analysis_status"], "skipped")
+
+    def test_analysis_and_absolute_urls_are_not_published_as_summary_text(self):
+        ai = AIAnalysisResult(
+            report_style="environment",
+            success=True,
+            overview=f"公开导读 {SECRET_URL}",
+            high_heat_unverified=[{
+                "topic": f"某事件 {SECRET_URL}",
+                "summary": "",
+                "analysis": f"单一 D 层来源 {SECRET_URL}",
+                "highest_heat": f"微博第1名 {SECRET_URL}",
+            }],
+        )
+        state = DASH.build_dashboard_state(ai, META, NOW, mode="current")
+        html = DASH.render_current_dashboard_html(ai, META, NOW, mode="current")
+        blob = json.dumps(state, ensure_ascii=False)
+        self.assertNotIn(SECRET_URL, blob)
+        self.assertNotIn(SECRET_URL, html)
+        self.assertNotIn("单一 D 层来源", blob)
+        self.assertNotIn("单一 D 层来源", html)
+        self.assertNotIn("summary", state["top_items"][0])
+
+    def test_shared_noise_policy_controls_state_html_and_radar(self):
+        for topic, visible in (
+            ("哈兰德赛后发言", False),
+            ("爱豆粉丝见面会", False),
+            ("足球联赛夺冠", False),
+            ("某球员涉刑事案件被警方立案", True),
+        ):
+            with self.subTest(topic=topic):
+                ai = AIAnalysisResult(
+                    report_style="environment",
+                    success=True,
+                    overview="今日盘面导读",
+                    overview_stats={
+                        "label_counts": {"high_heat_unverified": 1},
+                        "background_count": 0,
+                    },
+                    high_heat_unverified=[{
+                        "topic": topic,
+                        "summary": "事件摘要",
+                        "verification_status": "高热待核实",
+                    }],
+                )
+                state = DASH.build_dashboard_state(ai, META, NOW, mode="current")
+                html = DASH.render_current_dashboard_html(
+                    ai, META, NOW, mode="current"
+                )
+                self.assertEqual(bool(state["top_items"]), visible)
+                self.assertEqual(state["radar"]["anomaly"], int(visible))
+                self.assertEqual(
+                    f'class="cur-topic">{topic}</h3>' in html, visible
+                )
 
     def test_daily_group_mapping(self):
         # 固化 mode→group 契约：daily 路径保留 mode='daily' 且归入 group='daily'。
@@ -293,6 +390,17 @@ class TestBuildState(unittest.TestCase):
         state = DASH.build_dashboard_state(make_env_result(), META, NOW, mode="incremental")
         self.assertEqual(state["mode"], "incremental")
         self.assertEqual(state["group"], "current")
+
+    def test_item_status_wins_over_originating_bucket_and_radar_is_event_counted(self):
+        ai = make_env_result()
+        # 故意放在跨层 bucket，但事件证据只支持高热待核实。
+        ai.cross_layer_verified[0]["verification_status"] = "高热待核实"
+        state = DASH.build_dashboard_state(ai, META, NOW, mode="current")
+        first = state["top_items"][0]
+        self.assertEqual(first["label"], "单点高热，来源待补")
+        self.assertEqual(state["radar"]["cross_layer"], 0)
+        self.assertEqual(state["radar"]["high_heat"], 2)
+        self.assertEqual(state["radar"]["anomaly"], len(state["top_items"]))
 
 
 class TestWriteDashboardLayout(unittest.TestCase):
