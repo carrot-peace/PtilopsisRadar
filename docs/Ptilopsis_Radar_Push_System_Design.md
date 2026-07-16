@@ -33,7 +33,9 @@ MVP push channel is Telegram bot only. Email may be considered later, but is not
 
 Every push must have text. HTML is an artifact and may be attached to Telegram, served through GitHub Pages, served through a private service, or retained locally. Markdown is archive-only unless explicitly extended later.
 
-System-level interaction uses English. Hotspot/topic content keeps its native language.
+CR system terms and operator/audit interaction use English. DR reader-facing
+section labels, evidence status, and program-owned fallback copy use concise
+Chinese. Hotspot/event content keeps its native language.
 
 Examples of system-level terms:
 
@@ -107,7 +109,7 @@ CR-A is triggered by deterministic scoring and decision policy.
 
 DR is the daily report system.
 
-DR may use the current environment newsletter / AI overview direction in the repository. AI can be used for AI Brief, daily overview, topic brief generation, and editorial interpretation.
+DR may use the current environment newsletter direction in the repository. AI can organize evidence-bound events and write a daily overview plus event-level summaries, but program-owned evidence rules remain authoritative.
 
 DR must not be treated as CR-A. DR is a scheduled daily product, not a realtime alert decision.
 
@@ -233,12 +235,15 @@ CR Markdown = permanent per-run audit archive
 
 ### 4.2 DR Artifacts
 
-Every DR run produces:
+Every scheduled daily DR run produces:
 
 ```text
 DR HTML
-DR Telegram text
 ```
+
+`artifact` and `live` dispatch modes additionally produce DR Telegram text and
+dispatch plan / receipt artifacts. `off` mode returns before dispatch artifact
+generation.
 
 DR does not generate Markdown in MVP. DR HTML is the permanent daily report.
 
@@ -1821,15 +1826,17 @@ suppress: never enters text
 
 DR is the daily report product.
 
-DR can use AI according to the current project positioning. AI is allowed for AI Brief, daily overview, and topic-level daily interpretation.
+DR can use AI according to the current project positioning. AI is allowed to organize evidence-bound events and write the daily overview, event titles, summaries, and propagation notes.
 
 DR Telegram text is:
 
 ```text
-AI Brief + Topics
+导读 + 事件重点
 ```
 
-AI Brief is the main content of DR text. MVP directly reuses the existing generated AI overview / AI Brief from DR HTML or the environment newsletter result. A dedicated DR text summarizer can be designed later.
+The daily overview and highlights are rendered from the same event result used by DR HTML. The formatter does not regroup topics or substitute propagation analysis for an event summary.
+
+If the AI overview is unavailable, DR text renders a Chinese, program-owned brief from the post-filter signal counts. It must not replace the brief with a generic English failure message. Routine entertainment, sports, esports, and near-duplicate headlines are removed from the text selection unless they carry a structural public-interest reason.
 
 DR and CR share the same underlying source data family, but at different time scales. DR should not be expected to mirror every CR Decision. DR is a daily-scale product that may aggregate, reinterpret, or omit topics according to daily report logic.
 
@@ -1839,42 +1846,46 @@ Template:
 
 ```text
 Ptilopsis Radar｜DR
-Date: YYYY-MM-DD
+日期：YYYY-MM-DD
 
-AI Brief
-{existing AI overview}
+导读
+{模型概述，或程序根据事件证据生成的概述}
 
-Topics
-1. Topic A
-2. Topic B
-3. Topic C
+重点
+1. {事件标题}
+   {事件摘要}
+2. {事件标题}
+   {事件摘要}
 
-DR HTML: attached
+完整报告：见随附 HTML
 ```
 
 Rules:
 
 ```text
 no emoji
-system terms in English
+message section labels and evidence status use concise Chinese reader-facing language
 topic content in native language
 no Decision in DR text
 no links in DR text
+internal classifier prefixes are not user-facing
+status metadata uses readable language rather than raw bucket keys
+generic risk boundaries are not used as topic summaries
 ```
 
-DR text only lists topic names after AI Brief. Briefs, source links, evidence, and details live in DR HTML.
+DR text lists an event title and its concise event-level summary after the brief. Source links, expanded evidence, and detailed boundaries live in DR HTML.
 
 ### 20.2 DR HTML
 
-DR HTML follows daily sections, not CR four-level sections.
+DR HTML follows a single event stream, not CR four-level sections and not internal keyword categories.
 
 Suggested structure:
 
 ```text
-Mini Dashboard / AI Brief
-Key Topics
-Background & Evidence
-Raw Hotlist / Appendix
+导读
+重点（事件标题 + 详细摘要）
+来源与核验（逐事件点击展开）
+数据附录 · 原始热榜
 ```
 
 DR HTML quality rules:
@@ -1885,19 +1896,26 @@ topic entries must not be title-only
 topic entries should include simple brief / introduction
 source links must be included in HTML
 source links may be collapsed by default
+the mini dashboard reflects post-filter visible signals
+summary and propagation-structure analysis are rendered separately
+when AI prose is missing, representative propagation text is shown with an explicit non-factual label
+keyword groups containing unrelated headlines must present them as independent signals, not one synthesized event
 ```
 
 ### 20.3 DR Fallback
 
 If AI or DR text rendering fails, the system must not fabricate AI conclusions.
 
-Fallback should use system-level English.
+Fallback uses concise Chinese and must distinguish model prose from program-owned evidence. Analyzer-owned event fallbacks remain visible even when the model response is truncated or invalid.
 
 Example:
 
 ```text
 Ptilopsis Radar｜DR
-Daily text is temporarily unavailable. DR HTML has been generated and attached when available.
+本轮 AI 摘要不可用；以下内容仅依据程序统计与已采集证据整理。
+重点
+1. {程序保留的事件标题}
+   {可核对的传播摘要}
 ```
 
 DR HTML should still be attached when available.
@@ -2166,7 +2184,6 @@ Cross-layer Raw Score formula
 Background Support Raw Score future design
 CR-A multi-message chunking details
 CR HTML / Markdown path naming
-DR AI Brief source field mapping
 CR-P bot command runtime
 ```
 
@@ -2239,8 +2256,8 @@ PR9g: CR-A formatter + delivery adapter
 - do not extend AI realtime branch as decision logic
 
 PR9h: DR Telegram formatter alignment
-- AI Brief from existing overview source
-- Topics only
+- daily overview and event highlights from the shared event result
+- event title + concise event summary
 - no links in text
 - attach DR HTML
 

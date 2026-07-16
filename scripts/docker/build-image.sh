@@ -7,6 +7,9 @@ IMAGE=${1:-wantcat/trendradar:latest}
 cd "$ROOT"
 
 PTILOPSIS_BUILD_COMMIT=$(git rev-parse --short=12 HEAD)
+if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+    PTILOPSIS_BUILD_COMMIT="${PTILOPSIS_BUILD_COMMIT}-dirty"
+fi
 RANDOM_BUILD_ID=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
 GENERATED_BUILD_ID="docker-$RANDOM_BUILD_ID"
 PTILOPSIS_BUILD_ID=${PTILOPSIS_BUILD_ID_OVERRIDE:-$GENERATED_BUILD_ID}

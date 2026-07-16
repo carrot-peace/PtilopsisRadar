@@ -408,6 +408,14 @@ class TestEntrypointWiring(unittest.TestCase):
 
         self.assertIn("uuidgen", local_build)
         self.assertTrue(compose_build.stat().st_mode & stat.S_IXUSR)
+        self.assertIn(
+            "git status --porcelain --untracked-files=normal",
+            compose_build_text,
+        )
+        self.assertIn(
+            'PTILOPSIS_BUILD_COMMIT="${PTILOPSIS_BUILD_COMMIT}-dirty"',
+            compose_build_text,
+        )
         readme = (root / "README.md").read_text(encoding="utf-8")
         self.assertIn(
             "scripts/apple-container/build-image.zsh ptilopsis-radar:latest",

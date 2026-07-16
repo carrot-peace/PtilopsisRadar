@@ -59,8 +59,9 @@ They are out of scope when they require PtilopsisRadar to become a market dashbo
 ```
 hotlist/RSS crawling
 → source tiers
-→ evidence summary / evidence labels / bucketize
-→ environment AI analysis
+→ evidence IDs / candidate groups
+→ evidence-bound event generation or deterministic fallback
+→ event-level labels / bucketize
 → current dashboard / daily report artifacts
 ```
 
@@ -101,22 +102,22 @@ Each data source is mapped to an evidence tier (defined in `config/source_tiers.
 
 ### Programmatic Evidence Classification
 
-The program (`trendradar/ai/evidence.py`) performs the following steps for each topic group before AI involvement:
+The program (`trendradar/ai/evidence.py`) treats keyword topic groups as candidate containers, then evaluates every reader-facing event from the exact evidence bound to it:
 
 1. Aggregates which A / B / C / D sources the topic has hit, grouped by tier
 2. Calculates D-tier heat (platform count, highest ranking)
 3. Detects sentiment signals (strong emotion words in titles)
-4. Assigns a unique `evidence_label` (verification status) based on rules
-5. Allocates the topic group to a unique section (bucket)
+4. Assigns a stable `evidence_id` to each collected text and binds returned events through `evidence_ids`
+5. Recomputes the final `event_label`, verification status, factual boundary, and section from each event's evidence subset
 
-**Verification status is uniquely determined by the program; AI may not alter it.**
+**Topic groups are not reader-facing entries. Verification status and section are determined exclusively from event-level evidence; AI may not alter them.**
 
 ### Restrained AI Writing
 
-AI (optional, requires API Key configuration) has one sole task: based on the program-generated evidence summary, write restrained daily report text for each already-classified topic. AI does not:
+AI (optional, requires API Key configuration) organizes candidate texts into concrete events and writes restrained, evidence-bound titles, summaries, and propagation notes. AI does not:
 
 - Introduce new facts, numbers, or persons not in the evidence summary
-- Alter verification status or section allocation
+- Alter an event's verification status, factual boundary, or section allocation
 - Rewrite D-tier propagation as factual events
 - Output investment advice, action guidance, or trend predictions
 
@@ -128,6 +129,9 @@ planes. Deployment notifications and supervisor alerts use an independent,
 owner-only operational channel. The old multi-channel notification, fallback,
 and compatibility facade are fully removed. See
 [`docs/transport_boundaries.md`](docs/transport_boundaries.md).
+
+For the event schema, Gemini budget, delivery gates, deployment steps, and
+acceptance checklist, see [`docs/dr-operator-guide.md`](docs/dr-operator-guide.md).
 
 ---
 
@@ -239,6 +243,8 @@ cp .env.example .env
 docker compose up -d
 ```
 
+`docker-compose.yml` runs the tagged image; it does not build local changes automatically. Python, schema, and renderer changes require rebuilding the image. Prompt and other configuration files come from the host-mounted `config/` directory, so the image code and mounted configuration must be deployed from the same revision before the container is recreated. Production builds should start from a clean worktree; the build helper marks local dirty builds with a `-dirty` commit suffix.
+
 ### GitHub Actions Deployment
 
 1. Fork this repository
@@ -260,6 +266,8 @@ ai:
 ```
 
 Supported models include DeepSeek, OpenAI, Gemini, Claude, Ollama, etc. See [LiteLLM docs](https://docs.litellm.ai/docs/providers).
+
+The information-environment daily report has its own capacity budget: up to 30 evidence records sent to AI, 12 evidence records per batch, and 16,000 output tokens per request by default. Docker and GitHub Actions can override these with `AI_ANALYSIS_MAX_EVENTS`, `AI_ANALYSIS_BATCH_MAX_EVIDENCE`, and `AI_ANALYSIS_MAX_OUTPUT_TOKENS` without changing translation or other AI workloads. The legacy `max_events` name limits AI input evidence, not the number of deterministic fallback events shown to readers.
 
 ### Diagnostic Commands
 
