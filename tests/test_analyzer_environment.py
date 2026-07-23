@@ -271,6 +271,140 @@ class TestEnvironmentFailures(unittest.TestCase):
         self.assertTrue(all(item.get("event_id") for item in all_items))
         self.assertNotIn("AI前沿模型", [item["topic"] for item in all_items])
 
+    def test_deterministic_sample_summary_handles_empty_headline(self):
+        social = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+            "title": "",
+            "source": "微博",
+            "tier": "D",
+            "rank": 3,
+        })
+        publisher = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+            "source": "OpenAI News",
+            "tier": "A",
+        })
+
+        self.assertIn("相关内容进入微博榜单第3名", social)
+        self.assertNotIn("“”", social)
+        self.assertIn("一条未提供标题的来源记录", publisher)
+        self.assertNotIn("『』", publisher)
+
+    def test_social_sample_summary_without_positive_rank_uses_generic_placement(self):
+        for rank in (None, 0, -1):
+            with self.subTest(rank=rank):
+                summary = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+                    "title": "某地发布暴雨红色预警",
+                    "source": "微博",
+                    "tier": "D",
+                    "rank": rank,
+                })
+                self.assertIn("出现在微博榜单中", summary)
+                self.assertNotIn(f"第{rank}名", summary)
+
+    def test_deterministic_sample_summaries_keep_all_available_evidence(self):
+        long_title = "很长的传播标题" * 40
+        for tier in ("A", "D"):
+            with self.subTest(tier=tier):
+                summary = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+                    "title": long_title,
+                    "source": "微博" if tier == "D" else "OpenAI News",
+                    "tier": tier,
+                    "rank": 1,
+                    "time": "09:30 ~ 12:00",
+                })
+                self.assertIn(long_title, summary)
+                if tier == "D":
+                    self.assertIn("进入微博榜单第1名", summary)
+                    self.assertIn("观测时间为09:30 ~ 12:00", summary)
+                    self.assertIn("采集记录未附来源正文", summary)
+
+    def test_publisher_fallback_uses_grounded_source_excerpt(self):
+        source_title = "OpenAI 发布模型更新"
+        excerpt = "OpenAI 表示，本次更新增加了新的开发者控制项，并已开始分批开放。"
+        az = make_analyzer()
+        az._call_ai = lambda _: (_ for _ in ()).throw(RuntimeError("network down"))
+
+        result = az.analyze(
+            stats=[],
+            rss_stats=[{
+                "word": "官方发布",
+                "titles": [
+                    T(source_title, "OpenAI News", 1, summary=f"<p>{excerpt}</p>")
+                ],
+            }],
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(len(result.silence_gap), 1)
+        summary = result.silence_gap[0]["summary"]
+        self.assertIn(excerpt, summary)
+        self.assertNotIn("具体内容以原始出处为准", summary)
+
+    def test_publisher_sample_summary_does_not_truncate_grounded_excerpt(self):
+        excerpt = "来源明确写明的具体信息。" * 40
+        summary = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+            "title": "一条发布方记录",
+            "source": "OpenAI News",
+            "tier": "A",
+            "source_excerpt": excerpt,
+        })
+
+        self.assertIn(excerpt, summary)
+
+    def test_social_fallback_uses_observation_metadata_not_description(self):
+        leaked_description = "某部门已经确认事件属实，不应进入摘要。"
+        az = make_analyzer()
+        az._call_ai = lambda _: (_ for _ in ()).throw(RuntimeError("network down"))
+
+        result = az.analyze(
+            stats=[{
+                "word": "公共事件",
+                "titles": [
+                    T(
+                        "某地发布暴雨红色预警",
+                        "微博",
+                        1,
+                        summary=leaked_description,
+                        time_display="09:30 ~ 12:00",
+                    )
+                ],
+            }],
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(len(result.high_heat_unverified), 1)
+        summary = result.high_heat_unverified[0]["summary"]
+        self.assertIn("进入微博榜单第1名", summary)
+        self.assertIn("观测时间为09:30 ~ 12:00", summary)
+        self.assertNotIn(leaked_description, summary)
+
+    def test_empty_ai_summary_is_filled_from_single_publisher_excerpt(self):
+        source_title = "OpenAI 发布模型更新"
+        excerpt = "OpenAI 表示，新版本增加开发者控制项，并已开始分批开放。"
+        source_id = evidence_id(source_title, "OpenAI News")
+        az = make_analyzer()
+        az._call_ai = lambda _: response({
+            "官方发布": [
+                event(source_title, "", "单一 A 层来源。", source_id)
+            ]
+        })
+
+        result = az.analyze(
+            stats=[],
+            rss_stats=[{
+                "word": "官方发布",
+                "titles": [
+                    T(source_title, "OpenAI News", 1, summary=excerpt)
+                ],
+            }],
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(len(result.silence_gap), 1)
+        self.assertIn(excerpt, result.silence_gap[0]["summary"])
+
     def test_bad_json_and_schema_mismatch_are_blocking(self):
         for payload in ("not json", response({}, schema="old-schema")):
             az = make_analyzer()
@@ -305,6 +439,17 @@ class TestEnvironmentFailures(unittest.TestCase):
         })
         _, _, _, duplicate_error = az._parse_environment_response(repeated_id)
         self.assertIn("重复使用 evidence_id", duplicate_error)
+
+        detailed_summary = "摘" * 500
+        long_response = response({
+            "X": [event("详细摘要", detailed_summary, "分析", "ev_1")]
+        })
+        _, parsed_items, _, parse_error = az._parse_environment_response(long_response)
+        self.assertFalse(parse_error)
+        self.assertEqual(
+            parsed_items["X"]["events"][0]["summary"],
+            detailed_summary,
+        )
 
         with_background = json.loads(response({"X": []}))
         with_background["background_notes"] = ["模型不应写背景项"]

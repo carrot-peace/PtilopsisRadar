@@ -561,6 +561,42 @@ class AIAnalyzer:
         }
 
     @classmethod
+    def _deterministic_summary_for_sample(cls, sample: Dict[str, Any]) -> str:
+        """Write the most informative summary that one evidence record supports."""
+        headline = str(sample.get("title", "") or "").strip()
+        source = str(sample.get("source", "") or "未知来源").strip()
+        tier = str(sample.get("tier", "unknown") or "unknown")
+        rank = sample.get("rank")
+        observed_at = str(sample.get("time", "") or "").strip()
+
+        if tier == "D":
+            where = (
+                f"进入{source}榜单第{rank}名"
+                if isinstance(rank, int) and rank > 0
+                else f"出现在{source}榜单中"
+            )
+            time_text = f"，观测时间为{observed_at}" if observed_at else ""
+            subject = f"“{headline}”相关内容" if headline else "相关内容"
+            return (
+                f"{subject}{where}{time_text}。"
+                "采集记录未附来源正文，因此无法补充标题之外的信息。"
+            )
+
+        excerpt = str(sample.get("source_excerpt", "") or "").strip()
+        if excerpt:
+            prefix = f"{source}的来源摘录显示，"
+            if excerpt[-1] not in "。.!！？?…":
+                excerpt += "。"
+            return prefix + excerpt
+
+        record = (
+            f"标题为『{headline}』的来源记录"
+            if headline
+            else "一条未提供标题的来源记录"
+        )
+        return f"{source}出现{record}。采集记录未附正文摘录。"
+
+    @classmethod
     def _build_event_entries(
         cls,
         *,
@@ -595,6 +631,10 @@ class AIAnalyzer:
             detail = cls._event_evidence(evidence, exact_ids)
             if not title or detail is None or title in seen_titles:
                 continue
+            if not summary:
+                samples = detail.get("sample_titles") or []
+                if len(samples) == 1 and isinstance(samples[0], dict):
+                    summary = cls._deterministic_summary_for_sample(samples[0])
             bound_ids = set(detail.get("evidence_ids") or [])
             if not bound_ids or bound_ids.intersection(claimed_evidence_ids):
                 continue
@@ -649,20 +689,20 @@ class AIAnalyzer:
         headline = str(sample.get("title", "") or "").strip()
         source = str(sample.get("source", "") or "未知来源").strip()
         tier = str(sample.get("tier", "unknown") or "unknown")
-        rank = sample.get("rank")
-        rank_text = f"第{rank}名" if isinstance(rank, int) and rank > 0 else "榜单中"
         if tier == "D":
-            title = f"{source}出现“{headline}”相关传播"
-            summary = (
-                f"标题为『{headline}』的内容出现在{source}{rank_text}。"
-                "当前只能确认这条传播记录，不能据此确认标题所述事件已经成立。"
+            title = (
+                f"{source}出现“{headline}”相关传播"
+                if headline
+                else f"{source}出现未提供标题的传播记录"
             )
+            summary = cls._deterministic_summary_for_sample(sample)
         else:
-            title = f"{source}收录“{headline}”"
-            summary = (
-                f"{source}出现标题为『{headline}』的来源记录。"
-                "当前摘要仅保留该来源可直接支持的信息，具体内容以原始出处为准。"
+            title = (
+                f"{source}收录“{headline}”"
+                if headline
+                else f"{source}收录未提供标题的来源记录"
             )
+            summary = cls._deterministic_summary_for_sample(sample)
         analysis = f"单一{tier}层来源，覆盖平台为{source}。"
 
         event_label = assign_evidence_label(detail)
@@ -1121,9 +1161,10 @@ class AIAnalyzer:
                 title = raw_event["title"].strip()
                 if not title:
                     return "", {}, [], f"议题 {topic} 的 event 缺少 title"
+                summary = raw_event["summary"].strip()
                 events.append({
                     "title": title,
-                    "summary": raw_event["summary"].strip(),
+                    "summary": summary,
                     "analysis": raw_event["analysis"].strip(),
                     "evidence_ids": evidence_ids,
                 })

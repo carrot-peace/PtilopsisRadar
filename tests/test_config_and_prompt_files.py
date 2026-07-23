@@ -65,15 +65,29 @@ class TestEnvironmentPromptFile(unittest.TestCase):
         self.assertIn("sample_titles", self.text)
 
     def test_forbids_merging_unrelated_keyword_group_items(self):
-        self.assertIn("必须按具体事件拆分 events", self.text)
+        self.assertIn("必须按具体事件或传播线索拆分 events", self.text)
         self.assertIn("不得按类目写总括摘要", self.text)
         self.assertIn("读者最终只看到 events，不看到议题组名", self.text)
         self.assertIn("常规娱乐、体育、电竞赛果", self.text)
 
-    def test_item_summary_prefers_detailed_supported_content(self):
-        self.assertIn("50—140 个汉字", self.text)
-        self.assertIn("传播对象、涉及主体或地点、当前可见进展", self.text)
-        self.assertIn("不要用类别背景凑字数", self.text)
+    def test_item_summary_is_concrete_without_forcing_news_structure(self):
+        self.assertIn("不模拟正式新闻稿", self.text)
+        self.assertIn("不要求每条都存在完整、明确的事件核心", self.text)
+        self.assertIn("summary 不设硬性字数或句数限制", self.text)
+        self.assertIn("篇幅由证据直接支持的具体信息决定", self.text)
+        self.assertNotIn("最多 180 个汉字", self.text)
+        self.assertIn("不为形成完整叙事而补齐主体、起因、影响或结果", self.text)
+        self.assertIn("不要强行提炼核心事件", self.text)
+        self.assertNotIn("不写成新闻报道或评论", self.text)
+
+    def test_item_summary_keeps_evidence_boundaries(self):
+        self.assertIn("避免无证据的定性与过度概括", self.text)
+        self.assertIn("引发广泛关注", self.text)
+        self.assertIn("反映某种问题", self.text)
+        self.assertIn('trend 明确为"升温"时，才可写"传播正在升温"', self.text)
+        self.assertNotIn('必须写成"关于 X 的说法/议题的传播正在升温"', self.text)
+        self.assertIn("可以在明确归因或加引号的前提下复述 title", self.text)
+        self.assertIn("不要用类别背景、传播结构、核验套话或主观评价凑字数", self.text)
         self.assertIn("summary 输出空字符串", self.text)
         self.assertIn("source_excerpt", self.text)
         self.assertIn("不得扩大到摘录之外", self.text)
@@ -82,7 +96,7 @@ class TestEnvironmentPromptFile(unittest.TestCase):
         self.assertIn('"schema_version": "environment-events-v1"', self.text)
         self.assertIn('"items": [', self.text)
         self.assertIn("evidence_ids 必须逐字复制", self.text)
-        self.assertIn('"title":"具体事件标题"', self.text)
+        self.assertIn('"title":"具体事件或传播线索标题"', self.text)
 
     def test_real_prompt_parses_into_system_user(self):
         # 用真实 prompt_loader 解析，确认能拆出非空 system / user
