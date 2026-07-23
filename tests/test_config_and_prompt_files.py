@@ -73,8 +73,9 @@ class TestEnvironmentPromptFile(unittest.TestCase):
     def test_item_summary_is_concrete_without_forcing_news_structure(self):
         self.assertIn("不模拟正式新闻稿", self.text)
         self.assertIn("不要求每条都存在完整、明确的事件核心", self.text)
-        self.assertIn("summary 不设最低字数，最多 180 个汉字", self.text)
-        self.assertIn("根据现有信息写 1—3 句", self.text)
+        self.assertIn("summary 不设硬性字数或句数限制", self.text)
+        self.assertIn("篇幅由证据直接支持的具体信息决定", self.text)
+        self.assertNotIn("最多 180 个汉字", self.text)
         self.assertIn("不为形成完整叙事而补齐主体、起因、影响或结果", self.text)
         self.assertIn("不要强行提炼核心事件", self.text)
         self.assertNotIn("不写成新闻报道或评论", self.text)

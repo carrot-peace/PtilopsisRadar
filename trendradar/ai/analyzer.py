@@ -17,7 +17,6 @@ from trendradar.ai.prompt_loader import load_prompt_template
 
 
 ENVIRONMENT_SCHEMA_VERSION = "environment-events-v1"
-_FALLBACK_SUMMARY_MAX_CHARS = 180
 ENVIRONMENT_RESPONSE_FORMAT: Dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {
@@ -562,17 +561,6 @@ class AIAnalyzer:
         }
 
     @classmethod
-    def _bounded_fallback_summary(cls, lead: str, suffix: str = "") -> str:
-        """Bound fallback prose while preserving a required factual boundary."""
-        if len(lead) + len(suffix) <= _FALLBACK_SUMMARY_MAX_CHARS:
-            return lead + suffix
-        available = _FALLBACK_SUMMARY_MAX_CHARS - len(suffix)
-        if available <= 1:
-            return suffix[:_FALLBACK_SUMMARY_MAX_CHARS]
-        clipped = lead[: available - 1].rstrip("，,；;：:。.!！？? ")
-        return clipped + "…" + suffix
-
-    @classmethod
     def _deterministic_summary_for_sample(cls, sample: Dict[str, Any]) -> str:
         """Write the most informative summary that one evidence record supports."""
         headline = str(sample.get("title", "") or "").strip()
@@ -589,33 +577,24 @@ class AIAnalyzer:
             )
             time_text = f"，观测时间为{observed_at}" if observed_at else ""
             subject = f"“{headline}”相关内容" if headline else "相关内容"
-            return cls._bounded_fallback_summary(
-                f"{subject}{where}{time_text}。",
-                "采集记录未附来源正文，因此无法补充标题之外的信息。",
+            return (
+                f"{subject}{where}{time_text}。"
+                "采集记录未附来源正文，因此无法补充标题之外的信息。"
             )
 
         excerpt = str(sample.get("source_excerpt", "") or "").strip()
         if excerpt:
             prefix = f"{source}的来源摘录显示，"
-            available = max(1, _FALLBACK_SUMMARY_MAX_CHARS - len(prefix))
-            needs_punctuation = excerpt[-1] not in "。.!！？?…"
-            if len(excerpt) + int(needs_punctuation) > available:
-                excerpt = excerpt[: max(1, available - 1)].rstrip(
-                    "，,；;：:。.!！？? "
-                ) + "…"
-            elif needs_punctuation:
+            if excerpt[-1] not in "。.!！？?…":
                 excerpt += "。"
-            return cls._bounded_fallback_summary(prefix + excerpt)
+            return prefix + excerpt
 
         record = (
             f"标题为『{headline}』的来源记录"
             if headline
             else "一条未提供标题的来源记录"
         )
-        return cls._bounded_fallback_summary(
-            f"{source}出现{record}。",
-            "采集记录未附正文摘录。",
-        )
+        return f"{source}出现{record}。采集记录未附正文摘录。"
 
     @classmethod
     def _build_event_entries(
@@ -1183,14 +1162,6 @@ class AIAnalyzer:
                 if not title:
                     return "", {}, [], f"议题 {topic} 的 event 缺少 title"
                 summary = raw_event["summary"].strip()
-                if len(summary) > _FALLBACK_SUMMARY_MAX_CHARS:
-                    return (
-                        "",
-                        {},
-                        [],
-                        f"议题 {topic} 的 event summary 超过 "
-                        f"{_FALLBACK_SUMMARY_MAX_CHARS} 个字符",
-                    )
                 events.append({
                     "title": title,
                     "summary": summary,

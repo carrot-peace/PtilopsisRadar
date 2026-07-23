@@ -300,7 +300,7 @@ class TestEnvironmentFailures(unittest.TestCase):
                 self.assertIn("出现在微博榜单中", summary)
                 self.assertNotIn(f"第{rank}名", summary)
 
-    def test_deterministic_sample_summaries_keep_the_fallback_limit(self):
+    def test_deterministic_sample_summaries_keep_all_available_evidence(self):
         long_title = "很长的传播标题" * 40
         for tier in ("A", "D"):
             with self.subTest(tier=tier):
@@ -309,9 +309,12 @@ class TestEnvironmentFailures(unittest.TestCase):
                     "source": "微博" if tier == "D" else "OpenAI News",
                     "tier": tier,
                     "rank": 1,
+                    "time": "09:30 ~ 12:00",
                 })
-                self.assertLessEqual(len(summary), 180)
+                self.assertIn(long_title, summary)
                 if tier == "D":
+                    self.assertIn("进入微博榜单第1名", summary)
+                    self.assertIn("观测时间为09:30 ~ 12:00", summary)
                     self.assertIn("采集记录未附来源正文", summary)
 
     def test_publisher_fallback_uses_grounded_source_excerpt(self):
@@ -336,7 +339,17 @@ class TestEnvironmentFailures(unittest.TestCase):
         summary = result.silence_gap[0]["summary"]
         self.assertIn(excerpt, summary)
         self.assertNotIn("具体内容以原始出处为准", summary)
-        self.assertLessEqual(len(summary), 180)
+
+    def test_publisher_sample_summary_does_not_truncate_grounded_excerpt(self):
+        excerpt = "来源明确写明的具体信息。" * 40
+        summary = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+            "title": "一条发布方记录",
+            "source": "OpenAI News",
+            "tier": "A",
+            "source_excerpt": excerpt,
+        })
+
+        self.assertIn(excerpt, summary)
 
     def test_social_fallback_uses_observation_metadata_not_description(self):
         leaked_description = "某部门已经确认事件属实，不应进入摘要。"
@@ -427,18 +440,16 @@ class TestEnvironmentFailures(unittest.TestCase):
         _, _, _, duplicate_error = az._parse_environment_response(repeated_id)
         self.assertIn("重复使用 evidence_id", duplicate_error)
 
-        exact_limit = response({
-            "X": [event("边界长度", "摘" * 180, "分析", "ev_1")]
+        detailed_summary = "摘" * 500
+        long_response = response({
+            "X": [event("详细摘要", detailed_summary, "分析", "ev_1")]
         })
-        _, parsed_items, _, limit_error = az._parse_environment_response(exact_limit)
-        self.assertFalse(limit_error)
-        self.assertEqual(len(parsed_items["X"]["events"][0]["summary"]), 180)
-
-        over_limit = response({
-            "X": [event("超出长度", "摘" * 181, "分析", "ev_1")]
-        })
-        _, _, _, length_error = az._parse_environment_response(over_limit)
-        self.assertIn("summary 超过 180 个字符", length_error)
+        _, parsed_items, _, parse_error = az._parse_environment_response(long_response)
+        self.assertFalse(parse_error)
+        self.assertEqual(
+            parsed_items["X"]["events"][0]["summary"],
+            detailed_summary,
+        )
 
         with_background = json.loads(response({"X": []}))
         with_background["background_notes"] = ["模型不应写背景项"]
