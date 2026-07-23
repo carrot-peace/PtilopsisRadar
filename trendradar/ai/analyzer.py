@@ -562,6 +562,17 @@ class AIAnalyzer:
         }
 
     @classmethod
+    def _bounded_fallback_summary(cls, lead: str, suffix: str = "") -> str:
+        """Bound fallback prose while preserving a required factual boundary."""
+        if len(lead) + len(suffix) <= _FALLBACK_SUMMARY_MAX_CHARS:
+            return lead + suffix
+        available = _FALLBACK_SUMMARY_MAX_CHARS - len(suffix)
+        if available <= 1:
+            return suffix[:_FALLBACK_SUMMARY_MAX_CHARS]
+        clipped = lead[: available - 1].rstrip("，,；;：:。.!！？? ")
+        return clipped + "…" + suffix
+
+    @classmethod
     def _deterministic_summary_for_sample(cls, sample: Dict[str, Any]) -> str:
         """Write the most informative summary that one evidence record supports."""
         headline = str(sample.get("title", "") or "").strip()
@@ -577,9 +588,10 @@ class AIAnalyzer:
                 else f"出现在{source}榜单中"
             )
             time_text = f"，观测时间为{observed_at}" if observed_at else ""
-            return (
-                f"“{headline}”相关内容{where}{time_text}。"
-                "采集记录未附来源正文，因此无法补充标题之外的信息。"
+            subject = f"“{headline}”相关内容" if headline else "相关内容"
+            return cls._bounded_fallback_summary(
+                f"{subject}{where}{time_text}。",
+                "采集记录未附来源正文，因此无法补充标题之外的信息。",
             )
 
         excerpt = str(sample.get("source_excerpt", "") or "").strip()
@@ -593,11 +605,16 @@ class AIAnalyzer:
                 ) + "…"
             elif needs_punctuation:
                 excerpt += "。"
-            return prefix + excerpt
+            return cls._bounded_fallback_summary(prefix + excerpt)
 
-        return (
-            f"{source}出现标题为『{headline}』的来源记录。"
-            "采集记录未附正文摘录。"
+        record = (
+            f"标题为『{headline}』的来源记录"
+            if headline
+            else "一条未提供标题的来源记录"
+        )
+        return cls._bounded_fallback_summary(
+            f"{source}出现{record}。",
+            "采集记录未附正文摘录。",
         )
 
     @classmethod

@@ -271,6 +271,49 @@ class TestEnvironmentFailures(unittest.TestCase):
         self.assertTrue(all(item.get("event_id") for item in all_items))
         self.assertNotIn("AI前沿模型", [item["topic"] for item in all_items])
 
+    def test_deterministic_sample_summary_handles_empty_headline(self):
+        social = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+            "title": "",
+            "source": "微博",
+            "tier": "D",
+            "rank": 3,
+        })
+        publisher = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+            "source": "OpenAI News",
+            "tier": "A",
+        })
+
+        self.assertIn("相关内容进入微博榜单第3名", social)
+        self.assertNotIn("“”", social)
+        self.assertIn("一条未提供标题的来源记录", publisher)
+        self.assertNotIn("『』", publisher)
+
+    def test_social_sample_summary_without_positive_rank_uses_generic_placement(self):
+        for rank in (None, 0, -1):
+            with self.subTest(rank=rank):
+                summary = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+                    "title": "某地发布暴雨红色预警",
+                    "source": "微博",
+                    "tier": "D",
+                    "rank": rank,
+                })
+                self.assertIn("出现在微博榜单中", summary)
+                self.assertNotIn(f"第{rank}名", summary)
+
+    def test_deterministic_sample_summaries_keep_the_fallback_limit(self):
+        long_title = "很长的传播标题" * 40
+        for tier in ("A", "D"):
+            with self.subTest(tier=tier):
+                summary = B.analyzer.AIAnalyzer._deterministic_summary_for_sample({
+                    "title": long_title,
+                    "source": "微博" if tier == "D" else "OpenAI News",
+                    "tier": tier,
+                    "rank": 1,
+                })
+                self.assertLessEqual(len(summary), 180)
+                if tier == "D":
+                    self.assertIn("采集记录未附来源正文", summary)
+
     def test_publisher_fallback_uses_grounded_source_excerpt(self):
         source_title = "OpenAI 发布模型更新"
         excerpt = "OpenAI 表示，本次更新增加了新的开发者控制项，并已开始分批开放。"
