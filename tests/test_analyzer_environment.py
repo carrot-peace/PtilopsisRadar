@@ -427,6 +427,19 @@ class TestEnvironmentFailures(unittest.TestCase):
         _, _, _, duplicate_error = az._parse_environment_response(repeated_id)
         self.assertIn("重复使用 evidence_id", duplicate_error)
 
+        exact_limit = response({
+            "X": [event("边界长度", "摘" * 180, "分析", "ev_1")]
+        })
+        _, parsed_items, _, limit_error = az._parse_environment_response(exact_limit)
+        self.assertFalse(limit_error)
+        self.assertEqual(len(parsed_items["X"]["events"][0]["summary"]), 180)
+
+        over_limit = response({
+            "X": [event("超出长度", "摘" * 181, "分析", "ev_1")]
+        })
+        _, _, _, length_error = az._parse_environment_response(over_limit)
+        self.assertIn("summary 超过 180 个字符", length_error)
+
         with_background = json.loads(response({"X": []}))
         with_background["background_notes"] = ["模型不应写背景项"]
         _, _, _, background_error = az._parse_environment_response(

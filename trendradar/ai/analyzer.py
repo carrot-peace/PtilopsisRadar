@@ -711,10 +711,18 @@ class AIAnalyzer:
         source = str(sample.get("source", "") or "未知来源").strip()
         tier = str(sample.get("tier", "unknown") or "unknown")
         if tier == "D":
-            title = f"{source}出现“{headline}”相关传播"
+            title = (
+                f"{source}出现“{headline}”相关传播"
+                if headline
+                else f"{source}出现未提供标题的传播记录"
+            )
             summary = cls._deterministic_summary_for_sample(sample)
         else:
-            title = f"{source}收录“{headline}”"
+            title = (
+                f"{source}收录“{headline}”"
+                if headline
+                else f"{source}收录未提供标题的来源记录"
+            )
             summary = cls._deterministic_summary_for_sample(sample)
         analysis = f"单一{tier}层来源，覆盖平台为{source}。"
 
@@ -1174,9 +1182,18 @@ class AIAnalyzer:
                 title = raw_event["title"].strip()
                 if not title:
                     return "", {}, [], f"议题 {topic} 的 event 缺少 title"
+                summary = raw_event["summary"].strip()
+                if len(summary) > _FALLBACK_SUMMARY_MAX_CHARS:
+                    return (
+                        "",
+                        {},
+                        [],
+                        f"议题 {topic} 的 event summary 超过 "
+                        f"{_FALLBACK_SUMMARY_MAX_CHARS} 个字符",
+                    )
                 events.append({
                     "title": title,
-                    "summary": raw_event["summary"].strip(),
+                    "summary": summary,
                     "analysis": raw_event["analysis"].strip(),
                     "evidence_ids": evidence_ids,
                 })

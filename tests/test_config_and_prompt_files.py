@@ -83,6 +83,8 @@ class TestEnvironmentPromptFile(unittest.TestCase):
         self.assertIn("避免无证据的定性与过度概括", self.text)
         self.assertIn("引发广泛关注", self.text)
         self.assertIn("反映某种问题", self.text)
+        self.assertIn('trend 明确为"升温"时，才可写"传播正在升温"', self.text)
+        self.assertNotIn('必须写成"关于 X 的说法/议题的传播正在升温"', self.text)
         self.assertIn("可以在明确归因或加引号的前提下复述 title", self.text)
         self.assertIn("不要用类别背景、传播结构、核验套话或主观评价凑字数", self.text)
         self.assertIn("summary 输出空字符串", self.text)
