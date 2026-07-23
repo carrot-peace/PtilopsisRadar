@@ -251,6 +251,7 @@ class TestBucketizeAndOverview(unittest.TestCase):
         text = EV.render_evidence_for_prompt(buckets, ostats)
         self.assertIn("高热待核实", text)
         self.assertIn("代表性传播文本", text)
+        self.assertIn("观测时间=09:30", text)
         # 高热栏目边界必须是固定风险提示
         self.assertIn(EV.RISK_NOTE_HIGH_HEAT, text)
 

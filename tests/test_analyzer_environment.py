@@ -271,6 +271,84 @@ class TestEnvironmentFailures(unittest.TestCase):
         self.assertTrue(all(item.get("event_id") for item in all_items))
         self.assertNotIn("AI前沿模型", [item["topic"] for item in all_items])
 
+    def test_publisher_fallback_uses_grounded_source_excerpt(self):
+        source_title = "OpenAI 发布模型更新"
+        excerpt = "OpenAI 表示，本次更新增加了新的开发者控制项，并已开始分批开放。"
+        az = make_analyzer()
+        az._call_ai = lambda _: (_ for _ in ()).throw(RuntimeError("network down"))
+
+        result = az.analyze(
+            stats=[],
+            rss_stats=[{
+                "word": "官方发布",
+                "titles": [
+                    T(source_title, "OpenAI News", 1, summary=f"<p>{excerpt}</p>")
+                ],
+            }],
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(len(result.silence_gap), 1)
+        summary = result.silence_gap[0]["summary"]
+        self.assertIn(excerpt, summary)
+        self.assertNotIn("具体内容以原始出处为准", summary)
+        self.assertLessEqual(len(summary), 180)
+
+    def test_social_fallback_uses_observation_metadata_not_description(self):
+        leaked_description = "某部门已经确认事件属实，不应进入摘要。"
+        az = make_analyzer()
+        az._call_ai = lambda _: (_ for _ in ()).throw(RuntimeError("network down"))
+
+        result = az.analyze(
+            stats=[{
+                "word": "公共事件",
+                "titles": [
+                    T(
+                        "某地发布暴雨红色预警",
+                        "微博",
+                        1,
+                        summary=leaked_description,
+                        time_display="09:30 ~ 12:00",
+                    )
+                ],
+            }],
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(len(result.high_heat_unverified), 1)
+        summary = result.high_heat_unverified[0]["summary"]
+        self.assertIn("进入微博榜单第1名", summary)
+        self.assertIn("观测时间为09:30 ~ 12:00", summary)
+        self.assertNotIn(leaked_description, summary)
+
+    def test_empty_ai_summary_is_filled_from_single_publisher_excerpt(self):
+        source_title = "OpenAI 发布模型更新"
+        excerpt = "OpenAI 表示，新版本增加开发者控制项，并已开始分批开放。"
+        source_id = evidence_id(source_title, "OpenAI News")
+        az = make_analyzer()
+        az._call_ai = lambda _: response({
+            "官方发布": [
+                event(source_title, "", "单一 A 层来源。", source_id)
+            ]
+        })
+
+        result = az.analyze(
+            stats=[],
+            rss_stats=[{
+                "word": "官方发布",
+                "titles": [
+                    T(source_title, "OpenAI News", 1, summary=excerpt)
+                ],
+            }],
+            source_tier_resolver=_bootstrap.make_resolver(B),
+        )
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(len(result.silence_gap), 1)
+        self.assertIn(excerpt, result.silence_gap[0]["summary"])
+
     def test_bad_json_and_schema_mismatch_are_blocking(self):
         for payload in ("not json", response({}, schema="old-schema")):
             az = make_analyzer()

@@ -320,6 +320,7 @@ def _pick_samples(titles: List[Dict], resolver, limit: int = 3) -> List[Dict[str
             "tier": tier,
             "trend": _rank_trend(t),
             "rank": _min_rank(t),
+            "time": _title_time(t),
             "sentiment_flag": bool(_EMOTION_RE.search(title)),
         }
         # A/B/C publisher excerpts can support a concrete event summary.  D
@@ -523,10 +524,12 @@ def _format_sample_line(sample: Dict[str, Any]) -> str:
     tier_tag = f"[{tier}]" if tier and tier != "unknown" else ""
     rank = sample.get("rank")
     rank_text = f"，第{rank}名" if isinstance(rank, int) and rank > 0 else ""
+    observed_at = str(sample.get("time", "") or "").strip()
+    time_text = f"，观测时间={observed_at}" if observed_at else ""
     line = (
         f"    · evidence_id={sample.get('evidence_id', '-')} "
         f"{tier_tag}[{src}] {sample.get('title', '')}"
-        f"（{sample.get('trend', '')}{rank_text}）"
+        f"（{sample.get('trend', '')}{rank_text}{time_text}）"
     )
     excerpt = str(sample.get("source_excerpt", "") or "").strip()
     if excerpt:
