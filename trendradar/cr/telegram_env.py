@@ -17,10 +17,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from trendradar.cr.telegram_sink import (
-    CRTelegramHTTPClient,
     CRTelegramSink,
     CRTelegramSinkConfig,
 )
+from trendradar.telegram.transport import TelegramHTTPClient
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def build_cr_telegram_sink_config_from_env(
 def build_cr_telegram_sink_from_env(
     env: Mapping[str, str],
     *,
-    http_client: CRTelegramHTTPClient | None = None,
+    http_client: TelegramHTTPClient | None = None,
 ) -> CRTelegramSink | None:
     """Build a :class:`CRTelegramSink` from an explicit env mapping.
 

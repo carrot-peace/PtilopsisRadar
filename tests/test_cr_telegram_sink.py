@@ -4,8 +4,7 @@ PR9n: CR Telegram dispatch sink tests.
 
 Covers:
   - config validation + frozen + token redaction
-  - payload construction (chat_id / text / parse_mode / preview)
-  - URL construction (trailing-slash trim, token in path, never in detail)
+  - shared transport payload and endpoint integration
   - successful fake HTTP submission → accepted receipt
   - rejected (ok:false) / non-2xx HTTP → not-accepted, sanitized detail
   - transport exception propagation (sink + executor)
@@ -32,12 +31,10 @@ from trendradar.cr.dispatch_executor import (
 )
 from trendradar.cr.dispatch_plan import CRDispatchMessage, CRDispatchPlan
 from trendradar.cr.telegram_sink import (
-    CRTelegramHTTPResponse,
     CRTelegramSink,
     CRTelegramSinkConfig,
-    build_telegram_send_message_payload,
-    build_telegram_send_message_url,
 )
+from trendradar.telegram.transport import TelegramHTTPResponse
 
 
 # Fake, obviously-not-real credentials used throughout.
@@ -53,7 +50,7 @@ FAKE_CHAT = "fake-chat-42"
 class _FakeHTTPClient:
     """Records the last call and returns a canned response."""
 
-    def __init__(self, response: CRTelegramHTTPResponse):
+    def __init__(self, response: TelegramHTTPResponse):
         self._response = response
         self.calls: list[dict] = []
 
@@ -71,8 +68,8 @@ class _RaisingHTTPClient:
         raise RuntimeError("transport boom")
 
 
-def _ok_response() -> CRTelegramHTTPResponse:
-    return CRTelegramHTTPResponse(
+def _ok_response() -> TelegramHTTPResponse:
+    return TelegramHTTPResponse(
         status_code=200, body=json.dumps({"ok": True, "result": {"message_id": 7}})
     )
 
@@ -151,70 +148,17 @@ class TestConfigShape(unittest.TestCase):
         self.assertNotIn(FAKE_TOKEN, repr(cfg))
 
     def test_http_response_is_frozen(self):
-        resp = CRTelegramHTTPResponse(status_code=200, body="{}")
+        resp = TelegramHTTPResponse(status_code=200, body="{}")
         with self.assertRaises(dataclasses.FrozenInstanceError):
             resp.status_code = 500  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
-# Group B — Payload construction
+# Group B — Shared transport integration
 # ---------------------------------------------------------------------------
 
 
-class TestPayloadConstruction(unittest.TestCase):
-    def test_payload_has_chat_id_and_exact_text(self):
-        msg = _message(text="exact body 文本")
-        payload = build_telegram_send_message_payload(msg, _config())
-        self.assertEqual(payload["chat_id"], FAKE_CHAT)
-        self.assertEqual(payload["text"], "exact body 文本")
-
-    def test_parse_mode_omitted_when_none(self):
-        payload = build_telegram_send_message_payload(_message(), _config())
-        self.assertNotIn("parse_mode", payload)
-
-    def test_parse_mode_included_when_configured(self):
-        payload = build_telegram_send_message_payload(
-            _message(), _config(parse_mode="MarkdownV2")
-        )
-        self.assertEqual(payload["parse_mode"], "MarkdownV2")
-
-    def test_preview_suppression_reflected_true(self):
-        payload = build_telegram_send_message_payload(
-            _message(), _config(disable_web_page_preview=True)
-        )
-        self.assertIs(payload["disable_web_page_preview"], True)
-
-    def test_preview_suppression_reflected_false(self):
-        payload = build_telegram_send_message_payload(
-            _message(), _config(disable_web_page_preview=False)
-        )
-        self.assertIs(payload["disable_web_page_preview"], False)
-
-    def test_message_not_mutated(self):
-        msg = _message(text="keep me", candidate_count=3, run_label="rr")
-        build_telegram_send_message_payload(msg, _config())
-        self.assertEqual(msg.text, "keep me")
-        self.assertEqual(msg.candidate_count, 3)
-        self.assertEqual(msg.run_label, "rr")
-
-
-# ---------------------------------------------------------------------------
-# Group C — URL construction
-# ---------------------------------------------------------------------------
-
-
-class TestURLConstruction(unittest.TestCase):
-    def test_trailing_slash_trimmed(self):
-        url = build_telegram_send_message_url(
-            _config(api_base_url="https://api.telegram.org/")
-        )
-        self.assertNotIn(".org//bot", url)
-        self.assertTrue(url.startswith("https://api.telegram.org/bot"))
-
-    def test_url_uses_bot_token(self):
-        url = build_telegram_send_message_url(_config())
-        self.assertIn(f"/bot{FAKE_TOKEN}/sendMessage", url)
-
+class TestSharedTransportIntegration(unittest.TestCase):
     def test_token_never_in_receipt_detail(self):
         sink = CRTelegramSink(config=_config(), http_client=_FakeHTTPClient(_ok_response()))
         receipt = sink.submit(_message(), message_index=0)
@@ -247,7 +191,12 @@ class TestSuccessfulSubmission(unittest.TestCase):
 
     def test_fake_client_records_url_payload_timeout(self):
         fake = _FakeHTTPClient(_ok_response())
-        cfg = _config(timeout_seconds=3.0)
+        cfg = _config(
+            api_base_url="https://api.telegram.org/",
+            timeout_seconds=3.0,
+            parse_mode="MarkdownV2",
+            disable_web_page_preview=False,
+        )
         sink = CRTelegramSink(config=cfg, http_client=fake)
         msg = _message(text="hello")
 
@@ -255,9 +204,12 @@ class TestSuccessfulSubmission(unittest.TestCase):
 
         self.assertEqual(len(fake.calls), 1)
         call = fake.calls[0]
+        self.assertNotIn(".org//bot", call["url"])
         self.assertIn(f"/bot{FAKE_TOKEN}/sendMessage", call["url"])
         self.assertEqual(call["payload"]["text"], "hello")
         self.assertEqual(call["payload"]["chat_id"], FAKE_CHAT)
+        self.assertEqual(call["payload"]["parse_mode"], "MarkdownV2")
+        self.assertIs(call["payload"]["disable_web_page_preview"], False)
         self.assertEqual(call["timeout_seconds"], 3.0)
 
 
@@ -271,7 +223,7 @@ class TestRejectedResponses(unittest.TestCase):
         body = json.dumps(
             {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}
         )
-        fake = _FakeHTTPClient(CRTelegramHTTPResponse(status_code=200, body=body))
+        fake = _FakeHTTPClient(TelegramHTTPResponse(status_code=200, body=body))
         sink = CRTelegramSink(config=_config(), http_client=fake)
 
         receipt = sink.submit(_message(), message_index=0)
@@ -283,7 +235,7 @@ class TestRejectedResponses(unittest.TestCase):
 
     def test_http_400_rejected(self):
         body = json.dumps({"ok": False, "error_code": 400, "description": "Bad Request"})
-        fake = _FakeHTTPClient(CRTelegramHTTPResponse(status_code=400, body=body))
+        fake = _FakeHTTPClient(TelegramHTTPResponse(status_code=400, body=body))
         sink = CRTelegramSink(config=_config(), http_client=fake)
 
         receipt = sink.submit(_message(), message_index=0)
@@ -297,7 +249,7 @@ class TestRejectedResponses(unittest.TestCase):
         body = json.dumps(
             {"ok": False, "description": f"token {FAKE_TOKEN} chat {FAKE_CHAT}"}
         )
-        fake = _FakeHTTPClient(CRTelegramHTTPResponse(status_code=200, body=body))
+        fake = _FakeHTTPClient(TelegramHTTPResponse(status_code=200, body=body))
         sink = CRTelegramSink(config=_config(), http_client=fake)
 
         receipt = sink.submit(_message(), message_index=0)
@@ -307,7 +259,7 @@ class TestRejectedResponses(unittest.TestCase):
 
     def test_preserves_metadata_on_rejection(self):
         fake = _FakeHTTPClient(
-            CRTelegramHTTPResponse(status_code=200, body=json.dumps({"ok": False}))
+            TelegramHTTPResponse(status_code=200, body=json.dumps({"ok": False}))
         )
         sink = CRTelegramSink(config=_config(), http_client=fake)
         msg = _message(candidate_count=9, run_label="run-e")
