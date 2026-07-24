@@ -54,9 +54,43 @@ case "${RUN_MODE:-cron}" in
     fi
 
     echo "启动supercronic: $CRON_EXPR"
-    echo "supercronic 将作为 PID 1 运行"
+    /usr/local/bin/supercronic -passthrough-logs /tmp/crontab &
+    CRON_PID=$!
 
-    exec /usr/local/bin/supercronic -passthrough-logs /tmp/crontab
+    BOT_PID=""
+    if [ "${PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED:-0}" = "1" ]; then
+        echo "启动 Telegram 订阅 Bot"
+        python -m trendradar.telegram.bot &
+        BOT_PID=$!
+    fi
+
+    terminate_children() {
+        trap - TERM INT
+        if [ -n "$BOT_PID" ]; then
+            kill -TERM "$BOT_PID" 2>/dev/null || true
+        fi
+        kill -TERM "$CRON_PID" 2>/dev/null || true
+        wait "$CRON_PID" 2>/dev/null || true
+        if [ -n "$BOT_PID" ]; then
+            wait "$BOT_PID" 2>/dev/null || true
+        fi
+    }
+    trap 'terminate_children; exit 143' TERM INT
+
+    if [ -z "$BOT_PID" ]; then
+        wait "$CRON_PID"
+        exit $?
+    fi
+
+    set +e
+    wait -n "$CRON_PID" "$BOT_PID"
+    CHILD_STATUS=$?
+    set -e
+    terminate_children
+    if [ "$CHILD_STATUS" -eq 0 ]; then
+        CHILD_STATUS=1
+    fi
+    exit "$CHILD_STATUS"
     ;;
 *)
     exec "$@"

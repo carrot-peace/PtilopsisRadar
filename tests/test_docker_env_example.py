@@ -35,16 +35,30 @@ class TestDockerEnvExample(unittest.TestCase):
         self.assertEqual(values["PTILOPSIS_CR_TELEGRAM_SEND"], "0")
         self.assertEqual(values["PTILOPSIS_DR_DISPATCH_MODE"], "off")
         self.assertEqual(values["PTILOPSIS_DR_TELEGRAM_SEND"], "0")
+        self.assertEqual(
+            values["PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED"], "0"
+        )
 
         for name in (
-            "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN",
-            "PTILOPSIS_CR_TELEGRAM_CHAT_ID",
-            "PTILOPSIS_CR_TELEGRAM_API_BASE_URL",
-            "PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS",
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_OWNER_CHAT_IDS",
+            "TELEGRAM_API_BASE_URL",
+            "TELEGRAM_TIMEOUT_SECONDS",
+            "PTILOPSIS_TELEGRAM_SUBSCRIPTION_DB_PATH",
+            "PTILOPSIS_CR_TELEGRAM_ATTACH_HTML",
             "PTILOPSIS_CR_TELEGRAM_PARSE_MODE",
             "PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW",
         ):
             self.assertIn(name, values)
+
+        for removed_name in (
+            "TELEGRAM_CHAT_ID",
+            "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN",
+            "PTILOPSIS_CR_TELEGRAM_CHAT_ID",
+            "PTILOPSIS_DR_TELEGRAM_BOT_TOKEN",
+            "PTILOPSIS_DR_TELEGRAM_CHAT_ID",
+        ):
+            self.assertNotIn(removed_name, values)
 
     def test_compose_files_honor_configured_timezone(self):
         for relative_path in (
