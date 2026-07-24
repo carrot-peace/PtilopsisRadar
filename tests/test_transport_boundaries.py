@@ -15,7 +15,7 @@ TIMELINE_PATH = PROJECT_ROOT / "config" / "timeline.yaml"
 TELEGRAM_HTTP_ALLOWLIST = {
     "trendradar/cr/telegram_sink.py",
     "trendradar/dr/telegram_sink.py",
-    "trendradar/deployment/operator_alert.py",
+    "trendradar/telegram/transport.py",
 }
 FORBIDDEN_RUNTIME_SYMBOLS = {
     "NotificationDispatcher",
