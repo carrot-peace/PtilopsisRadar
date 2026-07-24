@@ -15,7 +15,6 @@ TIMELINE_PATH = PROJECT_ROOT / "config" / "timeline.yaml"
 
 TELEGRAM_HTTP_ALLOWLIST = {
     "trendradar/cr/telegram_sink.py",
-    "trendradar/dr/telegram_sink.py",
     "trendradar/telegram/transport.py",
 }
 TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST = {

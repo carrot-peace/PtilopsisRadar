@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from trendradar.deployment.operator_alert import (
     SharedTransportOperatorTelegramSender,
@@ -22,6 +23,14 @@ class FakeHTTPClient:
 
     def post_json(self, url, payload, *, timeout_seconds):
         self.calls.append((url, payload, timeout_seconds))
+        return self.response
+
+    def post_multipart(
+        self, url, *, fields, file_field, file_path, timeout_seconds
+    ):
+        self.calls.append(
+            (url, fields, file_field, file_path, timeout_seconds)
+        )
         return self.response
 
 
@@ -81,6 +90,26 @@ class TestTelegramTransport(unittest.TestCase):
         self.assertTrue(TelegramHTTPResponse(200, '{"ok": true}').ok)
         self.assertFalse(TelegramHTTPResponse(500, '{"ok": true}').ok)
         self.assertFalse(TelegramHTTPResponse(200, "not-json").ok)
+
+    def test_send_document_uses_shared_multipart_client(self):
+        fake = FakeHTTPClient()
+        transport = TelegramTransport(
+            TelegramTransportConfig(bot_token="secret"),
+            http_client=fake,
+        )
+        path = Path("daily.html")
+        response = transport.send_document(
+            chat_id="11",
+            file_path=path,
+            caption="DR HTML",
+        )
+        self.assertTrue(response.ok)
+        url, fields, file_field, file_path, timeout = fake.calls[0]
+        self.assertEqual(url, "https://api.telegram.org/botsecret/sendDocument")
+        self.assertEqual(fields, {"chat_id": "11", "caption": "DR HTML"})
+        self.assertEqual(file_field, "document")
+        self.assertEqual(file_path, path)
+        self.assertEqual(timeout, 10.0)
 
     def test_operator_adapter_uses_shared_transport_without_behavior_change(self):
         fake = FakeHTTPClient(TelegramHTTPResponse(400, '{"ok": false}'))
