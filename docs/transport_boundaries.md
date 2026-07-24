@@ -1,40 +1,40 @@
-# Transport Boundaries
+# Telegram Transport Boundaries
 
-Ptilopsis Radar has three explicit Telegram transport planes. They do not
-share a fallback sender, report formatter, notification facade, or implicit
-configuration path.
+Ptilopsis Radar uses one Telegram Bot identity and one low-level Bot API
+transport under `trendradar/telegram/`. CR, DR, operator alerts, and inbound
+commands share that HTTP boundary but keep separate business policies.
 
-## CR dispatch
+## Product delivery
 
-CR owns its dispatch plan, receipts, cooldown state, Telegram configuration,
-and sink under `trendradar/cr/`. Sending requires the CR dispatch mode and the
-CR-specific Telegram send gate to be enabled explicitly.
+- CR retains its dispatch plan, cooldown, quiet-hours, deferred queue, and
+  receipt lifecycle under `trendradar/cr/`.
+- DR retains its formatter, dispatch plan, attachment policy, and once-period
+  dedupe under `trendradar/dr/`.
+- CR and DR deliver to the deduplicated union of explicit Owners and active
+  subscribers. Text success drives accepted state; attachment failures are
+  partial failures.
 
-## DR dispatch
+## Operator delivery
 
-DR owns a separate dispatch plan, receipts, formatter, Telegram configuration,
-and sink under `trendradar/dr/`. Sending requires the DR dispatch mode and the
-DR-specific Telegram send gate to be enabled explicitly. DR does not reuse the
-CR sink.
+Deployment and supervisor alerts remain Owner-only. Subscribers never receive
+operational messages. Command authority also comes only from
+`TELEGRAM_OWNER_CHAT_IDS`; there is no legacy chat-id fallback.
 
-## Deployment and operator alerts
+## Subscription commands
 
-Deployment notifications and supervisor alerts live under
-`trendradar/deployment/`. They are owner-only operational messages, not report
-delivery. The current deployment environment uses `TELEGRAM_BOT_TOKEN` with
-`TELEGRAM_OWNER_CHAT_IDS`; `TELEGRAM_CHAT_ID` remains an owner compatibility
-input for deployed installations.
+The private-chat Bot supports `/start`, `/help`, Owner-only `/token`,
+`/subscribe <token>`, and `/unsubscribe`. Subscription state, hashed one-time
+tokens, and the processed update offset live in the dedicated SQLite store.
+The Bot ignores groups, channels, ordinary text, and mismatched sender/chat
+identities.
 
-## Prohibited paths
+## Enforced constraints
 
-- No `trendradar.notification` package or multi-channel compatibility facade.
-- No fallback from CR, DR, or artifact generation into another transport.
-- No inbound Telegram bot, receiver ACL, or command ACL surface.
-- No Telegram transport inside report rendering, AI analysis, storage, or MCP
-  configuration inspection.
-- No generic notification, alert-cooldown, attachment, or channel configuration
-  in `config/config.yaml`.
-
-Low-level Telegram HTTP is confined to the CR sink, DR sink, and deployment
-operator sender. Tests enforce this allowlist and the absence of prohibited
-generic runtime calls.
+- Low-level Telegram HTTP exists only in
+  `trendradar/telegram/transport.py`.
+- There is no generic multi-channel notification facade and no fallback from
+  CR or DR into operator delivery.
+- Report rendering, AI analysis, MCP configuration, and general storage do not
+  call Telegram.
+- `config/config.yaml` contains no generic notification or Telegram ACL
+  sections.

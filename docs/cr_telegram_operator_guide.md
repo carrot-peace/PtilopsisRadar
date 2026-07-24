@@ -49,8 +49,8 @@ Telegram dispatch requires the `live` dispatch mode plus the Telegram send gate:
 ```text
 PTILOPSIS_CR_DISPATCH_MODE=live
 PTILOPSIS_CR_TELEGRAM_SEND=1
-PTILOPSIS_CR_TELEGRAM_BOT_TOKEN=<token>
-PTILOPSIS_CR_TELEGRAM_CHAT_ID=<chat-id>
+TELEGRAM_BOT_TOKEN=<token>
+TELEGRAM_OWNER_CHAT_IDS=<owner-private-chat-id>
 ```
 
 The supported operator states are:
@@ -82,17 +82,19 @@ unset preserves the no-send default.
 | `PTILOPSIS_CR_DISPATCH_MODE` | No | `off` | CR-A dispatch mode: `off`, `artifact`, `shadow`, or `live`. Invalid values resolve to `off`. |
 | `PTILOPSIS_CR_DRY_RUN` | No (compat alias) | unset | Set to `1` as a compatibility alias for `artifact` mode. Prefer `PTILOPSIS_CR_DISPATCH_MODE`. |
 | `PTILOPSIS_CR_TELEGRAM_SEND` | Required for live Telegram dispatch | unset/off | Set to `1` to enable Telegram sink construction in `live` mode. Any unset/off value keeps Telegram disabled. |
-| `PTILOPSIS_CR_TELEGRAM_BOT_TOKEN` | Required only when Telegram send is enabled | none | Telegram bot token used by the CR Telegram sink. Do not put real tokens in docs, commits, PRs, issues, or logs. |
-| `PTILOPSIS_CR_TELEGRAM_CHAT_ID` | Required only when Telegram send is enabled | none | Telegram chat id used by the CR Telegram sink. Use a private test chat first. |
-| `PTILOPSIS_CR_TELEGRAM_API_BASE_URL` | No | `https://api.telegram.org` | Optional Telegram API base URL. When omitted, inherits the `CRTelegramSinkConfig` default. |
-| `PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS` | No | `10.0` | Optional positive request timeout in seconds. When omitted, inherits the `CRTelegramSinkConfig` default. |
+| `TELEGRAM_BOT_TOKEN` | Required only when Telegram send is enabled | none | Shared Telegram bot token. Do not put real tokens in docs, commits, PRs, issues, or logs. |
+| `TELEGRAM_OWNER_CHAT_IDS` | Required only when Telegram send is enabled | none | Comma-separated private Owner chat IDs. Active subscribers are added from the subscription store. |
+| `TELEGRAM_API_BASE_URL` | No | `https://api.telegram.org` | Shared Telegram API base URL. |
+| `TELEGRAM_TIMEOUT_SECONDS` | No | `10.0` | Shared positive request timeout in seconds. |
+| `PTILOPSIS_CR_TELEGRAM_ATTACH_HTML` | No | `true` | Send the generated CR HTML after accepted text. |
 | `PTILOPSIS_CR_TELEGRAM_PARSE_MODE` | No | `None` | Optional Telegram parse mode. When omitted or blank, no parse mode is sent. |
 | `PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW` | No | `true` | Optional boolean-like value controlling Telegram web page previews. When omitted, inherits the `CRTelegramSinkConfig` default. |
 
 `PTILOPSIS_CR_DISPATCH_MODE` controls whether CR-A runs and in what capacity.
 `PTILOPSIS_CR_TELEGRAM_SEND=1` enables Telegram sink construction in `live`
-mode. Token and chat id are required only when Telegram send is enabled.
-Optional values inherit `CRTelegramSinkConfig` defaults.
+mode. The shared Bot token and explicit Owner IDs are required only when
+Telegram send is enabled.
+Optional values inherit the shared transport defaults.
 
 ## 5. Example: artifact mode
 
@@ -114,8 +116,8 @@ PTILOPSIS_CR_DRY_RUN=1 python3 -m trendradar
 ```bash
 PTILOPSIS_CR_DISPATCH_MODE=live \
 PTILOPSIS_CR_TELEGRAM_SEND=1 \
-PTILOPSIS_CR_TELEGRAM_BOT_TOKEN="<telegram-bot-token>" \
-PTILOPSIS_CR_TELEGRAM_CHAT_ID="<telegram-chat-id>" \
+TELEGRAM_BOT_TOKEN="<telegram-bot-token>" \
+TELEGRAM_OWNER_CHAT_IDS="<owner-private-chat-id>" \
 python3 -m trendradar
 ```
 
@@ -130,20 +132,18 @@ writes audit artifacts. The dispatch plan then selects CR-A candidates, and the
 dispatch executor submits only the planned messages.
 
 The Telegram sink does not re-score, re-decide, or re-render CR content. It
-submits the message text produced by the existing CR dispatch plan. Suppressed
-candidates remain non-pushable. No dedupe, cooldown, or alert-state persistence
-exists yet.
+submits the message text produced by the existing CR dispatch plan and then
+the generated HTML attachment. Suppressed candidates remain non-pushable.
+Existing cooldown, quiet-hours, deferred queue, and accepted-state semantics
+remain upstream of this adapter.
 
 ## 8. Known limitations
 
-- no dedupe
-- no cooldown
-- no alert-state persistence
-- no retry/backoff
+- no failed-delivery replay queue
+- no subscriber administration commands
 - no config.yaml integration
 - no token rotation helper
 - no Telegram formatting policy beyond current text payload
-- transport exception sanitization remains future hardening
 
 ## 9. Recommended operator workflow
 

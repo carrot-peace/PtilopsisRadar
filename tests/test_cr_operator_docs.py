@@ -20,10 +20,11 @@ ENV_VARS = (
     "PTILOPSIS_CR_DISPATCH_MODE",
     "PTILOPSIS_CR_DRY_RUN",
     "PTILOPSIS_CR_TELEGRAM_SEND",
-    "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN",
-    "PTILOPSIS_CR_TELEGRAM_CHAT_ID",
-    "PTILOPSIS_CR_TELEGRAM_API_BASE_URL",
-    "PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_OWNER_CHAT_IDS",
+    "TELEGRAM_API_BASE_URL",
+    "TELEGRAM_TIMEOUT_SECONDS",
+    "PTILOPSIS_CR_TELEGRAM_ATTACH_HTML",
     "PTILOPSIS_CR_TELEGRAM_PARSE_MODE",
     "PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW",
 )
@@ -56,9 +57,8 @@ class TestCROperatorDocs(unittest.TestCase):
         text = _doc_text().lower()
         for phrase in (
             "default behavior sends nothing",
-            "no dedupe",
-            "no cooldown",
-            "no alert-state persistence",
+            "no failed-delivery replay queue",
+            "no subscriber administration commands",
             "no config.yaml integration",
         ):
             self.assertIn(phrase, text)

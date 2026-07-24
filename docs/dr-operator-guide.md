@@ -49,13 +49,13 @@ DR 默认不发送。只有同时满足以下条件才进入 Telegram live 发�
 ```text
 PTILOPSIS_DR_DISPATCH_MODE=live
 PTILOPSIS_DR_TELEGRAM_SEND=1
-PTILOPSIS_DR_TELEGRAM_BOT_TOKEN 已配置
-PTILOPSIS_DR_TELEGRAM_CHAT_ID 已配置
+TELEGRAM_BOT_TOKEN 已配置
+TELEGRAM_OWNER_CHAT_IDS 已配置
 ```
 
 `artifact` 只写 dispatch plan / receipt，不产生网络发送；`off` 完全跳过 DR dispatch。调度表中的 legacy `push` 开关不替代上述 DR 独立门控。
 
-可选 Telegram 参数：`PTILOPSIS_DR_TELEGRAM_ATTACH_HTML`、`PTILOPSIS_DR_TELEGRAM_API_BASE_URL`、`PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS`、`PTILOPSIS_DR_TELEGRAM_PARSE_MODE`。未设置或传入空值时，附件开关、API 地址和超时时间分别回退为开启、官方 API 地址和 10 秒。通过 Docker 或 GitHub Actions 部署且未配置 `PARSE_MODE` 时默认为 HTML；若在直接调用中显式传入空值，则视为不启用 parse mode。
+可选 Telegram 参数：`PTILOPSIS_DR_TELEGRAM_ATTACH_HTML`、`PTILOPSIS_DR_TELEGRAM_PARSE_MODE`、共享的 `TELEGRAM_API_BASE_URL` 和 `TELEGRAM_TIMEOUT_SECONDS`。未设置或传入空值时，附件开关、API 地址和超时时间分别回退为开启、官方 API 地址和 10 秒。未配置 `PARSE_MODE` 时默认为 HTML；显式传入空值则不启用 parse mode。
 
 日报与 current 运行产物：
 

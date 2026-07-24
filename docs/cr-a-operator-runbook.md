@@ -106,8 +106,8 @@ live:
 | `PTILOPSIS_CR_DISPATCH_MODE` | `off`, `artifact`, `shadow`, `live` | Unset ⇒ `off`, CR-A does not run | Invalid value ⇒ resolves to `off` (fail closed) |
 | `PTILOPSIS_CR_DRY_RUN` | `1` | Compatibility alias for `artifact` | Ignored when `PTILOPSIS_CR_DISPATCH_MODE` is set explicitly |
 | `PTILOPSIS_CR_TELEGRAM_SEND` | `1` to enable, else off | Unset/off ⇒ sink not constructed, no send | Any non-`1` value keeps Telegram disabled |
-| `PTILOPSIS_CR_TELEGRAM_BOT_TOKEN` | bot token string | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
-| `PTILOPSIS_CR_TELEGRAM_CHAT_ID` | chat id string | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
+| `TELEGRAM_BOT_TOKEN` | bot token string | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
+| `TELEGRAM_OWNER_CHAT_IDS` | comma-separated private Owner IDs | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
 
 ### Quiet-hours
 
@@ -171,8 +171,8 @@ PTILOPSIS_CR_DISPATCH_MODE=shadow python3 -m trendradar
 PTILOPSIS_CR_DISPATCH_MODE=live python3 -m trendradar
 
 # Step 8 — live mode with Telegram send ENABLED. Use a private test chat.
-export PTILOPSIS_CR_TELEGRAM_BOT_TOKEN="<bot-token>"
-export PTILOPSIS_CR_TELEGRAM_CHAT_ID="<chat-id>"
+export TELEGRAM_BOT_TOKEN="<bot-token>"
+export TELEGRAM_OWNER_CHAT_IDS="<owner-private-chat-id>"
 PTILOPSIS_CR_DISPATCH_MODE=live \
 PTILOPSIS_CR_TELEGRAM_SEND=1 \
 python3 -m trendradar
