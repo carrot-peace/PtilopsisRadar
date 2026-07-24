@@ -19,6 +19,12 @@ class DRDispatchReceipt:
     date: str
     text_accepted: bool = False
     document_accepted: bool | None = None
+    recipient_count: int = 0
+    text_accepted_count: int = 0
+    text_failed_count: int = 0
+    document_accepted_count: int = 0
+    document_failed_count: int = 0
+    blocked_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,12 @@ def dr_dispatch_receipts_to_json_dict(
                 "date": receipt.date,
                 "text_accepted": receipt.text_accepted,
                 "document_accepted": receipt.document_accepted,
+                "recipient_count": receipt.recipient_count,
+                "text_accepted_count": receipt.text_accepted_count,
+                "text_failed_count": receipt.text_failed_count,
+                "document_accepted_count": receipt.document_accepted_count,
+                "document_failed_count": receipt.document_failed_count,
+                "blocked_count": receipt.blocked_count,
             }
             for receipt in receipts
         ],

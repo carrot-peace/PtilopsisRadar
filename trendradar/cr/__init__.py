@@ -184,9 +184,6 @@ from trendradar.cr.dispatch_executor import (
 )
 from trendradar.cr.telegram_sink import (
     CRTelegramSinkConfig,
-    CRTelegramHTTPResponse,
-    CRTelegramHTTPClient,
-    CRUrllibTelegramHTTPClient,
     CRTelegramSink,
 )
 from trendradar.cr.telegram_env import (
@@ -354,9 +351,6 @@ __all__ = [
     "CRNoopDispatchSink",
     "execute_cr_dispatch_plan",
     "CRTelegramSinkConfig",
-    "CRTelegramHTTPResponse",
-    "CRTelegramHTTPClient",
-    "CRUrllibTelegramHTTPClient",
     "CRTelegramSink",
     "cr_telegram_send_enabled",
     "build_cr_telegram_sink_config_from_env",

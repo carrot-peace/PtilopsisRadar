@@ -386,7 +386,6 @@ class TestSourceBoundary(unittest.TestCase):
         "telegram",
         "chat_id",
         "bot_token",
-        "recipient",
         "dispatcher",
         "cooldown",
         "dedupe",

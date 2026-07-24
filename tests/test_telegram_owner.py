@@ -15,13 +15,13 @@ class TestTelegramOwnerResolution(unittest.TestCase):
             ["111", "222"],
         )
 
-    def test_compatible_single_chat_id_is_still_an_owner(self):
+    def test_legacy_single_chat_id_is_not_command_authority(self):
         self.assertEqual(
             resolve_telegram_owner_chat_ids({"TELEGRAM_CHAT_ID": "-100123456789"}),
-            ["-100123456789"],
+            [],
         )
 
-    def test_compatible_semicolon_list_merges_before_explicit_owners(self):
+    def test_legacy_single_chat_id_does_not_merge_with_explicit_owners(self):
         self.assertEqual(
             resolve_telegram_owner_chat_ids(
                 {
@@ -29,7 +29,7 @@ class TestTelegramOwnerResolution(unittest.TestCase):
                     "TELEGRAM_OWNER_CHAT_IDS": "222,333",
                 }
             ),
-            ["111", "222", "333"],
+            ["222", "333"],
         )
 
     def test_missing_owner_configuration_is_empty(self):

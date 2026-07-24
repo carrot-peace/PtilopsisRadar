@@ -39,11 +39,9 @@ from trendradar.dr.telegram_env import (
     dr_telegram_send_enabled,
 )
 from trendradar.dr.telegram_sink import (
-    DRTelegramHTTPResponse,
     DRTelegramSink,
-    build_telegram_send_document_fields,
-    build_telegram_send_message_payload,
 )
+from trendradar.telegram.transport import TelegramHTTPResponse
 
 
 FAKE_TOKEN = "FAKE-DR-TOKEN-000:abc"
@@ -359,8 +357,8 @@ class TestDREnvAndSink(unittest.TestCase):
     def _env(self, **overrides: str) -> dict[str, str]:
         env = {
             "PTILOPSIS_DR_TELEGRAM_SEND": "1",
-            "PTILOPSIS_DR_TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
-            "PTILOPSIS_DR_TELEGRAM_CHAT_ID": FAKE_CHAT,
+            "TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
+            "TELEGRAM_OWNER_CHAT_IDS": FAKE_CHAT,
         }
         env.update(overrides)
         return env
@@ -384,7 +382,7 @@ class TestDREnvAndSink(unittest.TestCase):
 
     def test_missing_credentials_raise_when_enabled(self) -> None:
         env = self._env()
-        del env["PTILOPSIS_DR_TELEGRAM_BOT_TOKEN"]
+        del env["TELEGRAM_BOT_TOKEN"]
         with self.assertRaises(ValueError):
             build_dr_telegram_sink_config_from_env(env)
 
@@ -395,7 +393,7 @@ class TestDREnvAndSink(unittest.TestCase):
     def test_empty_optional_env_values_use_safe_defaults(self) -> None:
         config = build_dr_telegram_sink_config_from_env(
             self._env(
-                PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS="",
+                TELEGRAM_TIMEOUT_SECONDS="",
                 PTILOPSIS_DR_TELEGRAM_ATTACH_HTML="",
             )
         )
@@ -403,18 +401,12 @@ class TestDREnvAndSink(unittest.TestCase):
         self.assertEqual(config.timeout_seconds, 10.0)
         self.assertTrue(config.attach_html)
 
-    def test_payload_builders(self) -> None:
+    def test_config_uses_owner_recipient_and_html_defaults(self) -> None:
         config = build_dr_telegram_sink_config_from_env(self._env())
         assert config is not None
-        msg = DRDispatchMessage(
-            text="body", format="telegram_html", run_label="r",
-            date="2026-06-18", html_path="daily.html",
-        )
-        payload = build_telegram_send_message_payload(msg, config)
-        self.assertEqual(payload["chat_id"], FAKE_CHAT)
-        self.assertEqual(payload["parse_mode"], "HTML")
-        fields = build_telegram_send_document_fields(msg, config)
-        self.assertEqual(fields["caption"], "DR HTML")
+        self.assertEqual(config.recipients.get_chat_ids(), (FAKE_CHAT,))
+        self.assertEqual(config.parse_mode, "HTML")
+        self.assertTrue(config.attach_html)
 
     def test_sink_sends_text_and_document(self) -> None:
         class FakeClient:
@@ -424,13 +416,13 @@ class TestDREnvAndSink(unittest.TestCase):
 
             def post_json(self, url, payload, *, timeout_seconds):
                 self.json_payloads.append((url, payload))
-                return DRTelegramHTTPResponse(200, '{"ok": true}')
+                return TelegramHTTPResponse(200, '{"ok": true}')
 
             def post_multipart(
                 self, url, *, fields, file_field, file_path, timeout_seconds
             ):
                 self.multipart_payloads.append((url, fields, file_field, file_path))
-                return DRTelegramHTTPResponse(200, '{"ok": true}')
+                return TelegramHTTPResponse(200, '{"ok": true}')
 
         with tempfile.TemporaryDirectory() as td:
             html_path = Path(td) / "full.html"
@@ -459,12 +451,12 @@ class TestDREnvAndSink(unittest.TestCase):
     def test_document_failure_keeps_text_accepted(self) -> None:
         class FakeClient:
             def post_json(self, url, payload, *, timeout_seconds):
-                return DRTelegramHTTPResponse(200, '{"ok": true}')
+                return TelegramHTTPResponse(200, '{"ok": true}')
 
             def post_multipart(
                 self, url, *, fields, file_field, file_path, timeout_seconds
             ):
-                return DRTelegramHTTPResponse(400, '{"ok": false}')
+                return TelegramHTTPResponse(400, '{"ok": false}')
 
         with tempfile.TemporaryDirectory() as td:
             html_path = Path(td) / "full.html"
@@ -483,7 +475,7 @@ class TestDREnvAndSink(unittest.TestCase):
                 message_index=0,
             )
         self.assertTrue(receipt.accepted)
-        self.assertEqual(receipt.status, "accepted_document_failed")
+        self.assertEqual(receipt.status, "accepted_partial")
         self.assertFalse(receipt.document_accepted)
 
 

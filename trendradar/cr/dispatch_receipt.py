@@ -47,6 +47,7 @@ STATUS_SKIPPED_INSUFFICIENT_FRESH_SOURCES = "skipped_insufficient_fresh_sources"
 STATUS_QUIET_HOURS_CONFIG_ERROR = "quiet_hours_config_error"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_ACCEPTED = "accepted"
+STATUS_ACCEPTED_PARTIAL = "accepted_partial"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED_TRANSPORT = "failed_transport"
 STATUS_FAILED_RENDER = "failed_render"
@@ -65,6 +66,7 @@ def _resolve_receipt_status(
     """Map an execution receipt status to the JSON receipt status vocabulary."""
     mapping = {
         "accepted": STATUS_ACCEPTED,
+        "accepted_partial": STATUS_ACCEPTED_PARTIAL,
         "rejected": STATUS_REJECTED,
         "failed_transport": STATUS_FAILED_TRANSPORT,
         "http_error": STATUS_HTTP_ERROR,
@@ -83,6 +85,12 @@ def _build_receipt_entry(
         "accepted": execution_receipt.accepted,
         "status": status,
         "detail": execution_receipt.detail,
+        "recipient_count": execution_receipt.recipient_count,
+        "text_accepted_count": execution_receipt.text_accepted_count,
+        "text_failed_count": execution_receipt.text_failed_count,
+        "document_accepted_count": execution_receipt.document_accepted_count,
+        "document_failed_count": execution_receipt.document_failed_count,
+        "blocked_count": execution_receipt.blocked_count,
         "transport": None,
         "http_status": None,
         "sink_ok": None,
@@ -104,6 +112,12 @@ def _build_skipped_receipt_entry(
         "accepted": False,
         "status": status,
         "detail": detail,
+        "recipient_count": 0,
+        "text_accepted_count": 0,
+        "text_failed_count": 0,
+        "document_accepted_count": 0,
+        "document_failed_count": 0,
+        "blocked_count": 0,
         "transport": None,
         "http_status": None,
         "sink_ok": None,

@@ -44,6 +44,7 @@ from trendradar.cr.cooldown_enforce import (
 from trendradar.cr.cooldown_policy import CRCooldownPolicy
 from trendradar.cr.dispatch_executor import (
     CRDispatchExecutionResult,
+    CRDispatchReceipt,
     CRDispatchSink,
     TRANSPORT_EXCEPTIONS,
     execute_cr_dispatch_plan,
@@ -342,6 +343,7 @@ def _plan_for_candidates(
     text_config: object = None,
     total_eligible_count: int | None = None,
     high_score_suppressed_count: int | None = None,
+    html_path: str = "",
 ) -> CRDispatchPlan:
     from trendradar.cr.presentation import CRPresentationRun, render_cr_a_text
 
@@ -373,7 +375,7 @@ def _plan_for_candidates(
         high_score_suppressed_count=suppressed_count,
         coverage_warning=pipeline_result.coverage_warning,
     )
-    return build_cr_a_dispatch_plan(filtered)
+    return build_cr_a_dispatch_plan(filtered, html_path=html_path)
 
 
 def _count_high_score_cooldown_suppressed(
@@ -551,6 +553,7 @@ def _flush_receipt_entry(
     status: str,
     detail: str,
     entry: CRDeferredDispatchEntry,
+    sink_receipt: CRDispatchReceipt | None = None,
 ) -> dict[str, object]:
     return {
         "message_index": message_index,
@@ -563,6 +566,18 @@ def _flush_receipt_entry(
         "sink_ok": None,
         "exception_type": None,
         "exception_message": None,
+        "recipient_count": sink_receipt.recipient_count if sink_receipt else 0,
+        "text_accepted_count": (
+            sink_receipt.text_accepted_count if sink_receipt else 0
+        ),
+        "text_failed_count": sink_receipt.text_failed_count if sink_receipt else 0,
+        "document_accepted_count": (
+            sink_receipt.document_accepted_count if sink_receipt else 0
+        ),
+        "document_failed_count": (
+            sink_receipt.document_failed_count if sink_receipt else 0
+        ),
+        "blocked_count": sink_receipt.blocked_count if sink_receipt else 0,
         "source": "deferred_queue",
         "event_key": entry.event_key,
         "candidate_id": entry.candidate_id,
@@ -574,6 +589,7 @@ def _flush_deferred_queue(
     *,
     sink: CRDispatchSink | None,
     run_label: str,
+    html_path: str = "",
 ) -> tuple[list[dict[str, object]], set[str]]:
     receipts: list[dict[str, object]] = []
     accepted_event_keys: set[str] = set()
@@ -597,6 +613,7 @@ def _flush_deferred_queue(
             run_label=run_label,
             urgent_count=1 if entry.level == DECISION_URGENT else 0,
             high_score_suppressed_count=0,
+            html_path=html_path,
         )
         try:
             sink_receipt = sink.submit(message, message_index=index)
@@ -613,7 +630,13 @@ def _flush_deferred_queue(
             )
             continue
         status = sink_receipt.status
-        if status not in {"accepted", "rejected", "failed_transport", "http_error"}:
+        if status not in {
+            "accepted",
+            "accepted_partial",
+            "rejected",
+            "failed_transport",
+            "http_error",
+        }:
             status = "unknown"
         detail = "flushed_deferred" if sink_receipt.accepted else sink_receipt.detail
         receipts.append(
@@ -624,6 +647,7 @@ def _flush_deferred_queue(
                 status=status,
                 detail=detail,
                 entry=entry,
+                sink_receipt=sink_receipt,
             )
         )
         if sink_receipt.accepted:
@@ -928,7 +952,10 @@ def build_and_write_cr_runtime_dry_run(
     )
 
     # 6. Plan CR-A dispatch (pure — nothing is sent).
-    dispatch_plan = build_cr_a_dispatch_plan(pipeline_result)
+    dispatch_plan = build_cr_a_dispatch_plan(
+        pipeline_result,
+        html_path=artifact_paths.html_archive_path,
+    )
     effective_high_score_suppressed_count = (
         pipeline_result.high_score_suppressed_count
     )
@@ -973,6 +1000,7 @@ def build_and_write_cr_runtime_dry_run(
                 text_config=effective_text_config,
                 total_eligible_count=count_cr_a_eligible(fresh_presented),
                 high_score_suppressed_count=fresh_suppressed_count,
+                html_path=str(artifact_paths.html_archive_path),
             )
         else:
             health_blocked = True
@@ -1073,6 +1101,7 @@ def build_and_write_cr_runtime_dry_run(
                 queue_for_flush,
                 sink=dispatch_sink,
                 run_label=run_label,
+                html_path=str(artifact_paths.html_archive_path),
             )
             if accepted_flush_keys:
                 flushed_entries = ordered_entries_for_flush(queue_for_flush)
@@ -1144,6 +1173,7 @@ def build_and_write_cr_runtime_dry_run(
                     (),
                     text_config=effective_text_config,
                     high_score_suppressed_count=combined_suppressed_count,
+                    html_path=str(artifact_paths.html_archive_path),
                 )
             else:
                 cooldown_override_reason = cooldown_enforcement.override_reason
@@ -1166,6 +1196,7 @@ def build_and_write_cr_runtime_dry_run(
                 eligible_cr_a_candidates,
                 text_config=effective_text_config,
                 high_score_suppressed_count=combined_suppressed_count,
+                html_path=str(artifact_paths.html_archive_path),
             )
 
     # 6c. Apply quiet-hours live policy after cooldown eligibility.
@@ -1271,6 +1302,7 @@ def build_and_write_cr_runtime_dry_run(
                     high_score_suppressed_count=(
                         effective_high_score_suppressed_count
                     ),
+                    html_path=str(artifact_paths.html_archive_path),
                 )
                 quiet_bypass_applied = True
                 execution_state_candidates = bypass_candidates

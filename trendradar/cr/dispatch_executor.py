@@ -47,6 +47,12 @@ class CRDispatchReceipt:
     detail: str
     candidate_count: int
     run_label: str
+    recipient_count: int = 0
+    text_accepted_count: int = 0
+    text_failed_count: int = 0
+    document_accepted_count: int = 0
+    document_failed_count: int = 0
+    blocked_count: int = 0
 
 
 @dataclass(frozen=True)

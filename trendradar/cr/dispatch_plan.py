@@ -19,6 +19,7 @@ Design reference: PR9l, PR-CR-A2.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
 
 from trendradar.cr.decision import (
@@ -99,6 +100,7 @@ class CRDispatchMessage:
     run_label: str
     urgent_count: int
     high_score_suppressed_count: int
+    html_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,7 @@ def build_cr_a_dispatch_plan(
     *,
     min_candidate_count: int = 1,
     allow_empty_text: bool = False,
+    html_path: str | Path | None = None,
 ) -> CRDispatchPlan:
     """Build a CR-A dispatch plan from a :class:`CRPipelineResult`.
 
@@ -198,6 +201,7 @@ def build_cr_a_dispatch_plan(
     candidate_count = len(selected)
     urgent_count = _count_urgent(selected)
     high_score_suppressed_count = pipeline.high_score_suppressed_count
+    normalized_html_path = str(html_path or "")
 
     # 1. A suppression-only run is operator-visible even though it has no
     # selected event candidate.  It uses the text already rendered by the
@@ -220,6 +224,7 @@ def build_cr_a_dispatch_plan(
             run_label=pipeline.run_label,
             urgent_count=0,
             high_score_suppressed_count=high_score_suppressed_count,
+            html_path=normalized_html_path,
         )
         return CRDispatchPlan(
             should_dispatch=True,
@@ -263,6 +268,7 @@ def build_cr_a_dispatch_plan(
         run_label=pipeline.run_label,
         urgent_count=urgent_count,
         high_score_suppressed_count=high_score_suppressed_count,
+        html_path=normalized_html_path,
     )
     return CRDispatchPlan(
         should_dispatch=True,

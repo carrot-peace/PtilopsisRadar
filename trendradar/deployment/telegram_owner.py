@@ -1,5 +1,5 @@
 # coding=utf-8
-"""Resolve the owner chat ids used by deployment-only Telegram transports."""
+"""Resolve explicit Telegram owner chat ids."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ def _dedupe(values: Iterable[object]) -> list[str]:
 
 
 def resolve_telegram_owner_chat_ids(env: Mapping[str, str]) -> list[str]:
-    """Return explicit owners plus the supported ``TELEGRAM_CHAT_ID`` alias."""
-    compatible = str(env.get("TELEGRAM_CHAT_ID") or "").split(";")
+    """Return only explicitly configured owners."""
     explicit = str(env.get("TELEGRAM_OWNER_CHAT_IDS") or "").split(",")
-    return _dedupe([*compatible, *explicit])
+    return _dedupe(explicit)

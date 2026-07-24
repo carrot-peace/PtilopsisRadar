@@ -1,14 +1,15 @@
 # coding=utf-8
-"""DR Telegram env sink factory."""
+"""DR Telegram adapter configuration from the canonical Bot environment."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
-from trendradar.dr.telegram_sink import (
-    DRTelegramHTTPClient,
-    DRTelegramSink,
-    DRTelegramSinkConfig,
+from trendradar.dr.telegram_sink import DRTelegramSink, DRTelegramSinkConfig
+from trendradar.telegram.subscriptions import build_reader_recipient_provider
+from trendradar.telegram.transport import (
+    TelegramHTTPClient,
+    transport_config_from_env,
 )
 
 
@@ -35,49 +36,26 @@ def build_dr_telegram_sink_config_from_env(
     if not dr_telegram_send_enabled(env):
         return None
 
-    bot_token = env.get("PTILOPSIS_DR_TELEGRAM_BOT_TOKEN", "").strip()
-    if not bot_token:
-        raise ValueError("PTILOPSIS_DR_TELEGRAM_BOT_TOKEN is required")
-
-    chat_id = env.get("PTILOPSIS_DR_TELEGRAM_CHAT_ID", "").strip()
-    if not chat_id:
-        raise ValueError("PTILOPSIS_DR_TELEGRAM_CHAT_ID is required")
-
-    api_base_url = (
-        env.get("PTILOPSIS_DR_TELEGRAM_API_BASE_URL", "").strip()
-        or DRTelegramSinkConfig.api_base_url  # type: ignore[attr-defined]
-    )
-
-    timeout_raw = env.get("PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS")
-    if timeout_raw is None or not timeout_raw.strip():
-        timeout_seconds = DRTelegramSinkConfig.timeout_seconds  # type: ignore[attr-defined]
-    else:
-        try:
-            timeout_seconds = float(timeout_raw.strip())
-        except (TypeError, ValueError):
-            raise ValueError(
-                "PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS must be a positive number"
-            )
-        if timeout_seconds <= 0:
-            raise ValueError(
-                "PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS must be a positive number"
-            )
-
+    transport = transport_config_from_env(env)
     parse_mode_raw = env.get("PTILOPSIS_DR_TELEGRAM_PARSE_MODE")
     parse_mode = parse_mode_raw.strip() if parse_mode_raw is not None else "HTML"
-    if parse_mode == "":
+    if not parse_mode:
         parse_mode = None
 
     attach_raw = env.get("PTILOPSIS_DR_TELEGRAM_ATTACH_HTML")
-    attach_html = True if attach_raw is None or not attach_raw.strip() else _parse_bool_like(
-        attach_raw, "PTILOPSIS_DR_TELEGRAM_ATTACH_HTML"
+    attach_html = (
+        True
+        if attach_raw is None or not attach_raw.strip()
+        else _parse_bool_like(
+            attach_raw,
+            "PTILOPSIS_DR_TELEGRAM_ATTACH_HTML",
+        )
     )
-
     return DRTelegramSinkConfig(
-        bot_token=bot_token,
-        chat_id=chat_id,
-        api_base_url=api_base_url,
-        timeout_seconds=timeout_seconds,
+        bot_token=transport.bot_token,
+        recipients=build_reader_recipient_provider(env),
+        api_base_url=transport.api_base_url,
+        timeout_seconds=transport.timeout_seconds,
         parse_mode=parse_mode,
         attach_html=attach_html,
     )
@@ -86,7 +64,7 @@ def build_dr_telegram_sink_config_from_env(
 def build_dr_telegram_sink_from_env(
     env: Mapping[str, str],
     *,
-    http_client: DRTelegramHTTPClient | None = None,
+    http_client: TelegramHTTPClient | None = None,
 ) -> DRTelegramSink | None:
     config = build_dr_telegram_sink_config_from_env(env)
     if config is None:

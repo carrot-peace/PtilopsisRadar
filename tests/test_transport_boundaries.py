@@ -13,9 +13,7 @@ SCHEDULER_PATH = RUNTIME_ROOT / "core" / "scheduler.py"
 TIMELINE_PATH = PROJECT_ROOT / "config" / "timeline.yaml"
 
 TELEGRAM_HTTP_ALLOWLIST = {
-    "trendradar/cr/telegram_sink.py",
-    "trendradar/dr/telegram_sink.py",
-    "trendradar/deployment/operator_alert.py",
+    "trendradar/telegram/transport.py",
 }
 FORBIDDEN_RUNTIME_SYMBOLS = {
     "NotificationDispatcher",
@@ -36,7 +34,14 @@ def test_telegram_http_primitives_are_confined_to_explicit_senders() -> None:
     actual: set[str] = set()
     for path in _python_sources():
         text = path.read_text(encoding="utf-8")
-        if any(token in text for token in ("api.telegram.org", "sendMessage", "sendDocument")):
+        if any(
+            token in text
+            for token in (
+                "api.telegram.org",
+                "urllib.request",
+                "multipart/form-data",
+            )
+        ):
             actual.add(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert actual == TELEGRAM_HTTP_ALLOWLIST
@@ -79,19 +84,29 @@ def test_operational_transport_remains_owner_only() -> None:
         assert "receiver_chat_ids" not in text
 
 
-def test_inbound_telegram_bot_surface_is_absent() -> None:
-    bot_root = RUNTIME_ROOT / "telegram_bot"
-    assert not bot_root.exists() or not any(bot_root.glob("*.py"))
+def test_inbound_telegram_surface_is_narrow_and_explicit() -> None:
+    bot_path = RUNTIME_ROOT / "telegram" / "bot.py"
+    store_path = RUNTIME_ROOT / "telegram" / "subscriptions.py"
+    assert bot_path.is_file()
+    assert store_path.is_file()
     runtime_text = "\n".join(
         path.read_text(encoding="utf-8") for path in _python_sources()
     )
-    for token in (
+    for command in (
+        '"/start"',
+        '"/help"',
+        '"/token"',
+        '"/subscribe"',
+        '"/unsubscribe"',
+    ):
+        assert command in bot_path.read_text(encoding="utf-8")
+    for removed_config in (
         "TELEGRAM_RECEIVER_CHAT_IDS",
         "TELEGRAM_COMMAND_CHAT_IDS",
         "TELEGRAM_COMMANDS_ENABLED",
         "TELEGRAM_UNAUTHORIZED_BEHAVIOR",
     ):
-        assert token not in runtime_text
+        assert removed_config not in runtime_text
 
 
 def test_repository_config_has_no_generic_transport_sections() -> None:
