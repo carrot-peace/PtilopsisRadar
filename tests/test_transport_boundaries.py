@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from pathlib import Path
 
 
@@ -28,6 +29,11 @@ FORBIDDEN_RUNTIME_SYMBOLS = {
     "_send_notification_if_needed",
     "create_notification_dispatcher",
 }
+EXECUTABLE_TELEGRAM_TRANSPORT_SYMBOLS = {
+    "TelegramTransport",
+    "UrllibTelegramHTTPClient",
+    "*",
+}
 
 
 def _python_sources() -> list[Path]:
@@ -46,7 +52,32 @@ def test_telegram_http_primitives_are_confined_to_explicit_senders() -> None:
     assert actual == TELEGRAM_HTTP_ALLOWLIST
 
 
-def _imports_shared_telegram_transport(tree: ast.AST) -> bool:
+def _resolve_import_module(
+    node: ast.ImportFrom,
+    *,
+    source_path: Path | None,
+) -> str:
+    if node.level == 0:
+        return node.module or ""
+    if source_path is None:
+        return node.module or ""
+
+    relative = source_path.relative_to(PROJECT_ROOT).with_suffix("")
+    package_parts = list(relative.parts[:-1])
+    parent_hops = node.level - 1
+    if parent_hops > len(package_parts):
+        return node.module or ""
+    resolved = package_parts[: len(package_parts) - parent_hops]
+    if node.module:
+        resolved.extend(node.module.split("."))
+    return ".".join(resolved)
+
+
+def _imports_shared_telegram_transport(
+    tree: ast.AST,
+    *,
+    source_path: Path | None = None,
+) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             if any(
@@ -58,21 +89,20 @@ def _imports_shared_telegram_transport(tree: ast.AST) -> bool:
             continue
         if not isinstance(node, ast.ImportFrom):
             continue
+        module = _resolve_import_module(node, source_path=source_path)
         imported_names = {alias.name for alias in node.names}
         if (
-            node.module == "trendradar.telegram.transport"
-            and imported_names & {"TelegramTransport", "*"}
+            module == "trendradar.telegram.transport"
+            and imported_names & EXECUTABLE_TELEGRAM_TRANSPORT_SYMBOLS
         ):
             return True
         if (
-            node.module == "trendradar.telegram"
-            and imported_names & {"TelegramTransport", "transport", "*"}
+            module == "trendradar.telegram"
+            and imported_names
+            & (EXECUTABLE_TELEGRAM_TRANSPORT_SYMBOLS | {"transport"})
         ):
             return True
-        if (
-            node.module == "trendradar"
-            and imported_names & {"telegram", "*"}
-        ):
+        if module == "trendradar" and imported_names & {"telegram", "*"}:
             return True
     return False
 
@@ -81,7 +111,7 @@ def test_shared_telegram_transport_imports_are_confined_to_adapters() -> None:
     actual: set[str] = set()
     for path in _python_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if _imports_shared_telegram_transport(tree):
+        if _imports_shared_telegram_transport(tree, source_path=path):
             actual.add(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert actual == TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST
@@ -89,15 +119,51 @@ def test_shared_telegram_transport_imports_are_confined_to_adapters() -> None:
 
 def test_shared_telegram_transport_import_detection_covers_module_forms() -> None:
     transport_imports = (
-        "import trendradar.telegram",
-        "import trendradar.telegram.transport as transport",
-        "from trendradar import telegram",
-        "from trendradar.telegram import TelegramTransport",
-        "from trendradar.telegram import transport",
-        "from trendradar.telegram.transport import TelegramTransport",
+        ("import trendradar.telegram", "trendradar/cr/example.py"),
+        (
+            "import trendradar.telegram.transport as transport",
+            "trendradar/cr/example.py",
+        ),
+        ("from trendradar import telegram", "trendradar/cr/example.py"),
+        (
+            "from trendradar.telegram import TelegramTransport",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from trendradar.telegram import transport",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from trendradar.telegram.transport import TelegramTransport",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from trendradar.telegram.transport import "
+            "UrllibTelegramHTTPClient",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from ..telegram.transport import TelegramTransport",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from ..telegram.transport import UrllibTelegramHTTPClient",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from ..telegram import transport",
+            "trendradar/cr/example.py",
+        ),
+        (
+            "from .transport import UrllibTelegramHTTPClient",
+            "trendradar/telegram/example.py",
+        ),
     )
-    for source in transport_imports:
-        assert _imports_shared_telegram_transport(ast.parse(source)), source
+    for source, relpath in transport_imports:
+        assert _imports_shared_telegram_transport(
+            ast.parse(source),
+            source_path=PROJECT_ROOT / relpath,
+        ), source
 
     type_only_import = ast.parse(
         "from trendradar.telegram.transport import TelegramHTTPResponse"
@@ -217,3 +283,24 @@ def test_transport_boundary_document_exists() -> None:
     )
     for term in ("CR dispatch", "DR dispatch", "Deployment and operator alerts"):
         assert term in text
+
+
+BOUNDARY_CHECKS = (
+    test_telegram_http_primitives_are_confined_to_explicit_senders,
+    test_shared_telegram_transport_imports_are_confined_to_adapters,
+    test_shared_telegram_transport_import_detection_covers_module_forms,
+    test_generic_notification_package_and_runtime_symbols_stay_absent,
+    test_operational_transport_remains_owner_only,
+    test_inbound_telegram_bot_surface_is_absent,
+    test_repository_config_has_no_generic_transport_sections,
+    test_runtime_entrypoint_has_no_generic_delivery_controls,
+    test_scheduler_and_timeline_have_no_delivery_controls,
+    test_storage_schema_has_no_delivery_execution_state,
+    test_transport_boundary_document_exists,
+)
+
+
+def load_tests(loader, tests, pattern):
+    del loader, pattern
+    tests.addTests(unittest.FunctionTestCase(check) for check in BOUNDARY_CHECKS)
+    return tests
