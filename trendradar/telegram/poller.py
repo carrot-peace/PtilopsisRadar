@@ -125,10 +125,13 @@ class TelegramPollingRunner:
                 )
 
     def run_forever(self) -> None:
-        self.assert_no_webhook()
         backoff_seconds = 1.0
+        webhook_checked = False
         while True:
             try:
+                if not webhook_checked:
+                    self.assert_no_webhook()
+                    webhook_checked = True
                 self.poll_once()
                 backoff_seconds = 1.0
             except FatalPollingError:
