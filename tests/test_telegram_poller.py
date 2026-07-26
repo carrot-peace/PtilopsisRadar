@@ -45,12 +45,22 @@ def _update(update_id: int, chat_id: int, text: str) -> dict[str, object]:
 class FakeTransport:
     def __init__(self) -> None:
         self.webhook = _response(result={"url": ""})
+        self.webhook_responses: list[
+            TelegramHTTPResponse | BaseException
+        ] = []
+        self.webhook_calls = 0
         self.poll_responses: list[TelegramHTTPResponse | BaseException] = []
         self.sent: list[tuple[str, str]] = []
         self.send_response = _response(result={})
         self.offsets: list[int] = []
 
     def get_webhook_info(self):
+        self.webhook_calls += 1
+        if self.webhook_responses:
+            value = self.webhook_responses.pop(0)
+            if isinstance(value, BaseException):
+                raise value
+            return value
         return self.webhook
 
     def get_updates(self, *, offset, timeout_seconds):
@@ -129,6 +139,23 @@ class TestPollingRunner(PollerFixture):
         with self.assertRaises(FatalPollingError):
             self.runner.run_forever()
         self.assertEqual(sleeps, [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0])
+
+    def test_webhook_inspection_retries_before_polling(self) -> None:
+        sleeps: list[float] = []
+        self.runner.sleep = sleeps.append
+        self.transport.webhook_responses = [
+            ConnectionError("transient"),
+            _response(status=500),
+            _response(result={"url": ""}),
+        ]
+        self.transport.poll_responses = [_response(status=401)]
+
+        with self.assertRaises(FatalPollingError):
+            self.runner.run_forever()
+
+        self.assertEqual(sleeps, [1.0, 2.0])
+        self.assertEqual(self.transport.webhook_calls, 3)
+        self.assertEqual(self.transport.offsets, [0])
 
 
 class TestPollingConfiguration(unittest.TestCase):
