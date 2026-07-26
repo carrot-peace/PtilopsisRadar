@@ -167,6 +167,35 @@ class RemoteStorageSafetyTests(unittest.TestCase):
         self.assertEqual(local_path.read_bytes(), database)
         self.assertFalse(local_path.with_suffix(".db.part").exists())
 
+    def test_public_download_uses_atomic_query_destination(self):
+        local_path = (
+            Path(self.parent_dir.name)
+            / "output"
+            / "news"
+            / f"{self.date}.db"
+        )
+        local_path.parent.mkdir(parents=True)
+        local_path.write_bytes(b"previous-complete-database")
+        database = self._valid_sqlite_bytes()
+        self.fake_s3.head_result = {
+            "ContentLength": len(database),
+            "ETag": '"v1"',
+        }
+        self.fake_s3.get_result = {
+            "ContentLength": len(database),
+            "Body": FakeBody([database]),
+        }
+
+        downloaded = self.backend.download_database(
+            date=self.date,
+            db_type="news",
+            local_path=local_path,
+        )
+
+        self.assertEqual(downloaded, local_path)
+        self.assertEqual(local_path.read_bytes(), database)
+        self.assertFalse(local_path.with_suffix(".db.part").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

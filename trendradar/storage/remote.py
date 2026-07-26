@@ -327,6 +327,30 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
             if part_path.exists():
                 part_path.unlink()
 
+    def download_database(
+        self,
+        *,
+        date: str,
+        db_type: str,
+        local_path: Path,
+    ) -> Optional[Path]:
+        """Download one database to a validated, atomically replaced path."""
+        if db_type not in {"news", "rss"}:
+            raise ValueError(f"Unsupported database type: {db_type}")
+
+        remote_key = self._get_remote_db_key(date, db_type)
+        metadata = self._head_object(remote_key)
+        if metadata is None:
+            return None
+
+        destination = Path(local_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return self._download_object_to_path(
+            remote_key,
+            destination,
+            metadata,
+        )
+
     def _download_sqlite(self, date: Optional[str] = None, db_type: str = "news") -> Optional[Path]:
         """
         从远程存储下载当天的 SQLite 文件到本地临时目录
@@ -1187,8 +1211,7 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
             date_str = date.strftime("%Y-%m-%d")
 
             # 本地目标路径
-            local_date_dir = local_dir / date_str
-            local_db_path = local_date_dir / "news.db"
+            local_db_path = local_dir / "news" / f"{date_str}.db"
 
             # 如果本地已存在，跳过
             if local_db_path.exists():
@@ -1198,17 +1221,11 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
             # 远程对象键
             remote_key = f"news/{date_str}.db"
 
-            metadata = self._head_object(remote_key)
-            if metadata is None:
-                print(f"[远程存储] 跳过（远程不存在）: {date_str}")
-                continue
-
             try:
-                local_date_dir.mkdir(parents=True, exist_ok=True)
-                downloaded = self._download_object_to_path(
-                    remote_key,
-                    local_db_path,
-                    metadata,
+                downloaded = self.download_database(
+                    date=date_str,
+                    db_type="news",
+                    local_path=local_db_path,
                 )
                 if downloaded is None:
                     print(f"[远程存储] 跳过（远程不存在）: {date_str}")

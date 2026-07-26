@@ -6,7 +6,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 from pathlib import Path
 import re
@@ -14,6 +14,11 @@ from typing import Dict, List, Optional
 
 import yaml
 
+from ..services.remote_pull_service import (
+    RemotePullResult,
+    RemotePullService,
+    validate_pull_days,
+)
 from ..utils.errors import MCPError
 
 
@@ -227,6 +232,10 @@ class StorageSyncTools:
             同步结果字典
         """
         try:
+            days = validate_pull_days(days)
+            if days == 0:
+                return self._build_sync_response(RemotePullResult())
+
             # 检查远程配置
             if not self._has_remote_config():
                 return {
@@ -250,81 +259,31 @@ class StorageSyncTools:
                     }
                 }
 
-            # 获取本地数据目录
             local_dir = self._get_local_data_dir()
-            local_dir.mkdir(parents=True, exist_ok=True)
-
-            # 获取远程可用日期
             remote_dates = remote_backend.list_remote_dates()
-
-            # 获取本地已有日期
             local_dates = set(self._get_local_dates())
 
-            # 计算需要拉取的日期（最近 N 天）
             from trendradar.utils.time import get_configured_time
             config = self._load_config()
             timezone = config.get("app", {}).get("timezone", "Asia/Shanghai")
             now = get_configured_time(timezone)
 
-            target_dates = []
-            for i in range(days):
-                date = now - timedelta(days=i)
-                date_str = date.strftime("%Y-%m-%d")
-                if date_str in remote_dates:
-                    target_dates.append(date_str)
-
-            # 执行拉取
-            synced_dates = []
-            skipped_dates = []
-            failed_dates = []
-
-            for date_str in target_dates:
-                # 检查本地是否已存在
-                if date_str in local_dates:
-                    skipped_dates.append(date_str)
-                    continue
-
-                # 拉取单个日期
-                try:
-                    local_date_dir = local_dir / date_str
-                    local_db_path = local_date_dir / "news.db"
-                    remote_key = f"news/{date_str}.db"
-
-                    local_date_dir.mkdir(parents=True, exist_ok=True)
-                    remote_backend.s3_client.download_file(
-                        remote_backend.bucket_name,
-                        remote_key,
-                        str(local_db_path)
-                    )
-                    synced_dates.append(date_str)
-                    logger.info("Pulled remote storage date=%s", date_str)
-                except Exception as e:
-                    failed_dates.append({"date": date_str, "error": str(e)})
-                    logger.warning(
-                        "Failed to pull remote storage date=%s: %s",
-                        date_str,
-                        e,
-                    )
-
-            return {
-                "success": True,
-                "summary": {
-                    "description": "远程存储同步结果",
-                    "synced_files": len(synced_dates),
-                    "skipped_count": len(skipped_dates),
-                    "failed_count": len(failed_dates)
-                },
-                "data": {
-                    "synced_dates": synced_dates,
-                    "skipped_dates": skipped_dates,
-                    "failed_dates": failed_dates
-                },
-                "message": f"成功同步 {len(synced_dates)} 天数据" + (
-                    f"，跳过 {len(skipped_dates)} 天（本地已存在）" if skipped_dates else ""
-                ) + (
-                    f"，失败 {len(failed_dates)} 天" if failed_dates else ""
+            result = RemotePullService(
+                remote_backend,
+                local_dir,
+            ).pull_recent_news(
+                days=days,
+                now=now,
+                remote_dates=remote_dates,
+                local_dates=local_dates,
+            )
+            for failure in result.failed_dates:
+                logger.warning(
+                    "Failed to pull remote storage date=%s: %s",
+                    failure["date"],
+                    failure["error"],
                 )
-            }
+            return self._build_sync_response(result)
 
         except MCPError as e:
             return {
@@ -339,6 +298,33 @@ class StorageSyncTools:
                     "message": str(e)
                 }
             }
+
+    @staticmethod
+    def _build_sync_response(result: RemotePullResult) -> Dict:
+        synced_dates = result.synced_dates
+        skipped_dates = result.skipped_dates
+        failed_dates = result.failed_dates
+        return {
+            "success": True,
+            "summary": {
+                "description": "远程存储同步结果",
+                "synced_files": len(synced_dates),
+                "skipped_count": len(skipped_dates),
+                "failed_count": len(failed_dates),
+            },
+            "data": {
+                "synced_dates": synced_dates,
+                "skipped_dates": skipped_dates,
+                "failed_dates": failed_dates,
+            },
+            "message": f"成功同步 {len(synced_dates)} 天数据" + (
+                f"，跳过 {len(skipped_dates)} 天（本地已存在）"
+                if skipped_dates else ""
+            ) + (
+                f"，失败 {len(failed_dates)} 天"
+                if failed_dates else ""
+            ),
+        }
 
     def get_storage_status(self) -> Dict:
         """
