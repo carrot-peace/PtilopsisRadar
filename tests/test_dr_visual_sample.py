@@ -40,6 +40,14 @@ class TestDRVisualSample(unittest.TestCase):
             self.assertIn(b"2026-07-13", first_render[0])
             self.assertIn(b"390px", first_render[1])
             self.assertTrue(first_render[2].strip())
+            self.assertIn(
+                "层级 C".encode(),
+                first_render[0],
+            )
+            self.assertIn(
+                "中文专业来源".encode(),
+                first_render[2],
+            )
 
 
 if __name__ == "__main__":

@@ -106,18 +106,21 @@ def build_fixture() -> tuple[SimpleNamespace, dict[str, Any]]:
         "今日头条",
         "https://www.toutiao.com/trending/7660841633700675647/",
         1,
+        "C",
     )
     flood_a = source(
         "河北宽城多个小区被淹 无失联人员",
         "今日头条",
         "https://www.toutiao.com/trending/7661880097988677170/",
         2,
+        "C",
     )
     flood_b = source(
         "河北宽城多地交通中断 村民出行受阻",
         "今日头条",
         "https://www.toutiao.com/trending/7661815107093007891/",
         3,
+        "C",
     )
     market = source(
         "三大指数均跌超2%，全市场逾170股跌停",
@@ -138,20 +141,20 @@ def build_fixture() -> tuple[SimpleNamespace, dict[str, Any]]:
             "海南陵水14岁失联女生已找到",
             "今日头条热榜出现“海南陵水14岁失联女生已顺利找到”的标题。当前采集结果能够确认的是寻人事件出现了“已找到”的公开进展，以及该进展进入平台热榜；现有证据未包含寻回时间、地点和后续处置细节，因此摘要不作额外补写。",
             "目前只绑定今日头条一条传播文本，属于单个平台的进展信号。",
-            layers="D",
+            layers="C",
             sources=[found],
             heat="今日头条 第1名",
-            status="高热待核实",
+            status="中文专业来源",
             boundary="当前只能确认相关标题进入平台热榜，不能据此补充标题之外的事实。",
         ),
         event(
             "河北宽城多处被淹，交通出行受阻",
             "今日头条两条热榜标题均指向河北宽城洪涝：一条提到多个小区被淹，并称暂未发现失联人员；另一条提到多地交通中断、村民出行受阻。两条内容描述的是同一地区洪涝造成的不同影响，当前未采集到更完整的灾情通报和处置时间线。",
             "两条证据来自同一平台，可相互补充事件影响，但不构成跨平台核验。",
-            layers="D",
+            layers="C",
             sources=[flood_a, flood_b],
             heat="今日头条 第2名",
-            status="高热待核实",
+            status="中文专业来源",
             boundary="现阶段可确认传播内容及其平台位置，具体灾情仍以当地正式通报为准。",
         ),
         event(
@@ -202,18 +205,18 @@ def build_fixture() -> tuple[SimpleNamespace, dict[str, Any]]:
         overview_stats={
             "label_counts": {
                 "cross_layer_verified": 0,
-                "high_heat_unverified": 6,
+                "high_heat_unverified": 4,
                 "sentiment_heavy": 0,
                 "silence_gap": 0,
-                "chinese_only_hot": 1,
+                "chinese_only_hot": 3,
             },
             "background_count": 2,
-            "layer_distribution": {"A": 0, "B": 0, "C": 1, "D": 4},
+            "layer_distribution": {"A": 0, "B": 0, "C": 3, "D": 4},
         },
         cross_layer_verified=[],
-        high_heat_unverified=[items[0], items[1], items[3], *noise],
+        high_heat_unverified=[items[3], *noise],
         sentiment_heavy=[],
-        chinese_only_hot=[items[2]],
+        chinese_only_hot=[items[0], items[1], items[2]],
         silence_gap=[],
         background_notes=["国际秩序与东亚（C）", "科技产业背景（C）"],
         method_note=(
