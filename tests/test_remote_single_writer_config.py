@@ -6,9 +6,6 @@ from trendradar.context import AppContext
 from trendradar.core.loader import _load_storage_config
 from trendradar.storage.manager import StorageManager
 
-_ORIGINAL_GET_STORAGE_MANAGER = AppContext.get_storage_manager
-
-
 class RemoteSingleWriterConfigTests(unittest.TestCase):
     def test_loader_reads_yaml_and_environment_override(self):
         loaded = _load_storage_config(
@@ -23,6 +20,7 @@ class RemoteSingleWriterConfigTests(unittest.TestCase):
         self.assertFalse(overridden["REMOTE"]["SINGLE_WRITER"])
 
     def test_context_forwards_single_writer_to_storage_manager(self):
+        factory = Mock()
         context = AppContext(
             {
                 "STORAGE": {
@@ -31,16 +29,10 @@ class RemoteSingleWriterConfigTests(unittest.TestCase):
                     "LOCAL": {},
                     "PULL": {},
                 }
-            }
+            },
+            storage_factory=factory,
         )
-        context._storage_manager = None
-
-        factory = Mock()
-        with patch.dict(
-            _ORIGINAL_GET_STORAGE_MANAGER.__globals__,
-            {"get_storage_manager": factory},
-        ):
-            _ORIGINAL_GET_STORAGE_MANAGER(context)
+        context.get_storage_manager()
 
         self.assertTrue(
             factory.call_args.kwargs["remote_config"]["single_writer"]

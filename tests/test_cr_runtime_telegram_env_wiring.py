@@ -50,9 +50,9 @@ class TestSourceWiring(unittest.TestCase):
         self.assertEqual(len(call.args), 1)
         argument = call.args[0]
         self.assertIsInstance(argument, ast.Attribute)
-        self.assertEqual(argument.attr, "environ")
+        self.assertEqual(argument.attr, "_environ")
         self.assertIsInstance(argument.value, ast.Name)
-        self.assertEqual(argument.value.id, "os")
+        self.assertEqual(argument.value.id, "self")
 
     def test_dispatch_sink_conditionally_built_for_live(self) -> None:
         hook = load_cr_dispatch_hook()

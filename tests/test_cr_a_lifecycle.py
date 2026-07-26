@@ -350,9 +350,15 @@ class TestReportWriteFailureDoesNotCorruptState(unittest.TestCase):
 
 
 class TestPostRunTrigger(unittest.TestCase):
-    """Verify the post-run trigger wiring in __main__.py (P1)."""
+    """Verify the post-run trigger wiring in the CR notification service."""
 
-    MAIN_PATH = os.path.join(ROOT, "trendradar", "__main__.py")
+    MAIN_PATH = os.path.join(
+        ROOT,
+        "trendradar",
+        "application",
+        "services",
+        "cr_notification.py",
+    )
 
     def _main_source(self) -> str:
         return Path(self.MAIN_PATH).read_text(encoding="utf-8")
@@ -360,9 +366,12 @@ class TestPostRunTrigger(unittest.TestCase):
     def _lifecycle_gate_source(self) -> str:
         source = self._main_source()
         start = source.index(
-            'if os.environ.get("PTILOPSIS_CR_LIFECYCLE_ENABLED") == "1":',
+            'if self._environ.get("PTILOPSIS_CR_LIFECYCLE_ENABLED") == "1":',
         )
-        end = source.index("\n\n        return stats, html_file", start)
+        end = source.index(
+            "\n\n            return CRNotificationResult",
+            start,
+        )
         return source[start:end]
 
     def test_trigger_gated_by_lifecycle_enabled(self) -> None:

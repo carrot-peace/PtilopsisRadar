@@ -1,4 +1,4 @@
-"""AST helpers for CR dispatch-hook structure checks in ``__main__.py``."""
+"""AST helpers for the extracted CR notification service."""
 
 from __future__ import annotations
 
@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-MAIN_PATH = Path(__file__).resolve().parent.parent / "trendradar" / "__main__.py"
+SERVICE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "trendradar"
+    / "application"
+    / "services"
+    / "cr_notification.py"
+)
 
 
 def call_name(call: ast.Call) -> str | None:
@@ -67,16 +73,19 @@ def _is_comparison(
     )
 
 
-def _find_main_pipeline(tree: ast.Module) -> ast.FunctionDef:
+def _find_cr_service_run(tree: ast.Module) -> ast.FunctionDef:
     for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "NewsAnalyzer":
+        if (
+            isinstance(node, ast.ClassDef)
+            and node.name == "CRNotificationService"
+        ):
             for child in node.body:
                 if (
                     isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and child.name == "_run_analysis_pipeline"
+                    and child.name == "run"
                 ):
                     return child
-    raise AssertionError("NewsAnalyzer._run_analysis_pipeline not found")
+    raise AssertionError("CRNotificationService.run not found")
 
 
 @dataclass(frozen=True)
@@ -90,8 +99,8 @@ class CRDispatchHook:
 
 
 def load_cr_dispatch_hook() -> CRDispatchHook:
-    tree = ast.parse(MAIN_PATH.read_text(encoding="utf-8"))
-    function = _find_main_pipeline(tree)
+    tree = ast.parse(SERVICE_PATH.read_text(encoding="utf-8"))
+    function = _find_cr_service_run(tree)
 
     resolve_assignment = next(
         (
