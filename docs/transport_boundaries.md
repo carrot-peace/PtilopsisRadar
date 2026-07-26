@@ -23,8 +23,9 @@ CR sink.
 Deployment notifications and supervisor alerts live under
 `trendradar/deployment/`. They are owner-only operational messages, not report
 delivery. The current deployment environment uses `TELEGRAM_BOT_TOKEN` with
-`TELEGRAM_OWNER_CHAT_IDS`; `TELEGRAM_CHAT_ID` remains an owner compatibility
-input for deployed installations.
+`TELEGRAM_OWNER_CHAT_IDS`. The deployment sender still accepts
+`TELEGRAM_CHAT_ID` as a narrow compatibility input, but reader delivery and
+subscription authorization never use it.
 
 ## Prohibited paths
 
@@ -41,7 +42,7 @@ input for deployed installations.
 Low-level Telegram HTTP is confined to `trendradar/telegram/transport.py`.
 Runtime use of the shared transport is confined to the CR sink, DR sink, and
 deployment operator sender, plus the explicit reader fan-out orchestrator and
-manual subscription poller. The poller is not started by the production
-container yet. Tests enforce both the HTTP implementation allowlist and the
-shared transport import-site allowlist, together with the absence of prohibited
-generic runtime calls.
+subscription poller. The Docker cron container starts the poller only when the
+subscription feature flag is exactly `1`. Tests enforce both the HTTP
+implementation allowlist and the shared transport import-site allowlist,
+together with the absence of prohibited generic runtime calls.
