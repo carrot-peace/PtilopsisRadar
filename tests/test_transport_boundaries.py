@@ -21,6 +21,7 @@ TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST = {
     "trendradar/deployment/operator_alert.py",
     "trendradar/dr/telegram_sink.py",
     "trendradar/telegram/__init__.py",
+    "trendradar/telegram/poller.py",
 }
 FORBIDDEN_RUNTIME_SYMBOLS = {
     "NotificationDispatcher",
@@ -46,7 +47,16 @@ def test_telegram_http_primitives_are_confined_to_explicit_senders() -> None:
     actual: set[str] = set()
     for path in _python_sources():
         text = path.read_text(encoding="utf-8")
-        if any(token in text for token in ("api.telegram.org", "sendMessage", "sendDocument")):
+        if any(
+            token in text
+            for token in (
+                "api.telegram.org",
+                "sendMessage",
+                "sendDocument",
+                "getUpdates",
+                "getWebhookInfo",
+            )
+        ):
             actual.add(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert actual == TELEGRAM_HTTP_ALLOWLIST
