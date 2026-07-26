@@ -7,6 +7,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from fastmcp.server.dependencies import get_context
+
 from .tools.analytics import AnalyticsTools
 from .tools.article_reader import ArticleReaderTools
 from .tools.config_mgmt import ConfigManagementTools
@@ -71,3 +73,12 @@ class MCPContext:
             return self.tools[name]
         except KeyError as exc:
             raise KeyError(f"MCP tool dependency is not configured: {name}") from exc
+
+
+def get_request_tools() -> Mapping[str, Any]:
+    """Return dependencies owned by the active MCP application."""
+    request_context = get_context().request_context
+    application_context = request_context.lifespan_context
+    if not isinstance(application_context, MCPContext):
+        raise RuntimeError("MCP application context is not configured")
+    return application_context.tools

@@ -298,6 +298,27 @@ def validate_limit(limit: Optional[Union[int, str]], default: int = 20, max_limi
     return limit
 
 
+def validate_days(
+    days: Optional[Union[int, str]],
+    *,
+    default: int,
+    max_days: int,
+) -> int:
+    """Validate a bounded positive day count."""
+    if days is None:
+        return default
+    if isinstance(days, str):
+        days = _parse_string_to_int(days, "days")
+    if isinstance(days, bool) or not isinstance(days, int):
+        raise InvalidParameterError("days 参数必须是整数类型")
+    if days < 1 or days > max_days:
+        raise InvalidParameterError(
+            f"days 必须在 1 到 {max_days} 之间，当前值: {days}",
+            suggestion=f"请提供 1-{max_days} 之间的天数",
+        )
+    return days
+
+
 def validate_date(date_str: str) -> datetime:
     """
     验证日期格式
@@ -367,7 +388,27 @@ def normalize_date_range(date_range: Optional[Union[dict, str]]) -> Optional[Uni
     return date_range
 
 
-def validate_date_range(date_range: Optional[Union[dict, str]]) -> Optional[tuple]:
+def _enforce_date_span(
+    start_date: datetime,
+    end_date: datetime,
+    max_days: Optional[int],
+) -> tuple:
+    if max_days is None:
+        return (start_date, end_date)
+    span_days = (end_date.date() - start_date.date()).days + 1
+    if span_days > max_days:
+        raise InvalidParameterError(
+            f"日期范围不能超过 {max_days} 天，当前为 {span_days} 天",
+            suggestion=f"请缩小日期范围至 {max_days} 天以内",
+        )
+    return (start_date, end_date)
+
+
+def validate_date_range(
+    date_range: Optional[Union[dict, str]],
+    *,
+    max_days: Optional[int] = None,
+) -> Optional[tuple]:
     """
     验证日期范围
 
@@ -403,8 +444,12 @@ def validate_date_range(date_range: Optional[Union[dict, str]]) -> Optional[tupl
         # 2. 检查是否是单日字符串格式 YYYY-MM-DD
         elif len(stripped) == 10 and stripped[4] == '-' and stripped[7] == '-':
             try:
-                single_date = datetime.strptime(stripped, "%Y-%m-%d")
-                return (single_date, single_date)
+                single_date = validate_date_query(stripped)
+                return _enforce_date_span(
+                    single_date,
+                    single_date,
+                    max_days,
+                )
             except ValueError:
                 raise InvalidParameterError(
                     f"日期格式错误: {stripped}",
@@ -418,14 +463,23 @@ def validate_date_range(date_range: Optional[Union[dict, str]]) -> Optional[tupl
                     dr = result["date_range"]
                     start_date = datetime.strptime(dr["start"], "%Y-%m-%d")
                     end_date = datetime.strptime(dr["end"], "%Y-%m-%d")
-                    return (start_date, end_date)
+                    return _enforce_date_span(
+                        start_date,
+                        end_date,
+                        max_days,
+                    )
                 else:
                     raise InvalidParameterError(
                         f"无法识别的日期表达式: {stripped}",
                         suggestion="支持格式: YYYY-MM-DD, {\"start\": \"...\", \"end\": \"...\"}, 或自然语言（今天、本周、最近7天等）"
                     )
             except InvalidParameterError:
-                raise
+                single_date = validate_date_query(stripped)
+                return _enforce_date_span(
+                    single_date,
+                    single_date,
+                    max_days,
+                )
             except Exception:
                 raise InvalidParameterError(
                     f"日期解析失败: {stripped}",
@@ -483,7 +537,7 @@ def validate_date_range(date_range: Optional[Union[dict, str]]) -> Optional[tupl
             suggestion=f"当前可用数据范围: {available_range}"
         )
 
-    return (start_date, end_date)
+    return _enforce_date_span(start_date, end_date, max_days)
 
 
 def validate_keyword(keyword: str) -> str:

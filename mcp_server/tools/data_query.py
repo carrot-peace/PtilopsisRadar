@@ -10,12 +10,11 @@ from ..services.data_service import DataService
 from ..utils.validators import (
     validate_platforms,
     validate_limit,
+    validate_days,
     validate_keyword,
     validate_date_range,
     validate_top_n,
     validate_mode,
-    validate_date_query,
-    normalize_date_range
 )
 from ..utils.errors import MCPError
 
@@ -23,14 +22,23 @@ from ..utils.errors import MCPError
 class DataQueryTools:
     """数据查询工具类"""
 
-    def __init__(self, project_root: str = None):
+    def __init__(
+        self,
+        project_root: str = None,
+        *,
+        data_service=None,
+    ):
         """
         初始化数据查询工具
 
         Args:
             project_root: 项目根目录
         """
-        self.data_service = DataService(project_root)
+        self.data_service = (
+            data_service
+            if data_service is not None
+            else DataService(project_root)
+        )
 
     def get_latest_news(
         self,
@@ -265,39 +273,44 @@ class DataQueryTools:
             20
         """
         try:
-            # 参数验证 - 默认今天
-            if date_range is None:
-                date_range = "今天"
-
-            # 规范化 date_range（处理 JSON 字符串序列化问题）
-            date_range = normalize_date_range(date_range)
-
-            # 处理 date_range：支持字符串或对象
-            if isinstance(date_range, dict):
-                # 范围对象，取 start 日期
-                date_str = date_range.get('start', '今天')
-            else:
-                date_str = date_range
-            target_date = validate_date_query(date_str)
+            requested_range = date_range if date_range is not None else "今天"
+            start_date, end_date = validate_date_range(
+                requested_range,
+                max_days=31,
+            )
             platforms = validate_platforms(platforms)
             limit = validate_limit(limit, default=50)
 
             # 获取数据
-            news_list = self.data_service.get_news_by_date(
-                target_date=target_date,
+            news_list = self.data_service.get_news_by_date_range(
+                start_date=start_date,
+                end_date=end_date,
                 platforms=platforms,
                 limit=limit,
                 include_url=include_url
+            )
+            start_text = start_date.strftime("%Y-%m-%d")
+            end_text = end_date.strftime("%Y-%m-%d")
+            days_requested = (end_date.date() - start_date.date()).days + 1
+            canonical_range = {
+                "start": start_text,
+                "end": end_text,
+            }
+            description = (
+                f"按日期查询的新闻（{start_text}）"
+                if start_date.date() == end_date.date()
+                else f"按日期范围查询的新闻（{start_text} 至 {end_text}）"
             )
 
             return {
                 "success": True,
                 "summary": {
-                    "description": f"按日期查询的新闻（{target_date.strftime('%Y-%m-%d')}）",
+                    "description": description,
                     "total": len(news_list),
                     "returned": len(news_list),
-                    "date": target_date.strftime("%Y-%m-%d"),
-                    "date_range": date_range,
+                    "date": start_text,
+                    "date_range": canonical_range,
+                    "days_requested": days_requested,
                     "platforms": platforms or "全部平台"
                 },
                 "data": news_list
@@ -342,6 +355,7 @@ class DataQueryTools:
         """
         try:
             limit = validate_limit(limit, default=50)
+            days = validate_days(days, default=1, max_days=30)
 
             rss_list = self.data_service.get_latest_rss(
                 feeds=feeds,
@@ -400,9 +414,7 @@ class DataQueryTools:
         try:
             keyword = validate_keyword(keyword)
             limit = validate_limit(limit, default=50)
-
-            if days < 1 or days > 30:
-                days = 7
+            days = validate_days(days, default=7, max_days=30)
 
             rss_list = self.data_service.search_rss(
                 keyword=keyword,
@@ -467,4 +479,3 @@ class DataQueryTools:
                     "message": str(e)
                 }
             }
-

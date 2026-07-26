@@ -202,6 +202,40 @@ class DataService:
 
         return result
 
+    def get_news_by_date_range(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        platforms: Optional[List[str]] = None,
+        limit: int = 50,
+        include_url: bool = False,
+    ) -> List[Dict]:
+        """Read a bounded date range, returning newest dates first."""
+        news_list = []
+        current_date = end_date
+        while current_date >= start_date and len(news_list) < limit:
+            try:
+                daily_news = self.get_news_by_date(
+                    target_date=current_date,
+                    platforms=platforms,
+                    limit=limit,
+                    include_url=include_url,
+                )
+                news_list.extend(daily_news)
+            except DataNotFoundError:
+                pass
+            current_date -= timedelta(days=1)
+
+        if not news_list:
+            raise DataNotFoundError(
+                "指定日期范围内没有新闻数据",
+                suggestion=(
+                    "请检查日期范围，或调用 list_available_dates "
+                    "查看本地可用日期"
+                ),
+            )
+        return news_list[:limit]
+
     def search_news_by_keyword(
         self,
         keyword: str,
