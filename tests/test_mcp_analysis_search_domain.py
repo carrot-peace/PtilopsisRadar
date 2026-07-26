@@ -1,14 +1,31 @@
+import asyncio
 import ast
+import hashlib
+import json
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
+from mcp_server.server import mcp
 from mcp_server.tools.analytics import AnalyticsTools
 from mcp_server.tools.search_tools import SearchTools
 
 
 ROOT = Path(__file__).parents[1]
+PUBLIC_HANDLERS = {
+    "analyze_topic_trend",
+    "analyze_data_insights",
+    "analyze_sentiment",
+    "find_related_news",
+    "generate_summary_report",
+    "aggregate_news",
+    "compare_periods",
+    "search_news",
+}
+EXPECTED_DESCRIPTION_DIGEST = (
+    "97888b9059ab788b839bdfcf5dd3a82e739ba857263f45930315fac599558cfe"
+)
 
 
 class AnalysisSearchFeatureBoundaryTests(unittest.TestCase):
@@ -21,18 +38,25 @@ class AnalysisSearchFeatureBoundaryTests(unittest.TestCase):
             for node in ast.walk(server_tree)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
-        handlers = {
-            "analyze_topic_trend",
-            "analyze_data_insights",
-            "analyze_sentiment",
-            "find_related_news",
-            "generate_summary_report",
-            "aggregate_news",
-            "compare_periods",
-            "search_news",
-        }
+        self.assertTrue(PUBLIC_HANDLERS.isdisjoint(defined_functions))
 
-        self.assertTrue(handlers.isdisjoint(defined_functions))
+    def test_public_parameter_guidance_is_stable(self):
+        tools = asyncio.run(mcp.get_tools())
+        descriptions = {
+            name: tools[name].description
+            for name in sorted(PUBLIC_HANDLERS)
+        }
+        encoded = json.dumps(
+            descriptions,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+
+        self.assertEqual(
+            hashlib.sha256(encoded).hexdigest(),
+            EXPECTED_DESCRIPTION_DIGEST,
+        )
 
 
 class TopicAnalysisContractTests(unittest.TestCase):

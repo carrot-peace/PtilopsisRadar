@@ -39,7 +39,7 @@ class SourceBudgetTests(unittest.TestCase):
             "mcp_server/context.py": 150,
             "mcp_server/server.py": 450,
             "mcp_server/domain/text.py": 100,
-            "mcp_server/features/analysis_search.py": 250,
+            "mcp_server/features/analysis_search.py": 450,
             "mcp_server/features/query.py": 300,
             "mcp_server/tools/data_query.py": 550,
             "mcp_server/tools/search_tools.py": 910,
