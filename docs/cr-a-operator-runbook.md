@@ -206,7 +206,7 @@ Do not include real secrets anywhere. Use the placeholder `<bot-token>` /
 [ ] output/cr/latest/dispatch_plan.json exists and parses
 [ ] output/cr/latest/dispatch_receipts.json exists and parses
 [ ] output/meta/deploy_trace/latest.json exists and parses
-[ ] receipt status == accepted
+[ ] receipt status is accepted or accepted_partial
 [ ] receipt accepted == true
 [ ] transport == telegram (live send path)
 [ ] sink_ok == true
@@ -227,7 +227,7 @@ quiet_hours_config_error  -> no send, no queue overwrite
 ```
 
 The core invariant the smoke check enforces: **no receipt has
-`accepted == true` unless its `status == accepted`.**
+`accepted == true` unless its status is `accepted` or `accepted_partial`.**
 
 ---
 
@@ -249,6 +249,7 @@ of truth: [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receip
 | `skipped_insufficient_fresh_sources` | No | No | No | Inspect failed source IDs; stale-only candidates are intentionally blocked. |
 | `not_configured` | No | No | No | Provide full Telegram token + chat id if a send was intended. |
 | `accepted` | Yes | Yes | Yes | None. Successful send. |
+| `accepted_partial` | Yes | Yes | Yes | Inspect detail; at least one recipient accepted and at least one failed. |
 | `rejected` | Yes | No | No | Inspect detail; check chat id / bot permissions. |
 | `failed_transport` | Yes | No | No | Transient network/transport; will retry next run. |
 | `failed_render` | No | No | No | Investigate message rendering. |
@@ -260,10 +261,11 @@ of truth: [`trendradar/cr/dispatch_receipt.py`](../trendradar/cr/dispatch_receip
 | `quiet_hours_config_error` | No | No | No | Fix `PTILOPSIS_CR_TIMEZONE` / `START` / `END`. |
 | `unknown` | varies | No | No | Investigate; should not occur in normal operation. |
 
-> A flushed deferred entry that is accepted reports `status == accepted` with
-> `detail == "flushed_deferred"` and `source == "deferred_queue"`. The status
-> vocabulary for flush entries is the same accepted/rejected/failed_transport/
-> http_error set; "flushed_deferred" is a detail, not a status.
+> A flushed deferred entry that is accepted reports `status == accepted` or
+> `status == accepted_partial`, with `detail == "flushed_deferred"` and
+> `source == "deferred_queue"`. The status vocabulary for flush entries is the
+> same accepted/accepted_partial/rejected/failed_transport/http_error set;
+> "flushed_deferred" is a detail, not a status.
 
 Every `deferred_quiet_hours` receipt represents an `inserted` or `refreshed`
 upsert that was successfully persisted. A rejected upsert uses
@@ -350,5 +352,5 @@ Scripted form (preferred — enforces the no-false-success invariant):
 
 The script is **read-only**: it sends no Telegram, runs no CR runtime, mutates
 no state, and exits non-zero on malformed JSON or an invariant violation
-(`accepted == true` with `status != accepted`). See
+(`accepted == true` with a status outside `accepted` and `accepted_partial`). See
 [`scripts/cr_a_smoke_check.py`](../scripts/cr_a_smoke_check.py).
