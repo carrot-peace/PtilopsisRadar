@@ -20,7 +20,7 @@ SUBSCRIBER_ACTIVE = "active"
 SUBSCRIBER_UNSUBSCRIBED = "unsubscribed"
 SUBSCRIBER_BLOCKED = "blocked"
 TOKEN_TTL_SECONDS = 15 * 60
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS subscribers (
@@ -56,7 +56,6 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
 );
 """
 
-
 @dataclass(frozen=True)
 class UpdateMutationResult:
     applied: bool
@@ -67,6 +66,12 @@ class UpdateMutationResult:
 class TokenIssue:
     token: str = field(repr=False)
     expires_at_epoch: int
+
+
+@dataclass(frozen=True)
+class SubscriberDeliveryTarget:
+    chat_id: str
+    lifecycle_version: int
 
 
 class SubscriptionStore:
@@ -98,7 +103,7 @@ class SubscriptionStore:
         try:
             connection.execute("PRAGMA journal_mode = WAL")
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version not in {0, 1, SCHEMA_VERSION}:
+            if version not in {0, 1, 2, SCHEMA_VERSION}:
                 raise RuntimeError(
                     f"unsupported Telegram subscription schema version: {version}"
                 )
@@ -108,6 +113,23 @@ class SubscriptionStore:
                 version = 1
             if version == 1:
                 connection.executescript(_SCHEMA_V2)
+                connection.execute("PRAGMA user_version = 2")
+                version = 2
+            if version == 2:
+                subscriber_columns = {
+                    str(row["name"])
+                    for row in connection.execute(
+                        "PRAGMA table_info(subscribers)"
+                    ).fetchall()
+                }
+                if "lifecycle_version" not in subscriber_columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE subscribers
+                        ADD COLUMN lifecycle_version
+                        INTEGER NOT NULL DEFAULT 1
+                        """
+                    )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         finally:
             connection.close()
@@ -212,13 +234,14 @@ class SubscriptionStore:
                 """
                 INSERT INTO subscribers(
                     chat_id, user_id, status,
-                    subscribed_at_epoch, updated_at_epoch
-                ) VALUES (?, ?, 'active', ?, ?)
+                    subscribed_at_epoch, updated_at_epoch, lifecycle_version
+                ) VALUES (?, ?, 'active', ?, ?, 1)
                 ON CONFLICT(chat_id) DO UPDATE SET
                     user_id = excluded.user_id,
                     status = 'active',
                     subscribed_at_epoch = excluded.subscribed_at_epoch,
-                    updated_at_epoch = excluded.updated_at_epoch
+                    updated_at_epoch = excluded.updated_at_epoch,
+                    lifecycle_version = subscribers.lifecycle_version + 1
                 """,
                 (chat_id, user_id, now_epoch, now_epoch),
             )
@@ -242,7 +265,9 @@ class SubscriptionStore:
             connection.execute(
                 """
                 UPDATE subscribers
-                SET status = 'unsubscribed', updated_at_epoch = ?
+                SET status = 'unsubscribed',
+                    updated_at_epoch = ?,
+                    lifecycle_version = lifecycle_version + 1
                 WHERE chat_id = ?
                 """,
                 (now_epoch, chat_id),
@@ -268,7 +293,10 @@ class SubscriptionStore:
             connection.execute(
                 """
                 UPDATE subscribers
-                SET user_id = ?, status = 'active', updated_at_epoch = ?
+                SET user_id = ?,
+                    status = 'active',
+                    updated_at_epoch = ?,
+                    lifecycle_version = lifecycle_version + 1
                 WHERE chat_id = ?
                 """,
                 (user_id, now_epoch, chat_id),
@@ -277,7 +305,12 @@ class SubscriptionStore:
 
         return self._mutate_update(update_id, operation)
 
-    def mark_blocked(self, chat_id: str) -> bool:
+    def mark_blocked(
+        self,
+        chat_id: str,
+        *,
+        expected_lifecycle_version: int,
+    ) -> bool:
         now_epoch = int(self.now())
         connection = self._connect()
         try:
@@ -285,10 +318,14 @@ class SubscriptionStore:
             updated = connection.execute(
                 """
                 UPDATE subscribers
-                SET status = 'blocked', updated_at_epoch = ?
-                WHERE chat_id = ? AND status = 'active'
+                SET status = 'blocked',
+                    updated_at_epoch = ?,
+                    lifecycle_version = lifecycle_version + 1
+                WHERE chat_id = ?
+                  AND status = 'active'
+                  AND lifecycle_version = ?
                 """,
-                (now_epoch, chat_id),
+                (now_epoch, chat_id, expected_lifecycle_version),
             )
             connection.commit()
             return updated.rowcount == 1
@@ -298,12 +335,12 @@ class SubscriptionStore:
         finally:
             connection.close()
 
-    def active_chat_ids(self) -> list[str]:
+    def active_delivery_targets(self) -> list[SubscriberDeliveryTarget]:
         connection = self._connect()
         try:
             rows = connection.execute(
                 """
-                SELECT chat_id
+                SELECT chat_id, lifecycle_version
                 FROM subscribers
                 WHERE status = 'active'
                 ORDER BY subscribed_at_epoch, chat_id
@@ -311,7 +348,16 @@ class SubscriptionStore:
             ).fetchall()
         finally:
             connection.close()
-        return [str(row["chat_id"]) for row in rows]
+        return [
+            SubscriberDeliveryTarget(
+                chat_id=str(row["chat_id"]),
+                lifecycle_version=int(row["lifecycle_version"]),
+            )
+            for row in rows
+        ]
+
+    def active_chat_ids(self) -> list[str]:
+        return [target.chat_id for target in self.active_delivery_targets()]
 
     def subscriber_status(self, chat_id: str) -> str | None:
         connection = self._connect()
