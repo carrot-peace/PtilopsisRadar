@@ -6,12 +6,13 @@ v2.0.0: 仅支持 SQLite 数据库，移除 TXT 文件支持
 """
 
 import re
-import sqlite3
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 
 import yaml
+
+from trendradar.storage.query import SQLiteQueryRepository
 
 from ..utils.errors import FileParseError, DataNotFoundError
 from .cache_service import get_cache
@@ -20,7 +21,7 @@ from .cache_service import get_cache
 class ParserService:
     """数据解析服务类"""
 
-    def __init__(self, project_root: str = None):
+    def __init__(self, project_root: str = None, query_repository=None):
         """
         初始化解析服务
 
@@ -34,6 +35,9 @@ class ParserService:
             self.project_root = Path(project_root)
 
         self.cache = get_cache()
+        self.query_repository = query_repository or SQLiteQueryRepository(
+            self.project_root / "output"
+        )
 
         # frequency_words.txt mtime 缓存
         self._freq_words_cache: Optional[List[Dict]] = None
@@ -60,7 +64,11 @@ class ParserService:
             date = datetime.now()
         return date.strftime("%Y-%m-%d")
 
-    def _get_db_path(self, date: datetime = None, db_type: str = "news") -> Optional[Path]:
+    def _get_db_path(
+        self,
+        date: datetime = None,
+        db_type: str = "news",
+    ) -> Optional[Path]:
         """
         获取数据库文件路径
 
@@ -74,235 +82,20 @@ class ParserService:
             数据库文件路径，如果不存在则返回 None
         """
         date_str = self.get_date_folder_name(date)
-        db_path = self.project_root / "output" / db_type / f"{date_str}.db"
-        if db_path.exists():
-            return db_path
-        return None
+        return self.query_repository.database_path(date_str, db_type)
 
     def _read_from_sqlite(
         self,
         date: datetime = None,
         platform_ids: Optional[List[str]] = None,
-        db_type: str = "news"
+        db_type: str = "news",
     ) -> Optional[Tuple[Dict, Dict, Dict]]:
-        """
-        从 SQLite 数据库读取数据
-
-        Args:
-            date: 日期对象，默认为今天
-            platform_ids: 平台ID列表，None表示所有平台
-            db_type: 数据库类型 ("news" 或 "rss")
-
-        Returns:
-            (all_titles, id_to_name, all_timestamps) 元组，如果数据库不存在返回 None
-        """
-        db_path = self._get_db_path(date, db_type)
-        if db_path is None:
-            return None
-
-        all_titles = {}
-        id_to_name = {}
-        all_timestamps = {}
-
-        try:
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            if db_type == "news":
-                return self._read_news_from_sqlite(cursor, platform_ids, all_titles, id_to_name, all_timestamps)
-            elif db_type == "rss":
-                return self._read_rss_from_sqlite(cursor, platform_ids, all_titles, id_to_name, all_timestamps)
-
-        except Exception as e:
-            print(f"Warning: 从 SQLite 读取数据失败: {e}")
-            return None
-        finally:
-            if 'conn' in locals():
-                conn.close()
-
-    def _read_news_from_sqlite(
-        self,
-        cursor,
-        platform_ids: Optional[List[str]],
-        all_titles: Dict,
-        id_to_name: Dict,
-        all_timestamps: Dict
-    ) -> Optional[Tuple[Dict, Dict, Dict]]:
-        """从热榜数据库读取数据"""
-        # 检查表是否存在
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='news_items'
-        """)
-        if not cursor.fetchone():
-            return None
-
-        # 构建查询
-        if platform_ids:
-            placeholders = ','.join(['?' for _ in platform_ids])
-            query = f"""
-                SELECT n.id, n.platform_id, p.name as platform_name, n.title,
-                       n.rank, n.url, n.mobile_url,
-                       n.first_crawl_time, n.last_crawl_time, n.crawl_count
-                FROM news_items n
-                LEFT JOIN platforms p ON n.platform_id = p.id
-                WHERE n.platform_id IN ({placeholders})
-            """
-            cursor.execute(query, platform_ids)
-        else:
-            cursor.execute("""
-                SELECT n.id, n.platform_id, p.name as platform_name, n.title,
-                       n.rank, n.url, n.mobile_url,
-                       n.first_crawl_time, n.last_crawl_time, n.crawl_count
-                FROM news_items n
-                LEFT JOIN platforms p ON n.platform_id = p.id
-            """)
-
-        rows = cursor.fetchall()
-
-        # 收集所有 news_item_id 用于查询历史排名
-        news_ids = [row['id'] for row in rows]
-        rank_history_map = {}
-
-        if news_ids:
-            placeholders = ",".join("?" * len(news_ids))
-            cursor.execute(f"""
-                SELECT news_item_id, rank FROM rank_history
-                WHERE news_item_id IN ({placeholders})
-                ORDER BY news_item_id, crawl_time
-            """, news_ids)
-
-            for rh_row in cursor.fetchall():
-                news_id = rh_row['news_item_id']
-                rank = rh_row['rank']
-                if news_id not in rank_history_map:
-                    rank_history_map[news_id] = []
-                rank_history_map[news_id].append(rank)
-
-        for row in rows:
-            news_id = row['id']
-            platform_id = row['platform_id']
-            platform_name = row['platform_name'] or platform_id
-            title = row['title']
-
-            if platform_id not in id_to_name:
-                id_to_name[platform_id] = platform_name
-
-            if platform_id not in all_titles:
-                all_titles[platform_id] = {}
-
-            ranks = rank_history_map.get(news_id, [row['rank']])
-
-            all_titles[platform_id][title] = {
-                "ranks": ranks,
-                "url": row['url'] or "",
-                "mobileUrl": row['mobile_url'] or "",
-                "first_time": row['first_crawl_time'] or "",
-                "last_time": row['last_crawl_time'] or "",
-                "count": row['crawl_count'] or 1,
-            }
-
-        # 获取抓取时间作为 timestamps
-        cursor.execute("""
-            SELECT crawl_time, created_at FROM crawl_records
-            ORDER BY crawl_time
-        """)
-        for row in cursor.fetchall():
-            crawl_time = row['crawl_time']
-            created_at = row['created_at']
-            try:
-                ts = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").timestamp()
-            except (ValueError, TypeError):
-                ts = datetime.now().timestamp()
-            all_timestamps[f"{crawl_time}.db"] = ts
-
-        if not all_titles:
-            return None
-
-        return (all_titles, id_to_name, all_timestamps)
-
-    def _read_rss_from_sqlite(
-        self,
-        cursor,
-        feed_ids: Optional[List[str]],
-        all_items: Dict,
-        id_to_name: Dict,
-        all_timestamps: Dict
-    ) -> Optional[Tuple[Dict, Dict, Dict]]:
-        """从 RSS 数据库读取数据"""
-        # 检查表是否存在
-        cursor.execute("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='rss_items'
-        """)
-        if not cursor.fetchone():
-            return None
-
-        # 构建查询
-        if feed_ids:
-            placeholders = ','.join(['?' for _ in feed_ids])
-            query = f"""
-                SELECT i.id, i.feed_id, f.name as feed_name, i.title,
-                       i.url, i.published_at, i.summary, i.author,
-                       i.first_crawl_time, i.last_crawl_time, i.crawl_count
-                FROM rss_items i
-                LEFT JOIN rss_feeds f ON i.feed_id = f.id
-                WHERE i.feed_id IN ({placeholders})
-                ORDER BY i.published_at DESC
-            """
-            cursor.execute(query, feed_ids)
-        else:
-            cursor.execute("""
-                SELECT i.id, i.feed_id, f.name as feed_name, i.title,
-                       i.url, i.published_at, i.summary, i.author,
-                       i.first_crawl_time, i.last_crawl_time, i.crawl_count
-                FROM rss_items i
-                LEFT JOIN rss_feeds f ON i.feed_id = f.id
-                ORDER BY i.published_at DESC
-            """)
-
-        rows = cursor.fetchall()
-
-        for row in rows:
-            feed_id = row['feed_id']
-            feed_name = row['feed_name'] or feed_id
-            title = row['title']
-
-            if feed_id not in id_to_name:
-                id_to_name[feed_id] = feed_name
-
-            if feed_id not in all_items:
-                all_items[feed_id] = {}
-
-            all_items[feed_id][title] = {
-                "url": row['url'] or "",
-                "published_at": row['published_at'] or "",
-                "summary": row['summary'] or "",
-                "author": row['author'] or "",
-                "first_time": row['first_crawl_time'] or "",
-                "last_time": row['last_crawl_time'] or "",
-                "count": row['crawl_count'] or 1,
-            }
-
-        # 获取抓取时间
-        cursor.execute("""
-            SELECT crawl_time, created_at FROM rss_crawl_records
-            ORDER BY crawl_time
-        """)
-        for row in cursor.fetchall():
-            crawl_time = row['crawl_time']
-            created_at = row['created_at']
-            try:
-                ts = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").timestamp()
-            except (ValueError, TypeError):
-                ts = datetime.now().timestamp()
-            all_timestamps[f"{crawl_time}.db"] = ts
-
-        if not all_items:
-            return None
-
-        return (all_items, id_to_name, all_timestamps)
+        """Delegate snapshot reads to the shared storage query repository."""
+        return self.query_repository.read_snapshot(
+            self.get_date_folder_name(date),
+            source_ids=platform_ids,
+            db_type=db_type,
+        )
 
     def read_all_titles_for_date(
         self,
@@ -403,17 +196,24 @@ class ParserService:
         from trendradar.core.frequency import load_frequency_words
 
         if words_file is None:
-            words_file = str(self.project_root / "config" / "frequency_words.txt")
+            words_file = str(
+                self.project_root / "config" / "frequency_words.txt"
+            )
         else:
             words_file = str(words_file)
 
         try:
             current_mtime = os.path.getmtime(words_file)
 
-            if self._freq_words_cache is not None and current_mtime == self._freq_words_mtime:
+            if (
+                self._freq_words_cache is not None
+                and current_mtime == self._freq_words_mtime
+            ):
                 return self._freq_words_cache
 
-            word_groups, filter_words, global_filters = load_frequency_words(words_file)
+            word_groups, filter_words, global_filters = load_frequency_words(
+                words_file
+            )
             self._freq_words_cache = word_groups
             self._freq_words_mtime = current_mtime
             return word_groups
@@ -432,19 +232,12 @@ class ParserService:
         Returns:
             日期字符串列表（YYYY-MM-DD 格式，降序排列）
         """
-        db_dir = self.project_root / "output" / db_type
-        if not db_dir.exists():
-            return []
+        return self.query_repository.available_dates(db_type)
 
-        dates = []
-        for db_file in db_dir.glob("*.db"):
-            date_match = re.match(r'(\d{4}-\d{2}-\d{2})\.db$', db_file.name)
-            if date_match:
-                dates.append(date_match.group(1))
-
-        return sorted(dates, reverse=True)
-
-    def get_available_date_range(self, db_type: str = "news") -> Tuple[Optional[datetime], Optional[datetime]]:
+    def get_available_date_range(
+        self,
+        db_type: str = "news",
+    ) -> Tuple[Optional[datetime], Optional[datetime]]:
         """
         获取可用的日期范围
 
