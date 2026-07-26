@@ -152,3 +152,8 @@ cd 你的项目名
 类型: streamableHttp
 URL: http://localhost:3333/mcp
 ```
+
+HTTP 模式默认仅监听本机且禁止写操作。若需要跨机器访问，必须设置
+`MCP_HTTP_BEARER_TOKEN` 并在客户端发送 `Authorization: Bearer <token>`；
+只有受信任环境才应额外设置 `MCP_HTTP_ALLOW_WRITE=true`。直接绑定公网地址而
+没有认证令牌时，服务会拒绝启动。

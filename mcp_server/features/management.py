@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Dict, Optional
 
 from fastmcp import FastMCP
 
 from ..context import get_request_tools
+from ..presentation import json_response
 
 
 def _json_response(result: Dict) -> str:
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return json_response(result)
 
 
 def register_management_features(server: FastMCP) -> None:

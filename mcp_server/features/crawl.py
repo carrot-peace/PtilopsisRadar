@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from fastmcp import FastMCP
 
-from ..context import get_request_tools
-
-
-def _json_response(result: Dict) -> str:
-    return json.dumps(result, ensure_ascii=False, indent=2)
+from ..context import get_request_tools, write_access_error
+from ..presentation import json_response
 
 
 def register_crawl_features(server: FastMCP) -> None:
@@ -39,6 +35,9 @@ def register_crawl_features(server: FastMCP) -> None:
             - trigger_crawl(platforms=['zhihu'])
             - trigger_crawl(save_to_local=True)
         """
+        denied = write_access_error()
+        if denied is not None:
+            return json_response(denied)
         tools = get_request_tools()
         result = await asyncio.to_thread(
             tools["crawl"].trigger_crawl,
@@ -46,4 +45,4 @@ def register_crawl_features(server: FastMCP) -> None:
             save_to_local=save_to_local,
             include_url=include_url,
         )
-        return _json_response(result)
+        return json_response(result)

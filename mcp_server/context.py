@@ -25,6 +25,8 @@ class MCPContext:
 
     project_root: Path
     tools: Mapping[str, Any]
+    allow_write: bool = True
+    expose_error_details: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -39,7 +41,13 @@ class MCPContext:
         )
 
     @classmethod
-    def create(cls, project_root: str | Path | None = None) -> "MCPContext":
+    def create(
+        cls,
+        project_root: str | Path | None = None,
+        *,
+        allow_write: bool = True,
+        expose_error_details: bool = True,
+    ) -> "MCPContext":
         root = (
             Path(project_root)
             if project_root is not None
@@ -48,6 +56,8 @@ class MCPContext:
         root_text = str(root)
         return cls(
             project_root=root,
+            allow_write=allow_write,
+            expose_error_details=expose_error_details,
             tools={
                 "data": DataQueryTools(root_text),
                 "analytics": AnalyticsTools(root_text),
@@ -66,9 +76,16 @@ class MCPContext:
         *,
         project_root: str | Path,
         tools: Mapping[str, Any],
+        allow_write: bool = True,
+        expose_error_details: bool = True,
     ) -> "MCPContext":
         """Build a context from explicit dependencies for tests or embedding."""
-        return cls(project_root=Path(project_root), tools=tools)
+        return cls(
+            project_root=Path(project_root),
+            tools=tools,
+            allow_write=allow_write,
+            expose_error_details=expose_error_details,
+        )
 
     def get_tool(self, name: str) -> Any:
         try:
@@ -77,10 +94,31 @@ class MCPContext:
             raise KeyError(f"MCP tool dependency is not configured: {name}") from exc
 
 
-def get_request_tools() -> Mapping[str, Any]:
-    """Return dependencies owned by the active MCP application."""
+def get_request_context() -> MCPContext:
+    """Return the active application's immutable dependency context."""
     request_context = get_context().request_context
     application_context = request_context.lifespan_context
     if not isinstance(application_context, MCPContext):
         raise RuntimeError("MCP application context is not configured")
-    return application_context.tools
+    return application_context
+
+
+def get_request_tools() -> Mapping[str, Any]:
+    """Return dependencies owned by the active MCP application."""
+    return get_request_context().tools
+
+
+def write_access_error() -> dict[str, Any] | None:
+    """Return a stable denial payload when this application is read-only."""
+    if get_request_context().allow_write:
+        return None
+    return {
+        "success": False,
+        "error": {
+            "code": "PERMISSION_DENIED",
+            "message": "当前 MCP Transport 仅允许只读操作",
+            "suggestion": (
+                "仅在受信任且已认证的 HTTP 环境中启用写操作"
+            ),
+        },
+    }

@@ -6,8 +6,9 @@ Ptilopsis Radar MCP Server - FastMCP 2.0 实现
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 from fastmcp import FastMCP
 
@@ -19,6 +20,11 @@ from .features import (
     register_query_features,
     register_reader_features,
     register_storage_features,
+)
+from .transport import (
+    BearerTokenVerifier,
+    environment_flag,
+    validate_http_exposure,
 )
 
 
@@ -39,12 +45,29 @@ def create_server(
     *,
     project_root: Optional[str] = None,
     context: Optional[MCPContext] = None,
+    allow_write: bool | None = None,
+    expose_error_details: bool | None = None,
+    auth: Any = None,
 ) -> FastMCP:
     """Create an isolated MCP application and its dependency lifecycle."""
     if project_root is not None and context is not None:
         raise ValueError("project_root and context are mutually exclusive")
+    if context is not None and (
+        allow_write is not None or expose_error_details is not None
+    ):
+        raise ValueError(
+            "context is mutually exclusive with application policy options"
+        )
 
-    application_context = context or MCPContext.create(project_root)
+    application_context = context or MCPContext.create(
+        project_root,
+        allow_write=True if allow_write is None else allow_write,
+        expose_error_details=(
+            True
+            if expose_error_details is None
+            else expose_error_details
+        ),
+    )
 
     @asynccontextmanager
     async def lifespan(_server):
@@ -53,6 +76,7 @@ def create_server(
     server = FastMCP(
         "trendradar-news",
         lifespan=lifespan,
+        auth=auth,
         mask_error_details=True,
     )
     server.mount(_surface, as_proxy=False)
@@ -67,8 +91,12 @@ mcp = create_server()
 def run_server(
     project_root: Optional[str] = None,
     transport: str = 'stdio',
-    host: str = '0.0.0.0',
-    port: int = 3333
+    host: str = '127.0.0.1',
+    port: int = 3333,
+    allow_http_write: bool | None = None,
+    http_bearer_token: str | None = None,
+    http_publish_host: str | None = None,
+    allow_insecure_public_http: bool | None = None,
 ):
     """
     启动 MCP 服务器
@@ -76,15 +104,55 @@ def run_server(
     Args:
         project_root: 项目根目录路径
         transport: 传输模式，'stdio' 或 'http'
-        host: HTTP模式的监听地址，默认 0.0.0.0
+        host: HTTP模式的监听地址，默认 127.0.0.1
         port: HTTP模式的监听端口，默认 3333
     """
     if transport not in {"stdio", "http"}:
         raise ValueError(f"不支持的传输模式: {transport}")
 
-    server = mcp if project_root is None else create_server(
-        project_root=project_root
-    )
+    if transport == "stdio":
+        server = create_server(
+            project_root=project_root,
+            allow_write=True,
+            expose_error_details=True,
+        )
+    else:
+        bearer_token = (
+            http_bearer_token
+            if http_bearer_token is not None
+            else os.environ.get("MCP_HTTP_BEARER_TOKEN", "")
+        ).strip()
+        publish_host = (
+            http_publish_host
+            if http_publish_host is not None
+            else os.environ.get("MCP_HTTP_PUBLISH_HOST", "").strip()
+        ) or None
+        allow_insecure = (
+            allow_insecure_public_http
+            if allow_insecure_public_http is not None
+            else environment_flag("MCP_HTTP_ALLOW_INSECURE_PUBLIC")
+        )
+        validate_http_exposure(
+            bind_host=host,
+            publish_host=publish_host,
+            bearer_token=bearer_token,
+            allow_insecure_public=allow_insecure,
+        )
+        write_enabled = (
+            allow_http_write
+            if allow_http_write is not None
+            else environment_flag("MCP_HTTP_ALLOW_WRITE")
+        )
+        server = create_server(
+            project_root=project_root,
+            allow_write=write_enabled,
+            expose_error_details=False,
+            auth=(
+                BearerTokenVerifier(bearer_token)
+                if bearer_token
+                else None
+            ),
+        )
     logger.info(
         "Starting Ptilopsis Radar MCP server transport=%s root=%s",
         transport,
@@ -120,8 +188,8 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--host',
-        default='0.0.0.0',
-        help='HTTP模式的监听地址，默认 0.0.0.0'
+        default='127.0.0.1',
+        help='HTTP模式的监听地址，默认 127.0.0.1'
     )
     parser.add_argument(
         '--port',
@@ -133,6 +201,18 @@ if __name__ == '__main__':
         '--project-root',
         help='项目根目录路径'
     )
+    parser.add_argument(
+        '--allow-http-write',
+        action='store_true',
+        default=None,
+        help='允许 HTTP 客户端执行爬取和远端同步写操作'
+    )
+    parser.add_argument(
+        '--allow-insecure-public-http',
+        action='store_true',
+        default=None,
+        help='显式允许未认证的非回环 HTTP 暴露（不推荐）'
+    )
 
     args = parser.parse_args()
 
@@ -140,5 +220,7 @@ if __name__ == '__main__':
         project_root=args.project_root,
         transport=args.transport,
         host=args.host,
-        port=args.port
+        port=args.port,
+        allow_http_write=args.allow_http_write,
+        allow_insecure_public_http=args.allow_insecure_public_http,
     )

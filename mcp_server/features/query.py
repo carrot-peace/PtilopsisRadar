@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Dict, List, Optional, Union
 
 from fastmcp import FastMCP
 
 from ..context import get_request_tools
+from ..presentation import json_response
 from ..utils.date_parser import DateParser
 from ..utils.errors import MCPError
 
 
 def _json_response(result: Dict) -> str:
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return json_response(result)
 
 
 def _config_payload(result: Dict) -> Dict:

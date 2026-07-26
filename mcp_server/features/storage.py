@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Dict
 
 from fastmcp import FastMCP
 
-from ..context import get_request_tools
-
-
-def _json_response(result: Dict) -> str:
-    return json.dumps(result, ensure_ascii=False, indent=2)
+from ..context import get_request_tools, write_access_error
+from ..presentation import json_response
 
 
 def register_storage_features(server: FastMCP) -> None:
@@ -52,12 +47,15 @@ def register_storage_features(server: FastMCP) -> None:
             - S3_ACCESS_KEY_ID: 访问密钥 ID
             - S3_SECRET_ACCESS_KEY: 访问密钥
         """
+        denied = write_access_error()
+        if denied is not None:
+            return json_response(denied)
         tools = get_request_tools()
         result = await asyncio.to_thread(
             tools["storage"].sync_from_remote,
             days=days,
         )
-        return _json_response(result)
+        return json_response(result)
 
     @server.tool
     async def get_storage_status() -> str:
@@ -73,7 +71,7 @@ def register_storage_features(server: FastMCP) -> None:
         result = await asyncio.to_thread(
             tools["storage"].get_storage_status
         )
-        return _json_response(result)
+        return json_response(result)
 
     @server.tool
     async def list_available_dates(
@@ -102,4 +100,4 @@ def register_storage_features(server: FastMCP) -> None:
             tools["storage"].list_available_dates,
             source=source,
         )
-        return _json_response(result)
+        return json_response(result)
