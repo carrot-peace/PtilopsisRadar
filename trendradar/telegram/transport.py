@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import urllib.error
 import urllib.request
@@ -171,8 +172,8 @@ class TelegramTransportConfig:
             raise ValueError("bot_token must be non-empty")
         if not self.api_base_url:
             raise ValueError("api_base_url must be non-empty")
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be a finite positive number")
 
 
 def transport_config_from_env(
@@ -192,8 +193,12 @@ def transport_config_from_env(
         )
     except ValueError as exc:
         raise ValueError(
-            "TELEGRAM_TIMEOUT_SECONDS must be a positive number"
+            "TELEGRAM_TIMEOUT_SECONDS must be a finite positive number"
         ) from exc
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError(
+            "TELEGRAM_TIMEOUT_SECONDS must be a finite positive number"
+        )
     return TelegramTransportConfig(
         bot_token=bot_token,
         api_base_url=api_base_url,
