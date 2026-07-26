@@ -471,9 +471,20 @@ class StorageBackend(ABC):
         """开启批量模式（远程后端延迟上传，本地后端无操作）"""
         pass
 
-    def end_batch(self) -> None:
+    def end_batch(self):
         """结束批量模式"""
-        pass
+        from trendradar.storage.results import BatchResult
+        return BatchResult(committed=True)
+
+    def abort_batch(self):
+        """回滚批量模式。"""
+        from trendradar.storage.results import BatchResult
+        return BatchResult(committed=False, rolled_back=True)
+
+    def batch(self):
+        """Return the exception-safe batch context manager."""
+        from trendradar.storage.batch import StorageBatch
+        return StorageBatch(self)
 
     def get_active_ai_filter_tags(self, date: Optional[str] = None, interests_file: str = "ai_interests.txt") -> List[Dict]:
         return []
