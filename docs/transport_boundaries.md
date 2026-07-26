@@ -30,7 +30,9 @@ input for deployed installations.
 
 - No `trendradar.notification` package or multi-channel compatibility facade.
 - No fallback from CR, DR, or artifact generation into another transport.
-- No inbound Telegram bot, receiver ACL, or command ACL surface.
+- Inbound subscription commands are confined to
+  `trendradar/telegram/commands.py`; they have no HTTP or polling dependency.
+- No generic receiver ACL, command ACL, or legacy `telegram_bot` surface.
 - No Telegram transport inside report rendering, AI analysis, storage, or MCP
   configuration inspection.
 - No generic notification, alert-cooldown, attachment, or channel configuration

@@ -208,9 +208,21 @@ def test_operational_transport_remains_owner_only() -> None:
         assert "receiver_chat_ids" not in text
 
 
-def test_inbound_telegram_bot_surface_is_absent() -> None:
+def test_inbound_telegram_bot_surface_stays_narrow() -> None:
     bot_root = RUNTIME_ROOT / "telegram_bot"
     assert not bot_root.exists() or not any(bot_root.glob("*.py"))
+    command_source = (
+        RUNTIME_ROOT / "telegram" / "commands.py"
+    ).read_text(encoding="utf-8")
+    for forbidden in (
+        "TelegramTransport",
+        "urllib",
+        "fcntl",
+        "getUpdates",
+        "getWebhookInfo",
+    ):
+        assert forbidden not in command_source
+
     runtime_text = "\n".join(
         path.read_text(encoding="utf-8") for path in _python_sources()
     )
@@ -291,7 +303,7 @@ BOUNDARY_CHECKS = (
     test_shared_telegram_transport_import_detection_covers_module_forms,
     test_generic_notification_package_and_runtime_symbols_stay_absent,
     test_operational_transport_remains_owner_only,
-    test_inbound_telegram_bot_surface_is_absent,
+    test_inbound_telegram_bot_surface_stays_narrow,
     test_repository_config_has_no_generic_transport_sections,
     test_runtime_entrypoint_has_no_generic_delivery_controls,
     test_scheduler_and_timeline_have_no_delivery_controls,
