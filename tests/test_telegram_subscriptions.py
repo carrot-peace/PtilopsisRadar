@@ -343,15 +343,17 @@ class TestSubscriptionStore(unittest.TestCase):
                 barrier.wait()
                 return opened
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            stores = list(
-                executor.map(
-                    lambda _index: CoordinatedStore(path),
-                    range(8),
+        for _attempt in range(10):
+            barrier.reset()
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                stores = list(
+                    executor.map(
+                        lambda _index: CoordinatedStore(path),
+                        range(8),
+                    )
                 )
-            )
 
-        self.assertEqual(len(stores), 8)
+            self.assertEqual(len(stores), 8)
         connection = sqlite3.connect(path)
         try:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
