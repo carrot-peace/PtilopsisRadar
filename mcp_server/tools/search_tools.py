@@ -5,12 +5,15 @@
 """
 
 import logging
-import re
 from collections import Counter
 from datetime import datetime, timedelta
-from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple, Union
 
+from ..domain.text import (
+    extract_keywords,
+    jaccard_similarity,
+    sequence_similarity,
+)
 from ..services.search_service import SearchService
 from ..utils.validators import validate_keyword, validate_limit, validate_threshold, normalize_date_range
 from ..utils.errors import MCPError, InvalidParameterError, DataNotFoundError
@@ -363,8 +366,11 @@ class SearchTools:
         Returns:
             相似度分数 (0-1之间)
         """
-        # 使用 difflib.SequenceMatcher 计算序列相似度
-        return SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+        return sequence_similarity(
+            text1,
+            text2,
+            case_sensitive=False,
+        )
 
     def _fuzzy_match(self, query: str, text: str, threshold: float = 0.3) -> Tuple[bool, float]:
         """
@@ -414,17 +420,11 @@ class SearchTools:
         Returns:
             关键词列表
         """
-        # 移除URL和特殊字符
-        text = re.sub(r'http[s]?://\S+', '', text)
-        text = re.sub(r'\[.*?\]', '', text)  # 移除方括号内容
-
-        # 使用正则表达式分词（中文和英文）
-        words = re.findall(r'[\w]+', text)
-
-        # 过滤短词
-        keywords = [word for word in words if word and len(word) >= min_length]
-
-        return keywords
+        return extract_keywords(
+            text,
+            min_length=min_length,
+            remove_bracketed=True,
+        )
 
     def _calculate_keyword_overlap(self, keywords1: List[str], keywords2: List[str]) -> float:
         """
@@ -437,20 +437,7 @@ class SearchTools:
         Returns:
             重合度分数 (0-1之间)
         """
-        if not keywords1 or not keywords2:
-            return 0.0
-
-        set1 = set(keywords1)
-        set2 = set(keywords2)
-
-        # Jaccard 相似度
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-
-        if union == 0:
-            return 0.0
-
-        return intersection / union
+        return jaccard_similarity(keywords1, keywords2)
 
     def _jaccard_similarity(self, list1: List[str], list2: List[str]) -> float:
         """
@@ -463,19 +450,7 @@ class SearchTools:
         Returns:
             Jaccard 相似度 (0-1之间)
         """
-        if not list1 or not list2:
-            return 0.0
-
-        set1 = set(list1)
-        set2 = set(list2)
-
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-
-        if union == 0:
-            return 0.0
-
-        return intersection / union
+        return jaccard_similarity(list1, list2)
 
     def search_related_news_history(
         self,
