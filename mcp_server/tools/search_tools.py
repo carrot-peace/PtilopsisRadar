@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple, Union
 
-from ..services.data_service import DataService
+from ..services.search_service import SearchService
 from ..utils.validators import validate_keyword, validate_limit, validate_threshold, normalize_date_range
 from ..utils.errors import MCPError, InvalidParameterError, DataNotFoundError
 
@@ -18,14 +18,19 @@ from ..utils.errors import MCPError, InvalidParameterError, DataNotFoundError
 class SearchTools:
     """智能新闻检索工具类"""
 
-    def __init__(self, project_root: str = None):
+    def __init__(
+        self,
+        project_root: str = None,
+        *,
+        search_service=None,
+    ):
         """
         初始化智能检索工具
 
         Args:
             project_root: 项目根目录
         """
-        self.data_service = DataService(project_root)
+        self.search_service = search_service or SearchService(project_root)
 
     def search_news_unified(
         self,
@@ -101,7 +106,9 @@ class SearchTools:
                 start_date, end_date = date_range_tuple
             else:
                 # 不指定日期时，使用最新可用数据日期（而非 datetime.now()）
-                earliest, latest = self.data_service.get_available_date_range()
+                earliest, latest = (
+                    self.search_service.get_available_date_range()
+                )
 
                 if latest is None:
                     # 没有任何可用数据
@@ -123,9 +130,11 @@ class SearchTools:
 
             while current_date <= end_date:
                 try:
-                    all_titles, id_to_name, timestamps = self.data_service.parser.read_all_titles_for_date(
-                        date=current_date,
-                        platform_ids=platforms
+                    all_titles, id_to_name, timestamps = (
+                        self.search_service.read_news(
+                            date=current_date,
+                            platforms=platforms,
+                        )
                     )
 
                     # 根据搜索模式执行不同的搜索逻辑
@@ -152,7 +161,9 @@ class SearchTools:
 
             if not all_matches:
                 # 获取可用日期范围用于错误提示
-                earliest, latest = self.data_service.get_available_date_range()
+                earliest, latest = (
+                    self.search_service.get_available_date_range()
+                )
 
                 # 判断时间范围描述
                 if start_date.date() == datetime.now().date() and start_date == end_date:
@@ -550,7 +561,9 @@ class SearchTools:
             while current_date <= search_end:
                 try:
                     # 读取该日期的数据
-                    all_titles, id_to_name, _ = self.data_service.parser.read_all_titles_for_date(current_date)
+                    all_titles, id_to_name, _ = (
+                        self.search_service.read_news(date=current_date)
+                    )
 
                     # 搜索相关新闻
                     for platform_id, titles in all_titles.items():
@@ -754,7 +767,9 @@ class SearchTools:
             
             for search_date in search_dates:
                 try:
-                    all_titles, id_to_name, _ = self.data_service.parser.read_all_titles_for_date(search_date)
+                    all_titles, id_to_name, _ = (
+                        self.search_service.read_news(date=search_date)
+                    )
                     
                     for platform_id, titles in all_titles.items():
                         platform_name = id_to_name.get(platform_id, platform_id)
@@ -858,10 +873,8 @@ class SearchTools:
         while current_date <= end_date:
             try:
                 # 读取该日期的 RSS 数据
-                all_titles, id_to_name, _ = self.data_service.parser.read_all_titles_for_date(
+                all_titles, id_to_name, _ = self.search_service.read_rss(
                     date=current_date,
-                    platform_ids=None,
-                    db_type="rss"
                 )
 
                 for feed_id, items in all_titles.items():
