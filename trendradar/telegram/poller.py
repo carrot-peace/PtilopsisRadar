@@ -14,8 +14,12 @@ from pathlib import Path
 from types import TracebackType
 
 from trendradar.telegram.commands import SubscriptionCommandHandler
+from trendradar.telegram.recipients import (
+    resolve_owner_chat_ids,
+    subscription_db_path_from_env,
+    subscriptions_enabled,
+)
 from trendradar.telegram.subscriptions import (
-    DEFAULT_SUBSCRIPTION_DB_PATH,
     SubscriptionStore,
 )
 from trendradar.telegram.transport import (
@@ -32,20 +36,6 @@ _TRANSIENT_ERRORS = (ConnectionError, OSError, TimeoutError)
 
 class FatalPollingError(RuntimeError):
     """A polling failure that cannot be repaired by retrying."""
-
-
-def subscriptions_enabled(env: Mapping[str, str]) -> bool:
-    return env.get("PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED") == "1"
-
-
-def subscription_db_path_from_env(env: Mapping[str, str]) -> Path:
-    raw = str(env.get("PTILOPSIS_TELEGRAM_SUBSCRIPTION_DB_PATH") or "").strip()
-    return Path(raw) if raw else DEFAULT_SUBSCRIPTION_DB_PATH
-
-
-def resolve_owner_chat_ids(env: Mapping[str, str]) -> frozenset[str]:
-    values = str(env.get("TELEGRAM_OWNER_CHAT_IDS") or "").split(",")
-    return frozenset(value.strip() for value in values if value.strip())
 
 
 def _raise_for_fatal_status(response: TelegramHTTPResponse) -> None:
@@ -159,7 +149,7 @@ def build_runner(
     http_client: TelegramHTTPClient | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[TelegramPollingRunner, Path]:
-    owners = resolve_owner_chat_ids(env)
+    owners = frozenset(resolve_owner_chat_ids(env))
     if not owners:
         raise ValueError("TELEGRAM_OWNER_CHAT_IDS is required")
     db_path = subscription_db_path_from_env(env)
