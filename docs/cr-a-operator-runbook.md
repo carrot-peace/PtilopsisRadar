@@ -106,8 +106,10 @@ live:
 | `PTILOPSIS_CR_DISPATCH_MODE` | `off`, `artifact`, `shadow`, `live` | Unset ⇒ `off`, CR-A does not run | Invalid value ⇒ resolves to `off` (fail closed) |
 | `PTILOPSIS_CR_DRY_RUN` | `1` | Compatibility alias for `artifact` | Ignored when `PTILOPSIS_CR_DISPATCH_MODE` is set explicitly |
 | `PTILOPSIS_CR_TELEGRAM_SEND` | `1` to enable, else off | Unset/off ⇒ sink not constructed, no send | Any non-`1` value keeps Telegram disabled |
-| `PTILOPSIS_CR_TELEGRAM_BOT_TOKEN` | bot token string | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
-| `PTILOPSIS_CR_TELEGRAM_CHAT_ID` | chat id string | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
+| `TELEGRAM_BOT_TOKEN` | bot token string | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
+| `TELEGRAM_OWNER_CHAT_IDS` | comma-separated private chat IDs | Required only when send enabled | Missing/partial config ⇒ no send, **not** success |
+| `TELEGRAM_API_BASE_URL` | URL | `https://api.telegram.org` | Shared by CR, DR, and the subscription Bot |
+| `TELEGRAM_TIMEOUT_SECONDS` | finite positive seconds | `10` | Invalid values fail sink construction |
 
 ### Quiet-hours
 
@@ -132,7 +134,7 @@ Explicit guarantees:
 
 ```text
 - Urgent bypass is DISABLED unless PTILOPSIS_CR_QUIET_HOURS_ALLOW_URGENT=1.
-- Partial Telegram config (token or chat id missing) does NOT count as success.
+- Partial Telegram config (canonical token or Owner list missing) does NOT count as success.
 - Invalid quiet-hours config fails closed: no send, no queue overwrite.
 - start == end disables the window (no quiet-hours window active).
 ```
@@ -171,8 +173,8 @@ PTILOPSIS_CR_DISPATCH_MODE=shadow python3 -m trendradar
 PTILOPSIS_CR_DISPATCH_MODE=live python3 -m trendradar
 
 # Step 8 — live mode with Telegram send ENABLED. Use a private test chat.
-export PTILOPSIS_CR_TELEGRAM_BOT_TOKEN="<bot-token>"
-export PTILOPSIS_CR_TELEGRAM_CHAT_ID="<chat-id>"
+export TELEGRAM_BOT_TOKEN="<bot-token>"
+export TELEGRAM_OWNER_CHAT_IDS="<owner-private-chat-id>"
 PTILOPSIS_CR_DISPATCH_MODE=live \
 PTILOPSIS_CR_TELEGRAM_SEND=1 \
 python3 -m trendradar
@@ -192,7 +194,7 @@ PTILOPSIS_CR_DISPATCH_MODE=live PTILOPSIS_CR_TELEGRAM_SEND=1 python3 -m trendrad
 ```
 
 Do not include real secrets anywhere. Use the placeholder `<bot-token>` /
-`<chat-id>` examples above.
+`<owner-private-chat-id>` examples above.
 
 ---
 

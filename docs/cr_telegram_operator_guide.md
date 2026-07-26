@@ -1,162 +1,91 @@
 # CR Telegram Operator Guide
 
-## 1. Purpose
+CR alerts are one of the two reader products delivered by the shared Telegram
+Bot. CR owns its planning, cooldown, quiet-hours, receipts, and send gates; the
+Bot identity and recipient registry are shared with DR.
 
-This is the CR-A Telegram operator guide for Ptilopsis Radar.
+## Safe defaults
 
-CR-A means current-report alerting. This guide covers the CR-A dispatch mode
-and Telegram delivery. It is not daily report delivery, dashboard delivery, or a
-generic notification framework.
-
-The current CR-A path is:
-
-```text
-runtime stats
--> CR dispatch mode gate
--> CR pipeline
--> dispatch plan
--> dispatch executor
--> Telegram env factory (live mode only)
--> Telegram sink (live mode only)
-```
-
-## 2. Dispatch modes
-
-CR-A is controlled by `PTILOPSIS_CR_DISPATCH_MODE`:
-
-```text
-off       CR-A does not run.  Default.
-artifact  CR-A runs.  Writes audit artifacts only.  No dispatch sink.
-shadow    CR-A runs.  Writes audit artifacts and plan preview.  No dispatch sink.
-live      CR-A runs.  May dispatch only with explicit CR Telegram gates.
-```
-
-Invalid or unrecognized values resolve to `off` (fail closed).
-
-### Compatibility alias
-
-`PTILOPSIS_CR_DRY_RUN=1` behaves like `artifact` mode. This is a compatibility
-alias for existing deployments. When both `PTILOPSIS_CR_DISPATCH_MODE` and
-`PTILOPSIS_CR_DRY_RUN=1` are set, the explicit `PTILOPSIS_CR_DISPATCH_MODE`
-wins.
-
-## 3. Safety model
-
-Default behavior sends nothing.
-
-Telegram dispatch requires the `live` dispatch mode plus the Telegram send gate:
+Default behavior sends nothing. CR Telegram delivery requires both gates:
 
 ```text
 PTILOPSIS_CR_DISPATCH_MODE=live
 PTILOPSIS_CR_TELEGRAM_SEND=1
-PTILOPSIS_CR_TELEGRAM_BOT_TOKEN=<token>
-PTILOPSIS_CR_TELEGRAM_CHAT_ID=<chat-id>
 ```
 
-The supported operator states are:
+Other dispatch modes remain useful without delivery:
 
 ```text
-PTILOPSIS_CR_DISPATCH_MODE unset or off:
-  normal runtime, no CR-A, no Telegram sink
-
-PTILOPSIS_CR_DISPATCH_MODE=artifact:
-  CR artifacts are written, no dispatch sink, no send
-
-PTILOPSIS_CR_DISPATCH_MODE=shadow:
-  CR artifacts and plan preview are written, no dispatch sink, no send
-
-PTILOPSIS_CR_DISPATCH_MODE=live and TELEGRAM_SEND unset/off:
-  CR artifacts are written, Telegram sink is not constructed, no send
-
-PTILOPSIS_CR_DISPATCH_MODE=live and TELEGRAM_SEND=1:
-  Telegram sink is constructed from env; dispatch occurs only if CRDispatchPlan is ready
+off       CR does not run.
+artifact  CR writes audit artifacts and never constructs a sink.
+shadow    CR writes artifacts and a plan preview without sending.
+live      CR may send only when the explicit send gate is also 1.
 ```
 
-Only the exact runtime gates above enable the live path. Leaving any gate
-unset preserves the no-send default.
+`PTILOPSIS_CR_DRY_RUN=1` remains a compatibility alias for `artifact`; an
+explicit `PTILOPSIS_CR_DISPATCH_MODE` takes precedence.
 
-## 4. Environment variables
+## Shared Bot configuration
 
-| Variable | Required? | Default | Meaning |
-| --- | --- | --- | --- |
-| `PTILOPSIS_CR_DISPATCH_MODE` | No | `off` | CR-A dispatch mode: `off`, `artifact`, `shadow`, or `live`. Invalid values resolve to `off`. |
-| `PTILOPSIS_CR_DRY_RUN` | No (compat alias) | unset | Set to `1` as a compatibility alias for `artifact` mode. Prefer `PTILOPSIS_CR_DISPATCH_MODE`. |
-| `PTILOPSIS_CR_TELEGRAM_SEND` | Required for live Telegram dispatch | unset/off | Set to `1` to enable Telegram sink construction in `live` mode. Any unset/off value keeps Telegram disabled. |
-| `PTILOPSIS_CR_TELEGRAM_BOT_TOKEN` | Required only when Telegram send is enabled | none | Telegram bot token used by the CR Telegram sink. Do not put real tokens in docs, commits, PRs, issues, or logs. |
-| `PTILOPSIS_CR_TELEGRAM_CHAT_ID` | Required only when Telegram send is enabled | none | Telegram chat id used by the CR Telegram sink. Use a private test chat first. |
-| `PTILOPSIS_CR_TELEGRAM_API_BASE_URL` | No | `https://api.telegram.org` | Optional Telegram API base URL. When omitted, inherits the `CRTelegramSinkConfig` default. |
-| `PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS` | No | `10.0` | Optional positive request timeout in seconds. When omitted, inherits the `CRTelegramSinkConfig` default. |
-| `PTILOPSIS_CR_TELEGRAM_PARSE_MODE` | No | `None` | Optional Telegram parse mode. When omitted or blank, no parse mode is sent. |
-| `PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW` | No | `true` | Optional boolean-like value controlling Telegram web page previews. When omitted, inherits the `CRTelegramSinkConfig` default. |
+When CR sending is enabled, configure the canonical Bot identity:
 
-`PTILOPSIS_CR_DISPATCH_MODE` controls whether CR-A runs and in what capacity.
-`PTILOPSIS_CR_TELEGRAM_SEND=1` enables Telegram sink construction in `live`
-mode. Token and chat id are required only when Telegram send is enabled.
-Optional values inherit `CRTelegramSinkConfig` defaults.
+```text
+TELEGRAM_BOT_TOKEN=<bot-token>
+TELEGRAM_OWNER_CHAT_IDS=<owner-private-chat-id>[,<another-owner-id>]
+TELEGRAM_API_BASE_URL=https://api.telegram.org
+TELEGRAM_TIMEOUT_SECONDS=10
+```
 
-## 5. Example: artifact mode
+The token and at least one Owner private chat ID are required. The API URL and
+timeout are optional shared transport settings. The removed
+`PTILOPSIS_CR_TELEGRAM_BOT_TOKEN`,
+`PTILOPSIS_CR_TELEGRAM_CHAT_ID`,
+`PTILOPSIS_CR_TELEGRAM_API_BASE_URL`, and
+`PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS` variables are not fallbacks.
+
+CR-specific Telegram presentation options remain:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PTILOPSIS_CR_TELEGRAM_PARSE_MODE` | blank | Optional Telegram parse mode. |
+| `PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW` | `true` | Whether link previews are disabled. |
+
+Do not put real tokens in docs, commits, PRs, issues, or logs.
+
+## Recipient behavior
+
+Owners are fixed recipients and are always ordered before subscribers. When
+subscriptions are enabled, active subscribers are appended from the persisted
+registry and receive the same planned CR text. Recipient failures do not abort
+later recipients. A partial delivery is recorded as `accepted_partial`.
+
+Subscribers receive only CR/DR reader messages. Deployment notifications and
+supervisor alerts remain Owner-only.
+
+See [Telegram Subscription Operations](telegram-subscriptions.md) for token
+issuance, subscriber commands, database configuration, and rollout.
+
+## Safe enablement
 
 ```bash
+# 1. Inspect artifacts without sending.
 PTILOPSIS_CR_DISPATCH_MODE=artifact python3 -m trendradar
-```
 
-This writes CR Markdown and HTML audit artifacts. It does not send Telegram
-messages.
+# 2. Rehearse live mode while the send gate is still off.
+PTILOPSIS_CR_DISPATCH_MODE=live python3 -m trendradar
 
-Using the compatibility alias:
-
-```bash
-PTILOPSIS_CR_DRY_RUN=1 python3 -m trendradar
-```
-
-## 6. Example: live mode with Telegram
-
-```bash
+# 3. Configure the canonical Bot privately, then enable a controlled send.
+export TELEGRAM_BOT_TOKEN="<bot-token>"
+export TELEGRAM_OWNER_CHAT_IDS="<owner-private-chat-id>"
 PTILOPSIS_CR_DISPATCH_MODE=live \
 PTILOPSIS_CR_TELEGRAM_SEND=1 \
-PTILOPSIS_CR_TELEGRAM_BOT_TOKEN="<telegram-bot-token>" \
-PTILOPSIS_CR_TELEGRAM_CHAT_ID="<telegram-chat-id>" \
 python3 -m trendradar
 ```
 
-Use a private Telegram test chat first. Do not commit real tokens, and do not
-paste real tokens into PRs, issues, or logs. When Telegram send is enabled,
-invalid required or optional environment values fail fast before dispatch.
+Verify `output/cr/latest/dispatch_plan.json` and
+`output/cr/latest/dispatch_receipts.json`. An absent/invalid Bot configuration
+must produce no sink, never a false success.
 
-## 7. Dispatch semantics
-
-At runtime, the CR dry-run hook builds the CR pipeline from runtime stats and
-writes audit artifacts. The dispatch plan then selects CR-A candidates, and the
-dispatch executor submits only the planned messages.
-
-The Telegram sink does not re-score, re-decide, or re-render CR content. It
-submits the message text produced by the existing CR dispatch plan. Suppressed
-candidates remain non-pushable. No dedupe, cooldown, or alert-state persistence
-exists yet.
-
-## 8. Known limitations
-
-- no dedupe
-- no cooldown
-- no alert-state persistence
-- no retry/backoff
-- no config.yaml integration
-- no token rotation helper
-- no Telegram formatting policy beyond current text payload
-- transport exception sanitization remains future hardening
-
-## 9. Recommended operator workflow
-
-```text
-1. Run artifact mode and inspect Markdown/HTML artifacts.
-2. Use a private Telegram test chat.
-3. Switch to live mode with TELEGRAM_SEND=1 for a controlled test.
-4. Disable TELEGRAM_SEND or switch back to artifact after verification.
-5. Move to PR10 state/cooldown hardening before unattended operation.
-```
-
-## 10. PR9 closure note
-
-PR9 closes the minimum viable CR-A Telegram path.
-Production hardening belongs to PR10:
-state, dedupe, cooldown, persistence, retry/backoff, and operator UX.
+For unattended operation, also verify the existing CR input-health,
+cooldown, quiet-hours, deferred queue, and lifecycle controls documented in
+[CR-A Operator Runbook](cr-a-operator-runbook.md).
