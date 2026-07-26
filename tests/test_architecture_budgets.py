@@ -60,6 +60,22 @@ class SourceBudgetTests(unittest.TestCase):
 
 
 class ArchitectureDependencyTests(unittest.TestCase):
+    @staticmethod
+    def _imported_modules(tree):
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module:
+                    modules.add(module)
+                modules.update(
+                    f"{module}.{alias.name}" if module else alias.name
+                    for alias in node.names
+                )
+        return modules
+
     def test_split_analytics_facade_preserves_tool_surface(self):
         from mcp_server.tools.analytics import AnalyticsTools
 
@@ -96,43 +112,43 @@ class ArchitectureDependencyTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        imports = {
-            node.module or ""
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom)
-        }
+        imports = self._imported_modules(tree)
         self.assertFalse(
             any(
-                module.startswith("trendradar.storage.")
+                module == "trendradar.storage"
+                or module.startswith("trendradar.storage.")
                 for module in imports
             )
         )
 
+    def test_import_scanner_covers_package_and_module_imports(self):
+        tree = ast.parse(
+            """
+from trendradar import storage
+from ..services import data_service
+import mcp_server.services.parser_service as parser_service
+"""
+        )
+        self.assertEqual(
+            self._imported_modules(tree),
+            {
+                "trendradar",
+                "trendradar.storage",
+                "services",
+                "services.data_service",
+                "mcp_server.services.parser_service",
+            },
+        )
+
     def test_mcp_tools_depend_on_role_specific_services(self):
         expectations = {
-            "mcp_server/tools/search_tools.py": (
-                "services.search_service",
-                "DataService",
-                "ParserService",
-            ),
-            "mcp_server/tools/analytics.py": (
-                "services.analytics_service",
-                "DataService",
-                "ParserService",
-            ),
+            "mcp_server/tools/search_tools.py": "services.search_service",
+            "mcp_server/tools/analytics.py": "services.analytics_service",
         }
-        for relative, (
-            expected_module,
-            forbidden_data,
-            forbidden_parser,
-        ) in expectations.items():
+        for relative, expected_module in expectations.items():
             source = (ROOT / relative).read_text(encoding="utf-8")
             tree = ast.parse(source)
-            modules = {
-                node.module or ""
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom)
-            }
+            modules = self._imported_modules(tree)
             imported_names = {
                 alias.name
                 for node in ast.walk(tree)
@@ -140,8 +156,19 @@ class ArchitectureDependencyTests(unittest.TestCase):
                 for alias in node.names
             }
             self.assertIn(expected_module, modules)
-            self.assertNotIn(forbidden_data, imported_names)
-            self.assertNotIn(forbidden_parser, imported_names)
+            for forbidden_module in (
+                "services.data_service",
+                "services.parser_service",
+            ):
+                self.assertFalse(
+                    any(
+                        module == forbidden_module
+                        or module.endswith(f".{forbidden_module}")
+                        for module in modules
+                    )
+                )
+            self.assertNotIn("DataService", imported_names)
+            self.assertNotIn("ParserService", imported_names)
 
 
 if __name__ == "__main__":
