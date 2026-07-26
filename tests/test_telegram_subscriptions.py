@@ -3,15 +3,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from trendradar.telegram.subscriptions import (
     SCHEMA_VERSION,
     SubscriptionStore,
+    TOKEN_TTL_SECONDS,
+    TokenIssue,
+    UpdateMutationResult,
 )
 
 
@@ -62,6 +67,15 @@ class TestSubscriptionStore(unittest.TestCase):
             connection.commit()
         finally:
             connection.close()
+
+    def _issue(self, update_id: int = 1) -> TokenIssue:
+        result = self.store.issue_token(
+            update_id=update_id,
+            owner_chat_id="1",
+        )
+        self.assertTrue(result.applied)
+        self.assertIsInstance(result.value, TokenIssue)
+        return result.value
 
     def test_initialization_is_idempotent_owner_only_and_versioned(self) -> None:
         SubscriptionStore(self.path, now=self.clock)
@@ -157,6 +171,213 @@ class TestSubscriptionStore(unittest.TestCase):
             self.store._mutate_update(8, fail)
         self.assertEqual(self.store.subscriber_status("20"), "active")
         self.assertEqual(self.store.last_update_id(), -1)
+
+    def test_v1_database_is_migrated_without_losing_state(self) -> None:
+        self._seed("20", "active")
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute("DROP TABLE invite_tokens")
+            connection.execute("PRAGMA user_version = 1")
+            connection.commit()
+        finally:
+            connection.close()
+
+        migrated = SubscriptionStore(self.path, now=self.clock)
+        self.assertEqual(migrated.active_chat_ids(), ["20"])
+        connection = sqlite3.connect(self.path)
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            token_table = connection.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name = 'invite_tokens'
+                """
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(version, SCHEMA_VERSION)
+        self.assertIsNotNone(token_table)
+
+    def test_token_is_secret_hashed_and_expires_in_fifteen_minutes(self) -> None:
+        issue = self._issue()
+        self.assertNotIn(issue.token, repr(issue))
+        self.assertEqual(
+            issue.expires_at_epoch,
+            self.clock.value + TOKEN_TTL_SECONDS,
+        )
+        connection = sqlite3.connect(self.path)
+        try:
+            row = connection.execute(
+                """
+                SELECT token_hash, issued_by_chat_id,
+                       created_at_epoch, expires_at_epoch
+                FROM invite_tokens
+                """
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(
+            row[0],
+            hashlib.sha256(issue.token.encode("utf-8")).hexdigest(),
+        )
+        self.assertNotEqual(row[0], issue.token)
+        self.assertEqual(row[1:], ("1", 1000, 1900))
+
+    def test_token_is_valid_before_but_not_at_ttl_boundary(self) -> None:
+        first = self._issue()
+        self.clock.value = 1899
+        valid = self.store.redeem_token(
+            update_id=2,
+            token=first.token,
+            chat_id="20",
+            user_id="20",
+        )
+        self.assertEqual(valid.value, "subscribed")
+
+        second = self._issue(update_id=3)
+        self.clock.value = 2799
+        expired = self.store.redeem_token(
+            update_id=4,
+            token=second.token,
+            chat_id="30",
+            user_id="30",
+        )
+        self.assertEqual(expired.value, "invalid")
+
+    def test_token_is_single_use_and_invalid_reasons_are_uniform(self) -> None:
+        issue = self._issue()
+        first = self.store.redeem_token(
+            update_id=2,
+            token=issue.token,
+            chat_id="20",
+            user_id="20",
+        )
+        used = self.store.redeem_token(
+            update_id=3,
+            token=issue.token,
+            chat_id="30",
+            user_id="30",
+        )
+        missing = self.store.redeem_token(
+            update_id=4,
+            token="not-a-token",
+            chat_id="40",
+            user_id="40",
+        )
+        self.assertEqual(first.value, "subscribed")
+        self.assertEqual(used.value, "invalid")
+        self.assertEqual(missing.value, "invalid")
+        self.assertEqual(self.store.active_chat_ids(), ["20"])
+
+    def test_concurrent_redemption_activates_only_one_subscriber(self) -> None:
+        issue = self._issue()
+
+        def redeem(values: tuple[int, str]) -> UpdateMutationResult:
+            update_id, chat_id = values
+            return self.store.redeem_token(
+                update_id=update_id,
+                token=issue.token,
+                chat_id=chat_id,
+                user_id=chat_id,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(redeem, ((2, "20"), (3, "30"))))
+        self.assertEqual(len(self.store.active_chat_ids()), 1)
+
+    def test_active_subscriber_does_not_consume_another_token(self) -> None:
+        first = self._issue()
+        self.store.redeem_token(
+            update_id=2,
+            token=first.token,
+            chat_id="20",
+            user_id="20",
+        )
+        second = self._issue(update_id=3)
+        active = self.store.redeem_token(
+            update_id=4,
+            token=second.token,
+            chat_id="20",
+            user_id="20",
+        )
+        other = self.store.redeem_token(
+            update_id=5,
+            token=second.token,
+            chat_id="30",
+            user_id="30",
+        )
+        self.assertEqual(active.value, "already_active")
+        self.assertEqual(other.value, "subscribed")
+
+    def test_unsubscribed_user_requires_a_new_token(self) -> None:
+        first = self._issue()
+        self.store.redeem_token(
+            update_id=2,
+            token=first.token,
+            chat_id="20",
+            user_id="20",
+        )
+        self.store.unsubscribe(update_id=3, chat_id="20")
+        old = self.store.redeem_token(
+            update_id=4,
+            token=first.token,
+            chat_id="20",
+            user_id="20",
+        )
+        second = self._issue(update_id=5)
+        renewed = self.store.redeem_token(
+            update_id=6,
+            token=second.token,
+            chat_id="20",
+            user_id="20",
+        )
+        self.assertEqual(old.value, "invalid")
+        self.assertEqual(renewed.value, "subscribed")
+
+    def test_failed_subscriber_insert_rolls_back_token_and_offset(self) -> None:
+        issue = self._issue()
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """
+                CREATE TRIGGER reject_new_subscriber
+                BEFORE INSERT ON subscribers
+                BEGIN
+                    SELECT RAISE(ABORT, 'subscriber insert rejected');
+                END
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.redeem_token(
+                update_id=2,
+                token=issue.token,
+                chat_id="20",
+                user_id="20",
+            )
+        self.assertEqual(self.store.last_update_id(), 1)
+
+        connection = sqlite3.connect(self.path)
+        try:
+            used_at = connection.execute(
+                "SELECT used_at_epoch FROM invite_tokens"
+            ).fetchone()[0]
+            connection.execute("DROP TRIGGER reject_new_subscriber")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertIsNone(used_at)
+
+        retry = self.store.redeem_token(
+            update_id=2,
+            token=issue.token,
+            chat_id="20",
+            user_id="20",
+        )
+        self.assertEqual(retry.value, "subscribed")
 
 
 if __name__ == "__main__":
