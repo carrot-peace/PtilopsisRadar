@@ -173,6 +173,13 @@ class StorageManager:
 
         return self._backend
 
+    @property
+    def repositories(self):
+        """Expose partitioned repository ports without duplicating backends."""
+        from trendradar.storage.repositories import StorageRepositories
+
+        return StorageRepositories.from_backend(self.get_backend())
+
     def pull_from_remote(self) -> int:
         """
         从远程拉取数据到本地
@@ -293,11 +300,19 @@ class StorageManager:
 
     def begin_batch(self):
         """开启批量模式（远程后端延迟上传）"""
-        self.get_backend().begin_batch()
+        return self.get_backend().begin_batch()
 
     def end_batch(self):
         """结束批量模式（统一上传脏数据库）"""
-        self.get_backend().end_batch()
+        return self.get_backend().end_batch()
+
+    def abort_batch(self):
+        """回滚批量模式。"""
+        return self.get_backend().abort_batch()
+
+    def batch(self):
+        """Return the active backend's batch context manager."""
+        return self.get_backend().batch()
 
     def get_active_ai_filter_tags(self, date=None, interests_file="ai_interests.txt"):
         """获取指定兴趣文件的 active 标签"""

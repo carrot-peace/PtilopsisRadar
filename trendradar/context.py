@@ -44,6 +44,10 @@ from trendradar.ai.filter import AIFilter, AIFilterResult
 from trendradar.storage import get_storage_manager
 
 
+class _AIFilterBatchAbort(Exception):
+    """Internal control flow used to rollback unsuccessful AI filter results."""
+
+
 class AppContext:
     """
     应用上下文类
@@ -453,6 +457,34 @@ class AppContext:
         return normalized
 
     def run_ai_filter(self, interests_file: Optional[str] = None) -> Optional[AIFilterResult]:
+        """Run AI filtering inside one exception-safe storage batch."""
+        if not self.ai_filter_enabled:
+            return None
+
+        storage = self.get_storage_manager()
+        result = None
+        try:
+            with storage.batch() as batch:
+                result = self._run_ai_filter_impl(interests_file)
+                if result is not None and not result.success:
+                    raise _AIFilterBatchAbort
+        except _AIFilterBatchAbort:
+            return result
+
+        if batch.result is not None and not batch.result.committed:
+            errors = [
+                item.error
+                for item in batch.result.databases
+                if item.error
+            ]
+            detail = "; ".join(errors) or "batch commit failed"
+            return AIFilterResult(
+                success=False,
+                error=f"AI 筛选存储提交失败: {detail}",
+            )
+        return result
+
+    def _run_ai_filter_impl(self, interests_file: Optional[str] = None) -> Optional[AIFilterResult]:
         """
         执行 AI 智能筛选完整流程
 
@@ -507,9 +539,6 @@ class AppContext:
             print(f"[AI筛选][DEBUG] 兴趣描述 hash: {current_hash}")
             print(f"[AI筛选][DEBUG] 兴趣描述内容 ({len(interests_content)} 字符):\n{interests_content}")
 
-        # 2. 开启批量模式（远程后端延迟上传，所有写操作完成后统一上传）
-        storage.begin_batch()
-
         # 3. 检查提示词是否变更
         stored_hash = storage.get_latest_prompt_hash(interests_file=effective_interests_file)
 
@@ -526,7 +555,6 @@ class AppContext:
                 print(f"[AI筛选] 首次运行 ({effective_interests_file})，提取标签...")
                 tags_data = ai_filter.extract_tags(interests_content)
                 if not tags_data:
-                    storage.end_batch()
                     return AIFilterResult(success=False, error="标签提取失败")
                 tags_data = self._with_ordered_priorities(tags_data, start_priority=1)
                 saved_count = storage.save_ai_filter_tags(tags_data, new_version, current_hash, interests_file=effective_interests_file)
@@ -541,7 +569,6 @@ class AppContext:
                     print(f"[AI筛选] AI 标签更新失败，回退到重新提取")
                     tags_data = ai_filter.extract_tags(interests_content)
                     if not tags_data:
-                        storage.end_batch()
                         return AIFilterResult(success=False, error="标签提取失败")
                     tags_data = self._with_ordered_priorities(tags_data, start_priority=1)
                     deprecated_count = storage.deprecate_all_ai_filter_tags(interests_file=effective_interests_file)
@@ -562,7 +589,6 @@ class AppContext:
                         print(f"[AI筛选] 兴趣文件变更: {effective_interests_file} (AI change_ratio={change_ratio:.2f} >= threshold={threshold:.2f} → 全量重分类)")
                         tags_data = ai_filter.extract_tags(interests_content)
                         if not tags_data:
-                            storage.end_batch()
                             return AIFilterResult(success=False, error="标签提取失败")
                         tags_data = self._with_ordered_priorities(tags_data, start_priority=1)
                         deprecated_count = storage.deprecate_all_ai_filter_tags(interests_file=effective_interests_file)
@@ -615,7 +641,6 @@ class AppContext:
                 print(f"[AI筛选][DEBUG]   id={t['id']} tag={t['tag']} priority={t.get('priority', 9999)} version={t.get('version')} hash={t.get('prompt_hash', '')[:8]}...")
 
         if not active_tags:
-            storage.end_batch()
             return AIFilterResult(success=False, error="没有可用的标签")
 
         print(f"[AI筛选] 使用 {len(active_tags)} 个标签")
@@ -751,9 +776,6 @@ class AppContext:
             total_analyzed = len(pending_news) + len(pending_rss)
             total_matched = len(matched_hotlist_ids) + len(matched_rss_ids)
             print(f"[AI筛选] 已记录 {total_analyzed} 条新闻分析状态 (匹配 {total_matched}, 不匹配 {total_analyzed - total_matched})")
-
-        # 7. 结束批量模式（统一上传数据库到远程存储）
-        storage.end_batch()
 
         # 8. 查询并组装返回结果
         all_results = storage.get_active_ai_filter_results(interests_file=effective_interests_file)

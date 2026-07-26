@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from trendradar.storage.base import StorageBackend, NewsData, RSSItem, RSSData
+from trendradar.storage.batch import StorageBatch
+from trendradar.storage.results import BatchResult, DatabaseBatchResult
 from trendradar.storage.sqlite_mixin import SQLiteStorageMixin
 from trendradar.utils.time import (
     DEFAULT_TIMEZONE,
@@ -115,10 +117,18 @@ class LocalStorageBackend(SQLiteStorageMixin, StorageBackend):
         if db_path not in self._db_connections:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
             self._init_tables(conn, db_type)
             self._db_connections[db_path] = conn
 
-        return self._db_connections[db_path]
+        connection = self._db_connections[db_path]
+        labels = getattr(self, "_sqlite_connection_labels", None)
+        if labels is None:
+            labels = {}
+            self._sqlite_connection_labels = labels
+        labels[id(connection)] = f"{db_type}:{self._format_date_folder(date)}"
+        return connection
 
     # ========================================
     # StorageBackend 接口实现（委托给 mixin）
@@ -131,21 +141,20 @@ class LocalStorageBackend(SQLiteStorageMixin, StorageBackend):
             # 确保目录存在
             db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        success, new_count, updated_count, title_changed_count, off_list_count = \
-            self._save_news_data_impl(data, "[本地存储]")
+        result = self._save_news_data_impl(data, "[本地存储]")
 
-        if success:
+        if result.committed:
             # 输出详细的存储统计日志
-            log_parts = [f"[本地存储] 处理完成：新增 {new_count} 条"]
-            if updated_count > 0:
-                log_parts.append(f"更新 {updated_count} 条")
-            if title_changed_count > 0:
-                log_parts.append(f"标题变更 {title_changed_count} 条")
-            if off_list_count > 0:
-                log_parts.append(f"脱榜 {off_list_count} 条")
+            log_parts = [f"[本地存储] 处理完成：新增 {result.inserted} 条"]
+            if result.updated > 0:
+                log_parts.append(f"更新 {result.updated} 条")
+            if result.title_changed > 0:
+                log_parts.append(f"标题变更 {result.title_changed} 条")
+            if result.off_list > 0:
+                log_parts.append(f"脱榜 {result.off_list} 条")
             print("，".join(log_parts))
 
-        return success
+        return result.committed
 
     def get_today_all_data(self, date: Optional[str] = None) -> Optional[NewsData]:
         """获取指定日期的所有新闻数据（合并后）"""
@@ -201,16 +210,16 @@ class LocalStorageBackend(SQLiteStorageMixin, StorageBackend):
 
     def save_rss_data(self, data: RSSData) -> bool:
         """保存 RSS 数据到 SQLite"""
-        success, new_count, updated_count = self._save_rss_data_impl(data, "[本地存储]")
+        result = self._save_rss_data_impl(data, "[本地存储]")
 
-        if success:
+        if result.committed:
             # 输出统计日志
-            log_parts = [f"[本地存储] RSS 处理完成：新增 {new_count} 条"]
-            if updated_count > 0:
-                log_parts.append(f"更新 {updated_count} 条")
+            log_parts = [f"[本地存储] RSS 处理完成：新增 {result.inserted} 条"]
+            if result.updated > 0:
+                log_parts.append(f"更新 {result.updated} 条")
             print("，".join(log_parts))
 
-        return success
+        return result.committed
 
     def get_rss_data(self, date: Optional[str] = None) -> Optional[RSSData]:
         """获取指定日期的所有 RSS 数据"""
@@ -230,6 +239,45 @@ class LocalStorageBackend(SQLiteStorageMixin, StorageBackend):
     # ========================================
     # AI 智能筛选
     # ========================================
+
+    def batch(self):
+        return StorageBatch(self)
+
+    def begin_batch(self):
+        self._begin_sqlite_batch()
+
+    def end_batch(self):
+        results = self._finish_sqlite_batch(commit=True)
+        databases = tuple(
+            DatabaseBatchResult(
+                database=label,
+                committed=committed,
+                error=error,
+            )
+            for label, committed, error in results
+        )
+        committed = all(item.committed for item in databases)
+        return BatchResult(
+            committed=committed,
+            databases=databases,
+            rolled_back=bool(databases) and not committed,
+        )
+
+    def abort_batch(self):
+        results = self._finish_sqlite_batch(commit=False)
+        databases = tuple(
+            DatabaseBatchResult(
+                database=label,
+                committed=False,
+                error=error,
+            )
+            for label, _committed, error in results
+        )
+        return BatchResult(
+            committed=False,
+            databases=databases,
+            rolled_back=True,
+        )
 
     def get_active_ai_filter_tags(self, date=None, interests_file="ai_interests.txt"):
         return self._get_active_tags_impl(date, interests_file)
