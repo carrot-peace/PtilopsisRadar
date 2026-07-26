@@ -393,10 +393,16 @@ def _enforce_date_span(
     end_date: datetime,
     max_days: Optional[int],
 ) -> tuple:
-    if max_days is None:
-        return (start_date, end_date)
     span_days = (end_date.date() - start_date.date()).days + 1
-    if span_days > max_days:
+    if span_days < 1:
+        raise InvalidParameterError(
+            "开始日期不能晚于结束日期",
+            suggestion=(
+                f"start: {start_date.strftime('%Y-%m-%d')}, "
+                f"end: {end_date.strftime('%Y-%m-%d')}"
+            ),
+        )
+    if max_days is not None and span_days > max_days:
         raise InvalidParameterError(
             f"日期范围不能超过 {max_days} 天，当前为 {span_days} 天",
             suggestion=f"请缩小日期范围至 {max_days} 天以内",
@@ -443,36 +449,16 @@ def validate_date_range(
                 )
         # 2. 检查是否是单日字符串格式 YYYY-MM-DD
         elif len(stripped) == 10 and stripped[4] == '-' and stripped[7] == '-':
-            try:
-                single_date = validate_date_query(stripped)
-                return _enforce_date_span(
-                    single_date,
-                    single_date,
-                    max_days,
-                )
-            except ValueError:
-                raise InvalidParameterError(
-                    f"日期格式错误: {stripped}",
-                    suggestion="请使用 YYYY-MM-DD 格式，例如: 2025-10-11"
-                )
+            single_date = validate_date(stripped)
+            return _enforce_date_span(
+                single_date,
+                single_date,
+                max_days,
+            )
         # 3. 尝试自然语言解析
         else:
             try:
                 result = DateParser.resolve_date_range_expression(stripped)
-                if result.get("success"):
-                    dr = result["date_range"]
-                    start_date = datetime.strptime(dr["start"], "%Y-%m-%d")
-                    end_date = datetime.strptime(dr["end"], "%Y-%m-%d")
-                    return _enforce_date_span(
-                        start_date,
-                        end_date,
-                        max_days,
-                    )
-                else:
-                    raise InvalidParameterError(
-                        f"无法识别的日期表达式: {stripped}",
-                        suggestion="支持格式: YYYY-MM-DD, {\"start\": \"...\", \"end\": \"...\"}, 或自然语言（今天、本周、最近7天等）"
-                    )
             except InvalidParameterError:
                 single_date = validate_date_query(stripped)
                 return _enforce_date_span(
@@ -485,6 +471,14 @@ def validate_date_range(
                     f"日期解析失败: {stripped}",
                     suggestion="支持格式: YYYY-MM-DD, {\"start\": \"...\", \"end\": \"...\"}, 或自然语言（今天、本周、最近7天等）"
                 )
+            dr = result["date_range"]
+            start_date = datetime.strptime(dr["start"], "%Y-%m-%d")
+            end_date = datetime.strptime(dr["end"], "%Y-%m-%d")
+            return _enforce_date_span(
+                start_date,
+                end_date,
+                max_days,
+            )
 
     if not isinstance(date_range, dict):
         raise InvalidParameterError(

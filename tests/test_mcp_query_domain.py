@@ -122,6 +122,21 @@ class DataQueryRangeContractTests(unittest.TestCase):
 
         self.assertEqual(end_date.date() - start_date.date(), timedelta(days=6))
 
+    def test_historical_iso_date_keeps_unbounded_shared_compatibility(self):
+        start_date, end_date = validate_date_range(
+            "2020-01-01",
+            max_days=31,
+        )
+
+        self.assertEqual(start_date, datetime(2020, 1, 1))
+        self.assertEqual(end_date, datetime(2020, 1, 1))
+
+    def test_nonpositive_natural_ranges_are_invalid_parameters(self):
+        for expression in ("最近0天", "last 0 days"):
+            with self.subTest(expression=expression):
+                with self.assertRaises(InvalidParameterError):
+                    validate_date_range(expression, max_days=31)
+
     def test_rss_day_bounds_fail_instead_of_silently_clamping(self):
         service = Mock()
         tools = DataQueryTools(data_service=service)
