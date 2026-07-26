@@ -40,6 +40,7 @@ input for deployed installations.
 
 Low-level Telegram HTTP is confined to `trendradar/telegram/transport.py`.
 Runtime use of the shared transport is confined to the CR sink, DR sink, and
-deployment operator sender. Tests enforce both the HTTP implementation
-allowlist and the shared transport import-site allowlist, together with the
-absence of prohibited generic runtime calls.
+deployment operator sender, plus the manual subscription poller. The poller is
+not started by the production container yet. Tests enforce both the HTTP
+implementation allowlist and the shared transport import-site allowlist,
+together with the absence of prohibited generic runtime calls.
