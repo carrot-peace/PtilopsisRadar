@@ -15,9 +15,9 @@ from trendradar.telegram.poller import (
     InstanceLock,
     TelegramPollingRunner,
     build_runner,
-    resolve_owner_chat_ids,
     run_poller,
 )
+from trendradar.telegram.recipients import resolve_owner_chat_ids
 from trendradar.telegram.subscriptions import SubscriptionStore
 from trendradar.telegram.transport import (
     TelegramHTTPResponse,
@@ -149,7 +149,7 @@ class TestPollingConfiguration(unittest.TestCase):
                 "TELEGRAM_CHAT_ID": "legacy-owner",
             }
         )
-        self.assertEqual(owners, frozenset({"1", "2"}))
+        self.assertEqual(owners, ("1", "2"))
 
     def test_build_runner_requires_owner_before_creating_database(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
