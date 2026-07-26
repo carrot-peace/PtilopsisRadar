@@ -391,6 +391,7 @@ def _load_storage_config(config_data: Dict) -> Dict:
     txt_enabled_env = _get_env_bool("STORAGE_TXT_ENABLED")
     html_enabled_env = _get_env_bool("STORAGE_HTML_ENABLED")
     pull_enabled_env = _get_env_bool("PULL_ENABLED")
+    single_writer_env = _get_env_bool("S3_SINGLE_WRITER")
 
     return {
         "BACKEND": _get_env_str("STORAGE_BACKEND") or storage.get("backend", "auto"),
@@ -409,6 +410,11 @@ def _load_storage_config(config_data: Dict) -> Dict:
             "ACCESS_KEY_ID": _get_env_str("S3_ACCESS_KEY_ID") or remote.get("access_key_id", ""),
             "SECRET_ACCESS_KEY": _get_env_str("S3_SECRET_ACCESS_KEY") or remote.get("secret_access_key", ""),
             "REGION": _get_env_str("S3_REGION") or remote.get("region", ""),
+            "SINGLE_WRITER": (
+                single_writer_env
+                if single_writer_env is not None
+                else remote.get("single_writer", False)
+            ),
             "RETENTION_DAYS": _get_env_int("REMOTE_RETENTION_DAYS") or remote.get("retention_days", 0),
         },
         "PULL": {
