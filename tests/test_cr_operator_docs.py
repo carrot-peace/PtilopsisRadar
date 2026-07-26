@@ -15,6 +15,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DOC_PATH = PROJECT_ROOT / "docs" / "cr_telegram_operator_guide.md"
+CR_A_RUNBOOK_PATH = PROJECT_ROOT / "docs" / "cr-a-operator-runbook.md"
 SUBSCRIPTION_DOC_PATH = (
     PROJECT_ROOT / "docs" / "telegram-subscriptions.md"
 )
@@ -70,6 +71,18 @@ class TestCROperatorDocs(unittest.TestCase):
         self.assertIn(
             "telegram-subscriptions.md",
             _doc_text(),
+        )
+
+    def test_cr_a_runbook_documents_partial_acceptance(self) -> None:
+        text = CR_A_RUNBOOK_PATH.read_text(encoding="utf-8")
+        self.assertIn("| `accepted_partial` | Yes | Yes | Yes |", text)
+        self.assertIn(
+            "status is `accepted` or `accepted_partial`",
+            text,
+        )
+        self.assertIn(
+            "accepted/accepted_partial/rejected",
+            text,
         )
 
 
