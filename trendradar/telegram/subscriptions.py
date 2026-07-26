@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import secrets
 import sqlite3
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -17,7 +19,8 @@ DEFAULT_SUBSCRIPTION_DB_PATH = Path(
 SUBSCRIBER_ACTIVE = "active"
 SUBSCRIBER_UNSUBSCRIBED = "unsubscribed"
 SUBSCRIBER_BLOCKED = "blocked"
-SCHEMA_VERSION = 1
+TOKEN_TTL_SECONDS = 15 * 60
+SCHEMA_VERSION = 2
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS subscribers (
@@ -38,11 +41,32 @@ CREATE TABLE IF NOT EXISTS bot_state (
 INSERT OR IGNORE INTO bot_state(singleton, last_update_id) VALUES (1, -1);
 """
 
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS invite_tokens (
+    token_hash TEXT PRIMARY KEY,
+    issued_by_chat_id TEXT NOT NULL,
+    created_at_epoch INTEGER NOT NULL,
+    expires_at_epoch INTEGER NOT NULL,
+    used_at_epoch INTEGER,
+    CHECK (expires_at_epoch > created_at_epoch),
+    CHECK (
+        used_at_epoch IS NULL
+        OR used_at_epoch >= created_at_epoch
+    )
+);
+"""
+
 
 @dataclass(frozen=True)
 class UpdateMutationResult:
     applied: bool
     value: object = None
+
+
+@dataclass(frozen=True)
+class TokenIssue:
+    token: str = field(repr=False)
+    expires_at_epoch: int
 
 
 class SubscriptionStore:
@@ -74,15 +98,24 @@ class SubscriptionStore:
         try:
             connection.execute("PRAGMA journal_mode = WAL")
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version not in {0, SCHEMA_VERSION}:
+            if version not in {0, 1, SCHEMA_VERSION}:
                 raise RuntimeError(
                     f"unsupported Telegram subscription schema version: {version}"
                 )
-            connection.executescript(_SCHEMA_V1)
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            if version == 0:
+                connection.executescript(_SCHEMA_V1)
+                connection.execute("PRAGMA user_version = 1")
+                version = 1
+            if version == 1:
+                connection.executescript(_SCHEMA_V2)
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         finally:
             connection.close()
         os.chmod(self.path, 0o600)
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
     def _mutate_update(
         self,
@@ -119,6 +152,79 @@ class SubscriptionStore:
             update_id,
             lambda _connection, _now: None,
         ).applied
+
+    def issue_token(
+        self,
+        *,
+        update_id: int,
+        owner_chat_id: str,
+    ) -> UpdateMutationResult:
+        raw_token = secrets.token_urlsafe(24)
+        token_hash = self._token_hash(raw_token)
+
+        def operation(connection: sqlite3.Connection, now_epoch: int) -> TokenIssue:
+            expires_at = now_epoch + TOKEN_TTL_SECONDS
+            connection.execute(
+                """
+                INSERT INTO invite_tokens(
+                    token_hash, issued_by_chat_id, created_at_epoch,
+                    expires_at_epoch, used_at_epoch
+                ) VALUES (?, ?, ?, ?, NULL)
+                """,
+                (token_hash, owner_chat_id, now_epoch, expires_at),
+            )
+            return TokenIssue(raw_token, expires_at)
+
+        return self._mutate_update(update_id, operation)
+
+    def redeem_token(
+        self,
+        *,
+        update_id: int,
+        token: str,
+        chat_id: str,
+        user_id: str,
+    ) -> UpdateMutationResult:
+        token_hash = self._token_hash(token)
+
+        def operation(connection: sqlite3.Connection, now_epoch: int) -> str:
+            existing = connection.execute(
+                "SELECT status FROM subscribers WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+            if existing is not None and existing["status"] == SUBSCRIBER_ACTIVE:
+                return "already_active"
+
+            consumed = connection.execute(
+                """
+                UPDATE invite_tokens
+                SET used_at_epoch = ?
+                WHERE token_hash = ?
+                  AND used_at_epoch IS NULL
+                  AND expires_at_epoch > ?
+                """,
+                (now_epoch, token_hash, now_epoch),
+            )
+            if consumed.rowcount != 1:
+                return "invalid"
+
+            connection.execute(
+                """
+                INSERT INTO subscribers(
+                    chat_id, user_id, status,
+                    subscribed_at_epoch, updated_at_epoch
+                ) VALUES (?, ?, 'active', ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    status = 'active',
+                    subscribed_at_epoch = excluded.subscribed_at_epoch,
+                    updated_at_epoch = excluded.updated_at_epoch
+                """,
+                (chat_id, user_id, now_epoch, now_epoch),
+            )
+            return "subscribed"
+
+        return self._mutate_update(update_id, operation)
 
     def unsubscribe(
         self,
