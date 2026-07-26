@@ -221,16 +221,23 @@ class TestPolicy(unittest.TestCase):
 
 class TestMainWiring(unittest.TestCase):
     def test_main_preserves_rss_failed_ids_and_builds_health_context(self) -> None:
-        source = (
+        main_source = (
             Path(__file__).resolve().parents[1] / "trendradar" / "__main__.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("self._cr_rss_failed_ids", source)
-        self.assertIn("rss_data.failed_ids", source)
-        self.assertIn("evaluate_cr_input_health", source)
-        self.assertIn("observed_item_identities=frozenset", source)
-        self.assertIn("load_cr_input_health_state", source)
-        self.assertIn("recovered_source_ids", source)
-        self.assertIn("save_cr_input_health_state", source)
+        service_source = (
+            Path(__file__).resolve().parents[1]
+            / "trendradar"
+            / "application"
+            / "services"
+            / "cr_notification.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("self._cr_rss_failed_ids", main_source)
+        self.assertIn("rss_data.failed_ids", main_source)
+        self.assertIn("evaluate_cr_input_health", service_source)
+        self.assertIn("observed_item_identities=frozenset", main_source)
+        self.assertIn("load_cr_input_health_state", service_source)
+        self.assertIn("recovered_source_ids", service_source)
+        self.assertIn("save_cr_input_health_state", service_source)
 
 
 class TestRuntimeGate(unittest.TestCase):

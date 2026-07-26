@@ -17,9 +17,6 @@ if TYPE_CHECKING:
 from trendradar.utils.time import (
     DEFAULT_TIMEZONE,
     get_configured_time,
-    format_date_folder,
-    format_time_filename,
-    get_current_time_display,
     convert_time_for_display,
     format_iso_time_friendly,
     is_within_days,
@@ -41,7 +38,7 @@ from trendradar.report.daily_v2 import render_daily_report_v2
 from trendradar.report.newsletter import render_newsletter_report
 from trendradar.ai import AITranslator
 from trendradar.ai.filter import AIFilter, AIFilterResult
-from trendradar.storage import get_storage_manager
+from trendradar.storage import StorageManager
 
 
 class _AIFilterBatchAbort(Exception):
@@ -70,15 +67,30 @@ class AppContext:
         html = ctx.generate_html_report(stats, total_titles, ...)
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        *,
+        storage_manager: Any = None,
+        storage_factory: Any = None,
+        clock: Any = None,
+        scheduler_factory: Any = None,
+    ):
         """
         初始化应用上下文
 
         Args:
             config: 完整的配置字典
+            storage_manager: 可选的已构造存储管理器
+            storage_factory: 可选的存储管理器工厂
+            clock: 可选时钟，需提供 now(timezone)
+            scheduler_factory: 可选调度器工厂
         """
         self.config = config
-        self._storage_manager = None
+        self._storage_manager = storage_manager
+        self._storage_factory = storage_factory or StorageManager
+        self._clock = clock
+        self._scheduler_factory = scheduler_factory or Scheduler
         self._scheduler = None
         self._source_tier_resolver = None
 
@@ -156,19 +168,21 @@ class AppContext:
 
     def get_time(self) -> datetime:
         """获取当前配置时区的时间"""
+        if self._clock is not None:
+            return self._clock.now(self.timezone)
         return get_configured_time(self.timezone)
 
     def format_date(self) -> str:
         """格式化日期文件夹 (YYYY-MM-DD)"""
-        return format_date_folder(timezone=self.timezone)
+        return self.get_time().strftime("%Y-%m-%d")
 
     def format_time(self) -> str:
         """格式化时间文件名 (HH-MM)"""
-        return format_time_filename(self.timezone)
+        return self.get_time().strftime("%H-%M")
 
     def get_time_display(self) -> str:
         """获取时间显示 (HH:MM)"""
-        return get_current_time_display(self.timezone)
+        return self.get_time().strftime("%H:%M")
 
     @staticmethod
     def convert_time_display(time_str: str) -> str:
@@ -178,14 +192,14 @@ class AppContext:
     # === 存储操作 ===
 
     def get_storage_manager(self):
-        """获取存储管理器（延迟初始化，单例）"""
+        """获取此 AppContext 独占的存储管理器（延迟初始化）。"""
         if self._storage_manager is None:
             storage_config = self.config.get("STORAGE", {})
             remote_config = storage_config.get("REMOTE", {})
             local_config = storage_config.get("LOCAL", {})
             pull_config = storage_config.get("PULL", {})
 
-            self._storage_manager = get_storage_manager(
+            self._storage_manager = self._storage_factory(
                 backend_type=storage_config.get("BACKEND", "auto"),
                 data_dir=local_config.get("DATA_DIR", "output"),
                 enable_txt=storage_config.get("FORMATS", {}).get("TXT", True),
@@ -205,6 +219,24 @@ class AppContext:
                 timezone=self.timezone,
             )
         return self._storage_manager
+
+    def set_retention_days_for_active_backend(self, days: int) -> str:
+        """Apply a global override to the backend that will actually be used."""
+        manager = self.get_storage_manager()
+        active_backend = manager.backend_name
+        if active_backend not in {"local", "remote"}:
+            raise ValueError(f"未知存储后端: {active_backend}")
+
+        storage_config = self.config.setdefault("STORAGE", {})
+        section_name = "REMOTE" if active_backend == "remote" else "LOCAL"
+        backend_config = storage_config.setdefault(section_name, {})
+        backend_config["RETENTION_DAYS"] = days
+
+        if active_backend == "remote":
+            manager.remote_retention_days = days
+        else:
+            manager.local_retention_days = days
+        return active_backend
 
     def get_output_path(self, subfolder: str, filename: str) -> str:
         """获取输出路径（扁平化结构：output/类型/日期/文件名）"""
@@ -428,7 +460,7 @@ class AppContext:
             schedule_config = self.config.get("SCHEDULE", {})
             timeline_data = self.config.get("_TIMELINE_DATA", {})
 
-            self._scheduler = Scheduler(
+            self._scheduler = self._scheduler_factory(
                 schedule_config=schedule_config,
                 timeline_data=timeline_data,
                 storage_backend=self.get_storage_manager(),
@@ -1072,9 +1104,23 @@ class AppContext:
 
     # === 资源清理 ===
 
-    def cleanup(self):
-        """清理资源"""
+    def run_retention_maintenance(self) -> int:
+        """Run destructive retention maintenance explicitly."""
         if self._storage_manager:
-            self._storage_manager.cleanup_old_data()
-            self._storage_manager.cleanup()
-            self._storage_manager = None
+            return self._storage_manager.cleanup_old_data()
+        return 0
+
+    def close(self) -> None:
+        """Release resources without deleting retained application data."""
+        storage_manager = self._storage_manager
+        self._storage_manager = None
+        self._scheduler = None
+        if storage_manager:
+            storage_manager.cleanup()
+
+    def cleanup(self) -> None:
+        """Compatibility wrapper: retention maintenance followed by close."""
+        try:
+            self.run_retention_maintenance()
+        finally:
+            self.close()

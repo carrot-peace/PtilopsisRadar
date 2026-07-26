@@ -1620,7 +1620,9 @@ class TestProductionTieredProfileWiring(unittest.TestCase):
         main_path = (
             Path(__file__).resolve().parent.parent
             / "trendradar"
-            / "__main__.py"
+            / "application"
+            / "services"
+            / "cr_notification.py"
         )
         tree = ast.parse(main_path.read_text(encoding="utf-8"))
         production_calls = []
