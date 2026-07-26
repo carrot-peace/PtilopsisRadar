@@ -21,7 +21,8 @@ from trendradar.cr.telegram_sink import (
     CRTelegramSink,
     CRTelegramSinkConfig,
 )
-from trendradar.telegram.recipients import ReaderRecipientProvider
+from trendradar.telegram.recipients import build_reader_recipient_provider
+from trendradar.telegram.transport import transport_config_from_env
 
 
 # ---------------------------------------------------------------------------
@@ -75,38 +76,7 @@ def build_cr_telegram_sink_config_from_env(
     if not cr_telegram_send_enabled(env):
         return None
 
-    # Required fields
-    bot_token = env.get("PTILOPSIS_CR_TELEGRAM_BOT_TOKEN", "").strip()
-    if not bot_token:
-        raise ValueError("PTILOPSIS_CR_TELEGRAM_BOT_TOKEN is required")
-
-    chat_id = env.get("PTILOPSIS_CR_TELEGRAM_CHAT_ID", "").strip()
-    if not chat_id:
-        raise ValueError("PTILOPSIS_CR_TELEGRAM_CHAT_ID is required")
-
-    # Optional fields
-    api_base_url_raw = env.get("PTILOPSIS_CR_TELEGRAM_API_BASE_URL")
-    if api_base_url_raw is not None:
-        api_base_url = api_base_url_raw.strip()
-        if not api_base_url:
-            raise ValueError("PTILOPSIS_CR_TELEGRAM_API_BASE_URL must be non-empty")
-    else:
-        api_base_url = CRTelegramSinkConfig.api_base_url  # type: ignore[attr-defined]
-
-    timeout_raw = env.get("PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS")
-    if timeout_raw is not None:
-        try:
-            timeout_seconds = float(timeout_raw.strip())
-        except (ValueError, TypeError):
-            raise ValueError(
-                "PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS must be a positive number"
-            )
-        if timeout_seconds <= 0:
-            raise ValueError(
-                "PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS must be a positive number"
-            )
-    else:
-        timeout_seconds = CRTelegramSinkConfig.timeout_seconds  # type: ignore[attr-defined]
+    transport = transport_config_from_env(env)
 
     parse_mode_raw = env.get("PTILOPSIS_CR_TELEGRAM_PARSE_MODE")
     if parse_mode_raw is not None:
@@ -123,10 +93,10 @@ def build_cr_telegram_sink_config_from_env(
         disable_web_page_preview = True
 
     return CRTelegramSinkConfig(
-        bot_token=bot_token,
-        recipients=ReaderRecipientProvider(owner_chat_ids=(chat_id,)),
-        api_base_url=api_base_url,
-        timeout_seconds=timeout_seconds,
+        bot_token=transport.bot_token,
+        recipients=build_reader_recipient_provider(env),
+        api_base_url=transport.api_base_url,
+        timeout_seconds=transport.timeout_seconds,
         parse_mode=parse_mode,
         disable_web_page_preview=disable_web_page_preview,
     )
