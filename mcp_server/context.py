@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from dataclasses import dataclass
@@ -101,6 +102,7 @@ class MCPContext:
     async def aclose(self) -> None:
         """Release each owned dependency once when the application stops."""
         seen: set[int] = set()
+        cancellation: asyncio.CancelledError | None = None
         for name, tool in self.tools.items():
             identity = id(tool)
             if identity in seen:
@@ -121,12 +123,21 @@ class MCPContext:
                 result = callback()
                 if inspect.isawaitable(result):
                     await result
+            except asyncio.CancelledError as exc:
+                cancellation = cancellation or exc
+                logger.warning(
+                    "MCP dependency cleanup cancelled for %s; "
+                    "finishing remaining cleanup first",
+                    name,
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to close MCP dependency %s: %s",
                     name,
                     exc,
                 )
+        if cancellation is not None:
+            raise cancellation
 
 
 def get_request_context() -> MCPContext:

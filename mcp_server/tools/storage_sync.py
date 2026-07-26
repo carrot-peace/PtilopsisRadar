@@ -127,8 +127,10 @@ class StorageSyncTools:
             return
         with redirect_stdout(StringIO()) as output:
             backend.cleanup()
-        if output.getvalue():
-            logger.debug("Suppressed remote backend cleanup output")
+        for line in output.getvalue().splitlines():
+            failed = "失败" in line or "failed" in line.lower()
+            log = logger.warning if failed else logger.debug
+            log("Remote backend cleanup: %s", line)
 
     def _get_local_data_dir(self) -> Path:
         """获取本地数据目录"""

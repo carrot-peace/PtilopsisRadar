@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import io
 import unittest
@@ -24,6 +25,11 @@ class _FailingDependency:
         raise RuntimeError("expected cleanup failure")
 
 
+class _CancelledDependency:
+    async def aclose(self):
+        raise asyncio.CancelledError
+
+
 class MCPApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_lifespan_closes_unique_dependencies_and_continues(self):
         dependency = _AsyncDependency()
@@ -42,19 +48,42 @@ class MCPApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dependency.closed, 1)
 
+    async def test_cancellation_is_deferred_until_others_are_closed(self):
+        dependency = _AsyncDependency()
+        context = MCPContext.from_tools(
+            project_root="/tmp/project",
+            tools={
+                "cancelled": _CancelledDependency(),
+                "remaining": dependency,
+            },
+        )
+
+        with self.assertLogs("mcp_server.context", level="WARNING"):
+            with self.assertRaises(asyncio.CancelledError):
+                await context.aclose()
+
+        self.assertEqual(dependency.closed, 1)
+
     def test_storage_cleanup_is_idempotent_and_stdio_safe(self):
         tools = StorageSyncTools("/tmp/project")
         backend = Mock()
-        backend.cleanup.side_effect = lambda: print("internal cleanup")
+        backend.cleanup.side_effect = lambda: print(
+            "关闭连接失败 /tmp/cache.db: injected failure"
+        )
         tools._remote_backend = backend
 
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            tools.cleanup()
-            tools.cleanup()
+        with self.assertLogs(
+            "mcp_server.tools.storage_sync",
+            level="WARNING",
+        ) as logs:
+            with contextlib.redirect_stdout(stdout):
+                tools.cleanup()
+                tools.cleanup()
 
         backend.cleanup.assert_called_once_with()
         self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("injected failure", "\n".join(logs.output))
 
 
 class MCPCommandLineTests(unittest.TestCase):
