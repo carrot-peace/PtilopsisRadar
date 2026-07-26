@@ -163,11 +163,13 @@ class TestConfigShape(unittest.TestCase):
 
     def test_legacy_transport_exports_remain_compatible(self):
         self.assertIs(CRTelegramHTTPResponse, TelegramHTTPResponse)
-        self.assertIs(CRTelegramHTTPClient, TelegramHTTPClient)
         self.assertIs(
             CRUrllibTelegramHTTPClient,
             UrllibTelegramHTTPClient,
         )
+        json_only_client = _FakeHTTPClient(_ok_response())
+        self.assertIsInstance(json_only_client, CRTelegramHTTPClient)
+        self.assertNotIsInstance(json_only_client, TelegramHTTPClient)
 
 
 # ---------------------------------------------------------------------------

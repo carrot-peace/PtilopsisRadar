@@ -18,6 +18,7 @@ retains only CR configuration and receipt semantics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol, cast, runtime_checkable
 
 from trendradar.cr.dispatch_executor import CRDispatchReceipt
 from trendradar.cr.dispatch_plan import CRDispatchMessage
@@ -32,7 +33,20 @@ from trendradar.telegram.transport import (
 
 
 CRTelegramHTTPResponse = TelegramHTTPResponse
-CRTelegramHTTPClient = TelegramHTTPClient
+
+
+@runtime_checkable
+class CRTelegramHTTPClient(Protocol):
+    def post_json(
+        self,
+        url: str,
+        payload: dict[str, object],
+        *,
+        timeout_seconds: float,
+    ) -> TelegramHTTPResponse:
+        ...
+
+
 CRUrllibTelegramHTTPClient = UrllibTelegramHTTPClient
 
 
@@ -106,13 +120,13 @@ class CRTelegramSink:
     """
 
     config: CRTelegramSinkConfig
-    http_client: TelegramHTTPClient | None = None
+    http_client: CRTelegramHTTPClient | None = None
     transport: TelegramTransport = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.transport = TelegramTransport(
             self.config.transport_config,
-            http_client=self.http_client,
+            http_client=cast(TelegramHTTPClient | None, self.http_client),
         )
 
     def submit(
