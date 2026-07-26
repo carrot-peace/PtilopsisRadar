@@ -16,6 +16,7 @@ from trendradar.telegram.transport import (
     TelegramTransport,
     TelegramTransportConfig,
     UrllibTelegramHTTPClient,
+    transport_config_from_env,
 )
 
 
@@ -60,8 +61,12 @@ class TestTelegramTransport(unittest.TestCase):
     def test_config_hides_token_and_validates_timeout(self):
         config = TelegramTransportConfig(bot_token="secret")
         self.assertNotIn("secret", repr(config))
-        with self.assertRaises(ValueError):
-            TelegramTransportConfig(bot_token="secret", timeout_seconds=0)
+        for timeout in (0, -1, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                TelegramTransportConfig(
+                    bot_token="secret",
+                    timeout_seconds=timeout,
+                )
 
     def test_send_message_builds_the_existing_payload(self):
         fake = FakeHTTPClient()
@@ -107,6 +112,50 @@ class TestTelegramTransport(unittest.TestCase):
         self.assertTrue(TelegramHTTPResponse(200, '{"ok": true}').ok)
         self.assertFalse(TelegramHTTPResponse(500, '{"ok": true}').ok)
         self.assertFalse(TelegramHTTPResponse(200, "not-json").ok)
+
+    def test_polling_config_payload_and_result(self):
+        config = transport_config_from_env(
+            {
+                "TELEGRAM_BOT_TOKEN": "secret",
+                "TELEGRAM_API_BASE_URL": "https://telegram.test/",
+                "TELEGRAM_TIMEOUT_SECONDS": "7.5",
+            }
+        )
+        fake = FakeHTTPClient(
+            TelegramHTTPResponse(200, '{"ok":true,"result":[]}')
+        )
+        transport = TelegramTransport(config, http_client=fake)
+        self.assertEqual(
+            transport.get_updates(offset=42, timeout_seconds=50).result,
+            [],
+        )
+        url, payload, timeout = fake.calls[0]
+        self.assertEqual(url, "https://telegram.test/botsecret/getUpdates")
+        self.assertEqual(payload["offset"], 42)
+        self.assertEqual(payload["allowed_updates"], ["message"])
+        self.assertEqual(timeout, 55.0)
+
+        fake.response = TelegramHTTPResponse(
+            200,
+            '{"ok":true,"result":{"url":""}}',
+        )
+        self.assertEqual(transport.get_webhook_info().result, {"url": ""})
+        self.assertTrue(fake.calls[1][0].endswith("/getWebhookInfo"))
+
+    def test_polling_config_requires_token_and_numeric_timeout(self):
+        with self.assertRaises(ValueError):
+            transport_config_from_env({})
+        for timeout in ("bad", "0", "-1", "nan", "inf", "-Infinity"):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(
+                ValueError,
+                "TELEGRAM_TIMEOUT_SECONDS",
+            ):
+                transport_config_from_env(
+                    {
+                        "TELEGRAM_BOT_TOKEN": "secret",
+                        "TELEGRAM_TIMEOUT_SECONDS": timeout,
+                    }
+                )
 
     def test_send_document_uses_shared_multipart_client(self):
         fake = FakeHTTPClient()
