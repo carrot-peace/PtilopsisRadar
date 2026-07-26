@@ -2,9 +2,10 @@
 """Tests for scripts/cr_a_smoke_check.py (PR-CR-A8).
 
 The smoke check is read-only: it parses CR-A artifacts and enforces the
-no-false-success invariant (accepted == true requires status == "accepted").
-These tests exercise it against temporary artifact files only; they never run
-CR, never send Telegram, and never touch real output paths.
+no-false-success invariant (accepted == true requires a full or partial
+acceptance status). These tests exercise it against temporary artifact files
+only; they never run CR, never send Telegram, and never touch real output
+paths.
 """
 
 import importlib.util
@@ -60,6 +61,22 @@ class CRSmokeCheckTest(unittest.TestCase):
         _write(
             self.receipts,
             {"receipts": [{"message_index": 0, "accepted": True, "status": "accepted"}]},
+        )
+        lines = self._run()
+        self.assertTrue(any("no false success" in line for line in lines))
+
+    def test_partially_accepted_receipt_passes(self) -> None:
+        _write(
+            self.receipts,
+            {
+                "receipts": [
+                    {
+                        "message_index": 0,
+                        "accepted": True,
+                        "status": "accepted_partial",
+                    }
+                ]
+            },
         )
         lines = self._run()
         self.assertTrue(any("no false success" in line for line in lines))
