@@ -35,6 +35,8 @@ class SourceBudgetTests(unittest.TestCase):
             "trendradar/storage/sqlite/schedule.py": 120,
             "trendradar/storage/sqlite/ai_filter.py": 550,
             "mcp_server/services/parser_service.py": 300,
+            "mcp_server/context.py": 150,
+            "mcp_server/server.py": 1150,
             "mcp_server/tools/analytics.py": 150,
             "mcp_server/tools/analytics_insights.py": 900,
             "mcp_server/tools/analytics_search.py": 500,

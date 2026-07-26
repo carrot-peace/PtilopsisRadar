@@ -5,15 +5,19 @@
 实现从远程存储拉取数据到本地、获取存储状态、列出可用日期等功能。
 """
 
-import os
-import re
-from pathlib import Path
+import logging
 from datetime import datetime, timedelta
+import os
+from pathlib import Path
+import re
 from typing import Dict, List, Optional
 
 import yaml
 
 from ..utils.errors import MCPError
+
+
+logger = logging.getLogger(__name__)
 
 
 class StorageSyncTools:
@@ -101,10 +105,12 @@ class StorageSyncTools:
             )
             return self._remote_backend
         except ImportError:
-            print("[存储同步] 远程存储后端需要安装 boto3: pip install boto3")
+            logger.warning(
+                "Remote storage backend requires the boto3 dependency"
+            )
             return None
         except Exception as e:
-            print(f"[存储同步] 创建远程后端失败: {e}")
+            logger.warning("Failed to create remote storage backend: %s", e)
             return None
 
     def _get_local_data_dir(self) -> Path:
@@ -291,10 +297,14 @@ class StorageSyncTools:
                         str(local_db_path)
                     )
                     synced_dates.append(date_str)
-                    print(f"[存储同步] 已拉取: {date_str}")
+                    logger.info("Pulled remote storage date=%s", date_str)
                 except Exception as e:
                     failed_dates.append({"date": date_str, "error": str(e)})
-                    print(f"[存储同步] 拉取失败 ({date_str}): {e}")
+                    logger.warning(
+                        "Failed to pull remote storage date=%s: %s",
+                        date_str,
+                        e,
+                    )
 
             return {
                 "success": True,

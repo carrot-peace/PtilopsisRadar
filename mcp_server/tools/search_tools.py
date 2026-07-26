@@ -4,6 +4,7 @@
 提供模糊搜索、链接查询、历史相关新闻检索等高级搜索功能。
 """
 
+import logging
 import re
 from collections import Counter
 from datetime import datetime, timedelta
@@ -13,6 +14,9 @@ from typing import Dict, List, Optional, Tuple, Union
 from ..services.search_service import SearchService
 from ..utils.validators import validate_keyword, validate_limit, validate_threshold, normalize_date_range
 from ..utils.errors import MCPError, InvalidParameterError, DataNotFoundError
+
+
+logger = logging.getLogger(__name__)
 
 
 class SearchTools:
@@ -610,7 +614,11 @@ class SearchTools:
                     pass
                 except Exception as e:
                     # 记录错误但继续处理其他日期
-                    print(f"Warning: 处理日期 {current_date.strftime('%Y-%m-%d')} 时出错: {e}")
+                    logger.warning(
+                        "Failed to process search date %s: %s",
+                        current_date.strftime("%Y-%m-%d"),
+                        e,
+                    )
 
                 # 移动到下一天
                 current_date += timedelta(days=1)

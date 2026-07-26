@@ -4,6 +4,7 @@
 实现系统状态查询和爬虫触发功能。
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -12,6 +13,9 @@ from ..services.data_service import DataService
 from ..utils.validators import validate_platforms
 from ..utils.errors import MCPError, CrawlTaskError
 from trendradar.versioning import parse_version_tuple
+
+
+logger = logging.getLogger(__name__)
 
 
 class SystemManagementTools:
@@ -142,7 +146,7 @@ class SystemManagementTools:
                     saved_files["html"] = html_path
 
         except Exception as e:
-            print(f"[System] 数据保存失败: {e}")
+            logger.exception("Failed to persist crawl data")
             save_success = False
             save_error_msg = str(e)
 
@@ -224,7 +228,10 @@ class SystemManagementTools:
             config_data, all_platforms = self._load_crawl_config()
             target_platforms, ids = self._resolve_target_platforms(all_platforms, platforms)
 
-            print(f"开始临时爬取，平台: {[p.get('name', p['id']) for p in target_platforms]}")
+            logger.info(
+                "Starting temporary crawl platforms=%s",
+                [p.get("name", p["id"]) for p in target_platforms],
+            )
 
             # 2. 执行爬取
             advanced = config_data.get("advanced", {})
@@ -271,7 +278,7 @@ class SystemManagementTools:
                 )
             finally:
                 get_cache().clear()
-                print("[System] 缓存已清除")
+                logger.info("Cleared MCP cache after crawl")
                 storage.cleanup()
 
             # 4. 构建响应

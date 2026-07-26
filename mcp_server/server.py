@@ -7,44 +7,69 @@ Ptilopsis Radar MCP Server - FastMCP 2.0 实现
 
 import asyncio
 import json
+import logging
+from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Union
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_context
 
-from .tools.data_query import DataQueryTools
-from .tools.analytics import AnalyticsTools
-from .tools.search_tools import SearchTools
-from .tools.config_mgmt import ConfigManagementTools
-from .tools.system import SystemManagementTools
-from .tools.storage_sync import StorageSyncTools
-from .tools.article_reader import ArticleReaderTools
+from .context import MCPContext
 from .utils.date_parser import DateParser
 from .utils.errors import MCPError
 
 
-# 创建 FastMCP 2.0 应用
-mcp = FastMCP('trendradar-news')
+logger = logging.getLogger(__name__)
 
-# 全局工具实例（在第一次请求时初始化）
-_tools_instances = {}
+# Tool and resource handlers are registered once, then mounted into each
+# application instance created by create_server().
+_surface = FastMCP("trendradar-news-surface")
 
 
-def _get_tools(project_root: Optional[str] = None):
-    """获取或创建工具实例（单例模式）"""
-    if not _tools_instances:
-        _tools_instances['data'] = DataQueryTools(project_root)
-        _tools_instances['analytics'] = AnalyticsTools(project_root)
-        _tools_instances['search'] = SearchTools(project_root)
-        _tools_instances['config'] = ConfigManagementTools(project_root)
-        _tools_instances['system'] = SystemManagementTools(project_root)
-        _tools_instances['storage'] = StorageSyncTools(project_root)
-        _tools_instances['article'] = ArticleReaderTools(project_root)
-    return _tools_instances
+def _get_tools():
+    """Return the dependencies owned by the active MCP application."""
+    request_context = get_context().request_context
+    application_context = request_context.lifespan_context
+    if not isinstance(application_context, MCPContext):
+        raise RuntimeError("MCP application context is not configured")
+    return application_context.tools
+
+
+def create_server(
+    *,
+    project_root: Optional[str] = None,
+    context: Optional[MCPContext] = None,
+) -> FastMCP:
+    """Create an isolated MCP application and its dependency lifecycle."""
+    if project_root is not None and context is not None:
+        raise ValueError("project_root and context are mutually exclusive")
+
+    application_context = context or MCPContext.create(project_root)
+
+    @asynccontextmanager
+    async def lifespan(_server):
+        yield application_context
+
+    server = FastMCP(
+        "trendradar-news",
+        lifespan=lifespan,
+        mask_error_details=True,
+    )
+    server.mount(_surface, as_proxy=False)
+    return server
+
+
+def _config_payload(result: Dict) -> Dict:
+    """Extract a successful configuration response without leaking errors."""
+    if result.get("success") is not True:
+        return {}
+    config = result.get("config")
+    return config if isinstance(config, dict) else {}
 
 
 # ==================== MCP Resources ====================
 
-@mcp.resource("config://platforms")
+@_surface.resource("config://platforms")
 async def get_platforms_resource() -> str:
     """
     获取支持的平台列表
@@ -55,13 +80,14 @@ async def get_platforms_resource() -> str:
     config = await asyncio.to_thread(
         tools['config'].get_current_config, section="crawler"
     )
+    config_payload = _config_payload(config)
     return json.dumps({
-        "platforms": config.get("platforms", []),
+        "platforms": config_payload.get("platforms", []),
         "description": "Ptilopsis Radar 支持的热榜平台列表"
     }, ensure_ascii=False, indent=2)
 
 
-@mcp.resource("config://rss-feeds")
+@_surface.resource("config://rss-feeds")
 async def get_rss_feeds_resource() -> str:
     """
     获取 RSS 订阅源列表
@@ -76,7 +102,7 @@ async def get_rss_feeds_resource() -> str:
     }, ensure_ascii=False, indent=2)
 
 
-@mcp.resource("data://available-dates")
+@_surface.resource("data://available-dates")
 async def get_available_dates_resource() -> str:
     """
     获取可用的数据日期范围
@@ -93,7 +119,7 @@ async def get_available_dates_resource() -> str:
     }, ensure_ascii=False, indent=2)
 
 
-@mcp.resource("config://keywords")
+@_surface.resource("config://keywords")
 async def get_keywords_resource() -> str:
     """
     获取关注词配置
@@ -104,16 +130,17 @@ async def get_keywords_resource() -> str:
     config = await asyncio.to_thread(
         tools['config'].get_current_config, section="keywords"
     )
+    config_payload = _config_payload(config)
     return json.dumps({
-        "word_groups": config.get("word_groups", []),
-        "total_groups": config.get("total_groups", 0),
+        "word_groups": config_payload.get("word_groups", []),
+        "total_groups": config_payload.get("total_groups", 0),
         "description": "Ptilopsis Radar 关注词配置"
     }, ensure_ascii=False, indent=2)
 
 
 # ==================== 日期解析工具（优先调用）====================
 
-@mcp.tool
+@_surface.tool
 async def resolve_date_range(
     expression: str
 ) -> str:
@@ -184,7 +211,7 @@ async def resolve_date_range(
 
 # ==================== 数据查询工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def get_latest_news(
     platforms: Optional[List[str]] = None,
     limit: int = 50,
@@ -214,7 +241,7 @@ async def get_latest_news(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def get_trending_topics(
     top_n: int = 10,
     mode: str = 'current',
@@ -249,7 +276,7 @@ async def get_trending_topics(
 
 # ==================== RSS 数据查询工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def get_latest_rss(
     feeds: Optional[List[str]] = None,
     days: int = 1,
@@ -282,7 +309,7 @@ async def get_latest_rss(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def search_rss(
     keyword: str,
     feeds: Optional[List[str]] = None,
@@ -322,7 +349,7 @@ async def search_rss(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def get_rss_feeds_status() -> str:
     """
     获取 RSS 源状态信息
@@ -345,7 +372,7 @@ async def get_rss_feeds_status() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def get_news_by_date(
     date_range: Optional[Union[Dict[str, str], str]] = None,
     platforms: Optional[List[str]] = None,
@@ -382,7 +409,7 @@ async def get_news_by_date(
 
 # ==================== 高级数据分析工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def analyze_topic_trend(
     topic: str,
     analysis_type: str = "trend",
@@ -434,7 +461,7 @@ async def analyze_topic_trend(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def analyze_data_insights(
     insight_type: str = "platform_compare",
     topic: Optional[str] = None,
@@ -478,7 +505,7 @@ async def analyze_data_insights(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def analyze_sentiment(
     topic: Optional[str] = None,
     platforms: Optional[List[str]] = None,
@@ -519,7 +546,7 @@ async def analyze_sentiment(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def find_related_news(
     reference_title: str,
     date_range: Optional[Union[Dict[str, str], str]] = None,
@@ -559,7 +586,7 @@ async def find_related_news(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def generate_summary_report(
     report_type: str = "daily",
     date_range: Optional[Union[Dict[str, str], str]] = None
@@ -586,7 +613,7 @@ async def generate_summary_report(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def aggregate_news(
     date_range: Optional[Union[Dict[str, str], str]] = None,
     platforms: Optional[List[str]] = None,
@@ -625,7 +652,7 @@ async def aggregate_news(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def compare_periods(
     period1: Union[Dict[str, str], str],
     period2: Union[Dict[str, str], str],
@@ -687,7 +714,7 @@ async def compare_periods(
 
 # ==================== 智能检索工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def search_news(
     query: str,
     search_mode: str = "keyword",
@@ -747,7 +774,7 @@ async def search_news(
 
 # ==================== 配置与系统管理工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def get_current_config(
     section: str = "all"
 ) -> str:
@@ -769,7 +796,7 @@ async def get_current_config(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def get_system_status() -> str:
     """
     获取系统运行状态和健康检查信息
@@ -784,7 +811,7 @@ async def get_system_status() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def check_version(
     proxy_url: Optional[str] = None
 ) -> str:
@@ -808,7 +835,7 @@ async def check_version(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def trigger_crawl(
     platforms: Optional[List[str]] = None,
     save_to_local: bool = False,
@@ -839,7 +866,7 @@ async def trigger_crawl(
 
 # ==================== 存储同步工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def sync_from_remote(
     days: int = 7
 ) -> str:
@@ -880,7 +907,7 @@ async def sync_from_remote(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def get_storage_status() -> str:
     """
     获取存储配置和状态
@@ -895,7 +922,7 @@ async def get_storage_status() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def list_available_dates(
     source: str = "both"
 ) -> str:
@@ -924,7 +951,7 @@ async def list_available_dates(
 
 # ==================== 文章内容读取工具 ====================
 
-@mcp.tool
+@_surface.tool
 async def read_article(
     url: str,
     timeout: int = 30
@@ -964,7 +991,7 @@ async def read_article(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool
+@_surface.tool
 async def read_articles_batch(
     urls: List[str],
     timeout: int = 30
@@ -1005,6 +1032,9 @@ async def read_articles_batch(
 
 # ==================== 启动入口 ====================
 
+mcp = create_server()
+
+
 def run_server(
     project_root: Optional[str] = None,
     transport: str = 'stdio',
@@ -1020,85 +1050,27 @@ def run_server(
         host: HTTP模式的监听地址，默认 0.0.0.0
         port: HTTP模式的监听端口，默认 3333
     """
-    # 初始化工具实例
-    _get_tools(project_root)
+    if transport not in {"stdio", "http"}:
+        raise ValueError(f"不支持的传输模式: {transport}")
 
-    # 打印启动信息
-    print()
-    print("=" * 60)
-    print("  Ptilopsis Radar MCP Server - FastMCP 2.0")
-    print("=" * 60)
-    print(f"  传输模式: {transport.upper()}")
+    server = mcp if project_root is None else create_server(
+        project_root=project_root
+    )
+    logger.info(
+        "Starting Ptilopsis Radar MCP server transport=%s root=%s",
+        transport,
+        project_root or "<default>",
+    )
 
     if transport == 'stdio':
-        print("  协议: MCP over stdio (标准输入输出)")
-        print("  说明: 通过标准输入输出与 MCP 客户端通信")
-    elif transport == 'http':
-        print(f"  协议: MCP over HTTP (生产环境)")
-        print(f"  服务器监听: {host}:{port}")
-
-    if project_root:
-        print(f"  项目目录: {project_root}")
+        server.run(transport='stdio')
     else:
-        print("  项目目录: 当前目录")
-
-    print()
-    print("  已注册的工具:")
-    print("    === 日期解析工具（推荐优先调用）===")
-    print("    0. resolve_date_range       - 解析自然语言日期为标准格式")
-    print()
-    print("    === 基础数据查询（P0核心）===")
-    print("    1. get_latest_news        - 获取最新新闻")
-    print("    2. get_news_by_date       - 按日期查询新闻（支持自然语言）")
-    print("    3. get_trending_topics    - 获取趋势话题（支持自动提取）")
-    print()
-    print("    === RSS 数据查询 ===")
-    print("    4. get_latest_rss         - 获取最新 RSS 订阅数据")
-    print("    5. search_rss             - 搜索 RSS 数据")
-    print("    6. get_rss_feeds_status   - 获取 RSS 源状态")
-    print()
-    print("    === 智能检索工具 ===")
-    print("    7. search_news            - 统一新闻搜索（关键词/模糊/实体）")
-    print("    8. find_related_news      - 相关新闻查找（支持历史数据）")
-    print()
-    print("    === 高级数据分析 ===")
-    print("    9. analyze_topic_trend      - 统一话题趋势分析（热度/生命周期/爆火/预测）")
-    print("    10. analyze_data_insights   - 统一数据洞察分析（平台对比/活跃度/关键词共现）")
-    print("    11. analyze_sentiment       - 情感倾向分析")
-    print("    12. aggregate_news          - 跨平台新闻聚合去重")
-    print("    13. compare_periods         - 时期对比分析（周环比/月环比）")
-    print("    14. generate_summary_report - 每日/每周摘要生成")
-    print()
-    print("    === 配置与系统管理 ===")
-    print("    15. get_current_config      - 获取当前系统配置")
-    print("    16. get_system_status       - 获取系统运行状态")
-    print("    17. check_version           - 检查版本更新（对比本地与远程版本）")
-    print("    18. trigger_crawl           - 手动触发爬取任务")
-    print()
-    print("    === 存储同步工具 ===")
-    print("    19. sync_from_remote        - 从远程存储拉取数据到本地")
-    print("    20. get_storage_status      - 获取存储配置和状态")
-    print("    21. list_available_dates    - 列出本地/远程可用日期")
-    print()
-    print("    === 文章内容读取 ===")
-    print("    22. read_article            - 读取单篇文章内容（Markdown格式）")
-    print("    23. read_articles_batch     - 批量读取多篇文章（自动限速）")
-    print("=" * 60)
-    print()
-
-    # 根据传输模式运行服务器
-    if transport == 'stdio':
-        mcp.run(transport='stdio')
-    elif transport == 'http':
-        # HTTP 模式（生产推荐）
-        mcp.run(
+        server.run(
             transport='http',
             host=host,
             port=port,
             path='/mcp'  # HTTP 端点路径
         )
-    else:
-        raise ValueError(f"不支持的传输模式: {transport}")
 
 
 if __name__ == '__main__':

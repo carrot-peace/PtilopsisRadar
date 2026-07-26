@@ -5,15 +5,20 @@
 支持 MCP 客户端将参数序列化为字符串的情况。
 """
 
+import ast
+import json
+import logging
+import os
 from datetime import datetime
 from typing import List, Optional, Union
-import os
-import json
+
 import yaml
-import ast
 
 from .errors import InvalidParameterError
 from .date_parser import DateParser
+
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== 辅助函数：处理字符串序列化 ====================
@@ -189,7 +194,7 @@ def get_supported_platforms() -> List[str]:
             _platforms_config_mtime = current_mtime
             return _platforms_cache
     except Exception as e:
-        print(f"警告：无法加载平台配置: {e}")
+        logger.warning("Unable to load platform configuration: %s", e)
         return []
 
 
@@ -240,7 +245,9 @@ def validate_platforms(platforms: Optional[Union[List[str], str]]) -> List[str]:
 
     # 如果配置加载失败（supported_platforms为空），允许所有平台通过
     if not supported_platforms:
-        print("警告：平台配置未加载，跳过平台验证")
+        logger.warning(
+            "Platform configuration is unavailable; skipping validation"
+        )
         return platforms
 
     # 验证每个平台是否在配置中
