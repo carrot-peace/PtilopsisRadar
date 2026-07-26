@@ -39,6 +39,8 @@ from trendradar.cr.telegram_sink import (
     CRTelegramSink,
     CRTelegramSinkConfig,
 )
+from trendradar.telegram.fanout import RecipientTarget
+from trendradar.telegram.recipients import ReaderRecipientProvider
 from trendradar.telegram.transport import (
     TelegramHTTPClient,
     TelegramHTTPResponse,
@@ -84,7 +86,10 @@ def _ok_response() -> TelegramHTTPResponse:
 
 
 def _config(**overrides) -> CRTelegramSinkConfig:
-    base = {"bot_token": FAKE_TOKEN, "chat_id": FAKE_CHAT}
+    base = {
+        "bot_token": FAKE_TOKEN,
+        "recipients": ReaderRecipientProvider((FAKE_CHAT,)),
+    }
     base.update(overrides)
     return CRTelegramSinkConfig(**base)
 
@@ -126,15 +131,11 @@ class TestConfigShape(unittest.TestCase):
     def test_config_is_frozen(self):
         cfg = _config()
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            cfg.chat_id = "other"  # type: ignore[misc]
+            cfg.recipients = ReaderRecipientProvider(("other",))  # type: ignore[misc]
 
     def test_rejects_empty_bot_token(self):
         with self.assertRaises(ValueError):
             _config(bot_token="")
-
-    def test_rejects_empty_chat_id(self):
-        with self.assertRaises(ValueError):
-            _config(chat_id="")
 
     def test_rejects_non_positive_timeout(self):
         with self.assertRaises(ValueError):
@@ -148,7 +149,10 @@ class TestConfigShape(unittest.TestCase):
 
     def test_accepts_normal_config(self):
         cfg = _config()
-        self.assertEqual(cfg.chat_id, FAKE_CHAT)
+        self.assertEqual(
+            cfg.recipients.get_targets(),
+            (RecipientTarget(FAKE_CHAT),),
+        )
         self.assertEqual(cfg.api_base_url, "https://api.telegram.org")
         self.assertTrue(cfg.disable_web_page_preview)
 
@@ -216,7 +220,11 @@ class TestSuccessfulSubmission(unittest.TestCase):
         self.assertIsInstance(receipt, CRDispatchReceipt)
         self.assertTrue(receipt.accepted)
         self.assertEqual(receipt.status, "accepted")
-        self.assertEqual(receipt.detail, "telegram_ok")
+        self.assertEqual(
+            receipt.detail,
+            "recipients=1,text_ok=1,text_failed=0,"
+            "document_ok=0,document_failed=0,blocked=0",
+        )
         self.assertEqual(receipt.message_index, 0)
         self.assertEqual(receipt.candidate_count, 4)
         self.assertEqual(receipt.run_label, "run-d")
@@ -262,8 +270,7 @@ class TestRejectedResponses(unittest.TestCase):
 
         self.assertFalse(receipt.accepted)
         self.assertEqual(receipt.status, "rejected")
-        self.assertTrue(receipt.detail.startswith("telegram_rejected"))
-        self.assertLessEqual(len(receipt.detail), 80)
+        self.assertIn("text_failed=1", receipt.detail)
 
     def test_http_400_rejected(self):
         body = json.dumps({"ok": False, "error_code": 400, "description": "Bad Request"})
@@ -273,8 +280,8 @@ class TestRejectedResponses(unittest.TestCase):
         receipt = sink.submit(_message(), message_index=0)
 
         self.assertFalse(receipt.accepted)
-        self.assertEqual(receipt.status, "http_error")
-        self.assertEqual(receipt.detail, "http_400")
+        self.assertEqual(receipt.status, "rejected")
+        self.assertIn("text_failed=1", receipt.detail)
 
     def test_detail_has_no_token_or_chat_id(self):
         # Even if a (hypothetical) description echoed secrets, they are redacted.
@@ -299,6 +306,38 @@ class TestRejectedResponses(unittest.TestCase):
         self.assertEqual(receipt.message_index, 2)
         self.assertEqual(receipt.candidate_count, 9)
         self.assertEqual(receipt.run_label, "run-e")
+
+    def test_partial_fanout_accepts_and_attempts_later_recipients(self):
+        class _SequenceClient:
+            def __init__(self):
+                self.calls = []
+                self.responses = [
+                    _ok_response(),
+                    TelegramHTTPResponse(
+                        status_code=500,
+                        body=json.dumps({"ok": False}),
+                    ),
+                ]
+
+            def post_json(self, url, payload, *, timeout_seconds):
+                del url, timeout_seconds
+                self.calls.append(payload["chat_id"])
+                return self.responses.pop(0)
+
+        config = _config(
+            recipients=ReaderRecipientProvider(("owner", "subscriber")),
+        )
+        client = _SequenceClient()
+
+        receipt = CRTelegramSink(config=config, http_client=client).submit(
+            _message(),
+            message_index=0,
+        )
+
+        self.assertEqual(client.calls, ["owner", "subscriber"])
+        self.assertTrue(receipt.accepted)
+        self.assertEqual(receipt.status, "accepted_partial")
+        self.assertIn("recipients=2,text_ok=1,text_failed=1", receipt.detail)
 
 
 # ---------------------------------------------------------------------------

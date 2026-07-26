@@ -22,6 +22,7 @@ from typing import Protocol, cast, runtime_checkable
 
 from trendradar.cr.dispatch_executor import CRDispatchReceipt
 from trendradar.cr.dispatch_plan import CRDispatchMessage
+from trendradar.telegram.fanout import RecipientProvider, send_to_recipients
 from trendradar.telegram.transport import (
     DEFAULT_API_BASE_URL,
     TelegramHTTPClient,
@@ -64,7 +65,7 @@ class CRTelegramSinkConfig:
     """
 
     bot_token: str = field(repr=False)
-    chat_id: str
+    recipients: RecipientProvider = field(repr=False)
     api_base_url: str = DEFAULT_API_BASE_URL
     timeout_seconds: float = 10.0
     parse_mode: str | None = None
@@ -76,8 +77,6 @@ class CRTelegramSinkConfig:
     )
 
     def __post_init__(self) -> None:
-        if not self.chat_id:
-            raise ValueError("chat_id must be non-empty")
         object.__setattr__(
             self,
             "transport_config",
@@ -87,22 +86,6 @@ class CRTelegramSinkConfig:
                 timeout_seconds=self.timeout_seconds,
             ),
         )
-
-
-def _sanitize_telegram_detail(raw: str, config: CRTelegramSinkConfig) -> str:
-    """Produce a short, secret-free detail string.
-
-    Redacts the bot token and chat id (defensive — Telegram descriptions do not
-    normally echo them) and truncates to a small length.
-    """
-    cleaned = raw.replace(config.bot_token, "***")
-    if config.chat_id:
-        cleaned = cleaned.replace(config.chat_id, "***")
-    cleaned = " ".join(cleaned.split())
-    if len(cleaned) > 80:
-        cleaned = cleaned[:77] + "..."
-    return cleaned
-
 
 # ---------------------------------------------------------------------------
 # Sink
@@ -132,42 +115,25 @@ class CRTelegramSink:
     def submit(
         self, message: CRDispatchMessage, *, message_index: int
     ) -> CRDispatchReceipt:
-        response = self.transport.send_message(
-            chat_id=self.config.chat_id,
+        summary = send_to_recipients(
+            self.transport,
+            self.config.recipients,
             text=message.text,
             parse_mode=self.config.parse_mode,
             disable_web_page_preview=self.config.disable_web_page_preview,
         )
-        return self._receipt_from_response(response, message, message_index)
-
-    def _receipt_from_response(
-        self,
-        response: TelegramHTTPResponse,
-        message: CRDispatchMessage,
-        message_index: int,
-    ) -> CRDispatchReceipt:
-        if 200 <= response.status_code < 300:
-            if response.ok:
-                return self._receipt(
-                    message_index, message,
-                    accepted=True, status="accepted", detail="telegram_ok",
-                )
-            description = response.description
-            detail = _sanitize_telegram_detail(
-                f"telegram_rejected:{description}" if description
-                else "telegram_rejected",
-                self.config,
-            )
-            return self._receipt(
-                message_index, message,
-                accepted=False, status="rejected", detail=detail,
-            )
-
-        # Non-2xx HTTP response — token never included in the detail.
+        if not summary.accepted:
+            status = "rejected"
+        elif summary.partial:
+            status = "accepted_partial"
+        else:
+            status = "accepted"
         return self._receipt(
-            message_index, message,
-            accepted=False, status="http_error",
-            detail=f"http_{response.status_code}",
+            message_index,
+            message,
+            accepted=summary.accepted,
+            status=status,
+            detail=summary.detail(),
         )
 
     def _receipt(

@@ -21,6 +21,7 @@ from trendradar.cr.telegram_sink import (
     CRTelegramSink,
     CRTelegramSinkConfig,
 )
+from trendradar.telegram.recipients import ReaderRecipientProvider
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ def build_cr_telegram_sink_config_from_env(
 
     return CRTelegramSinkConfig(
         bot_token=bot_token,
-        chat_id=chat_id,
+        recipients=ReaderRecipientProvider(owner_chat_ids=(chat_id,)),
         api_base_url=api_base_url,
         timeout_seconds=timeout_seconds,
         parse_mode=parse_mode,
