@@ -61,13 +61,26 @@ class SourceBudgetTests(unittest.TestCase):
 
 class ArchitectureDependencyTests(unittest.TestCase):
     @staticmethod
-    def _imported_modules(tree):
+    def _imported_modules(tree, *, package=None):
         modules = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 modules.update(alias.name for alias in node.names)
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
+                if node.level:
+                    if not package:
+                        raise ValueError(
+                            "package is required for relative imports"
+                        )
+                    package_parts = package.split(".")
+                    keep = len(package_parts) - (node.level - 1)
+                    if keep < 0:
+                        raise ValueError("relative import escapes package")
+                    module_parts = package_parts[:keep]
+                    if module:
+                        module_parts.append(module)
+                    module = ".".join(module_parts)
                 if module:
                     modules.add(module)
                 modules.update(
@@ -112,7 +125,7 @@ class ArchitectureDependencyTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        imports = self._imported_modules(tree)
+        imports = self._imported_modules(tree, package="trendradar")
         self.assertFalse(
             any(
                 module == "trendradar.storage"
@@ -130,25 +143,46 @@ import mcp_server.services.parser_service as parser_service
 """
         )
         self.assertEqual(
-            self._imported_modules(tree),
+            self._imported_modules(tree, package="mcp_server.tools"),
             {
                 "trendradar",
                 "trendradar.storage",
-                "services",
-                "services.data_service",
+                "mcp_server.services",
+                "mcp_server.services.data_service",
                 "mcp_server.services.parser_service",
+            },
+        )
+
+    def test_import_scanner_resolves_package_relative_imports(self):
+        tree = ast.parse(
+            """
+from .storage import LocalStorageBackend
+from . import storage
+"""
+        )
+        self.assertEqual(
+            self._imported_modules(tree, package="trendradar"),
+            {
+                "trendradar",
+                "trendradar.storage",
+                "trendradar.storage.LocalStorageBackend",
             },
         )
 
     def test_mcp_tools_depend_on_role_specific_services(self):
         expectations = {
-            "mcp_server/tools/search_tools.py": "services.search_service",
-            "mcp_server/tools/analytics.py": "services.analytics_service",
+            "mcp_server/tools/search_tools.py": (
+                "mcp_server.services.search_service"
+            ),
+            "mcp_server/tools/analytics.py": (
+                "mcp_server.services.analytics_service"
+            ),
         }
         for relative, expected_module in expectations.items():
             source = (ROOT / relative).read_text(encoding="utf-8")
             tree = ast.parse(source)
-            modules = self._imported_modules(tree)
+            package = ".".join(Path(relative).parent.parts)
+            modules = self._imported_modules(tree, package=package)
             imported_names = {
                 alias.name
                 for node in ast.walk(tree)
@@ -157,8 +191,8 @@ import mcp_server.services.parser_service as parser_service
             }
             self.assertIn(expected_module, modules)
             for forbidden_module in (
-                "services.data_service",
-                "services.parser_service",
+                "mcp_server.services.data_service",
+                "mcp_server.services.parser_service",
             ):
                 self.assertFalse(
                     any(
