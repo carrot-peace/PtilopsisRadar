@@ -163,17 +163,63 @@ def show_status():
     """显示容器状态"""
     print("容器状态:")
 
-    # 检查 PID 1 状态
-    supercronic_is_pid1 = False
+    # 检查长期运行进程。订阅关闭时 supercronic 是 PID 1；订阅开启时
+    # entrypoint 作为 PID 1 同时监管 supercronic 与 Telegram poller。
+    subscriptions_enabled = (
+        os.environ.get("PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED", "0")
+        == "1"
+    )
+    service_processes_healthy = False
     pid1_cmdline = ""
     try:
-        with open('/proc/1/cmdline', 'r') as f:
-            pid1_cmdline = f.read().replace('\x00', ' ').strip()
+        pid1_cmdline = _read_proc_cmdline(1)
+        if not pid1_cmdline:
+            raise OSError("empty /proc/1/cmdline")
         print(f"  PID 1 进程: {pid1_cmdline}")
-        
-        if "supercronic" in pid1_cmdline.lower():
+
+        if subscriptions_enabled:
+            supervisor_is_pid1 = "entrypoint.sh" in pid1_cmdline.lower()
+            if supervisor_is_pid1:
+                print("  [成功] entrypoint supervisor 正确运行为 PID 1")
+            else:
+                print("  [失败] PID 1 不是 entrypoint supervisor")
+
+            child_cmdlines = {
+                pid: _read_proc_cmdline(pid)
+                for pid in _read_child_pids(1)
+            }
+            supercronic_pid = next(
+                (
+                    pid
+                    for pid, cmdline in child_cmdlines.items()
+                    if "supercronic" in cmdline.lower()
+                ),
+                None,
+            )
+            poller_pid = next(
+                (
+                    pid
+                    for pid, cmdline in child_cmdlines.items()
+                    if "trendradar.telegram.poller" in cmdline
+                ),
+                None,
+            )
+            if supercronic_pid is None:
+                print("  [失败] supervisor 未运行 supercronic 子进程")
+            else:
+                print(f"  [成功] supercronic 子进程运行中 (PID: {supercronic_pid})")
+            if poller_pid is None:
+                print("  [失败] supervisor 未运行 Telegram poller 子进程")
+            else:
+                print(f"  [成功] Telegram poller 子进程运行中 (PID: {poller_pid})")
+            service_processes_healthy = (
+                supervisor_is_pid1
+                and supercronic_pid is not None
+                and poller_pid is not None
+            )
+        elif "supercronic" in pid1_cmdline.lower():
             print("  [成功] supercronic 正确运行为 PID 1")
-            supercronic_is_pid1 = True
+            service_processes_healthy = True
         else:
             print("  [失败] PID 1 不是 supercronic")
             print(f"  实际的 PID 1: {pid1_cmdline}")
@@ -269,8 +315,11 @@ def show_status():
 
     # 状态总结和建议
     print("  状态总结:")
-    if supercronic_is_pid1:
-        print("    [成功] supercronic 正确运行为 PID 1")
+    if service_processes_healthy:
+        if subscriptions_enabled:
+            print("    [成功] supervisor、supercronic 与 Telegram poller 均正常")
+        else:
+            print("    [成功] supercronic 正确运行为 PID 1")
         print("    [成功] 定时任务应该正常工作")
         
         # 显示当前的调度信息
@@ -290,7 +339,7 @@ def show_status():
         print("       • 时区设置是否正确")
         print("       • 应用程序是否有错误")
     else:
-        print("    [失败] supercronic 状态异常")
+        print("    [失败] 容器服务进程状态异常")
         if pid1_cmdline:
             print(f"    当前 PID 1: {pid1_cmdline}")
         print("    建议操作:")
@@ -303,6 +352,7 @@ def show_status():
     print("    • 查看实时日志: docker logs -f trendradar")
     print("    • 手动执行测试: python manage.py run")
     print("    • 重启容器服务: docker restart trendradar")
+    return service_processes_healthy
 
 
 def show_config():
@@ -499,6 +549,20 @@ def _read_proc_cmdline(pid: int) -> str:
             return f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
     except Exception:
         return ""
+
+
+def _read_child_pids(pid: int) -> list[int]:
+    """读取 Linux procfs 中 pid 的直接子进程。"""
+    children_file = Path(f"/proc/{pid}/task/{pid}/children")
+    try:
+        return [
+            int(child_pid)
+            for child_pid in children_file.read_text(
+                encoding="utf-8"
+            ).split()
+        ]
+    except (OSError, ValueError):
+        return []
 
 
 def _is_expected_webserver_process(pid: int) -> bool:
