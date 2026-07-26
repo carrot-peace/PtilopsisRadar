@@ -41,6 +41,7 @@ from trendradar.dr.telegram_env import (
 from trendradar.dr.telegram_sink import (
     DRTelegramSink,
 )
+from trendradar.telegram.recipients import ReaderRecipientProvider
 from trendradar.telegram.transport import TelegramHTTPResponse
 
 
@@ -491,8 +492,49 @@ class TestDREnvAndSink(unittest.TestCase):
                 message_index=0,
             )
         self.assertTrue(receipt.accepted)
-        self.assertEqual(receipt.status, "accepted_document_failed")
+        self.assertEqual(receipt.status, "accepted_partial")
         self.assertFalse(receipt.document_accepted)
+
+    def test_partial_fanout_attempts_later_recipients(self) -> None:
+        class FakeClient:
+            def __init__(self):
+                self.chat_ids = []
+                self.responses = [
+                    TelegramHTTPResponse(200, '{"ok": true}'),
+                    TelegramHTTPResponse(500, '{"ok": false}'),
+                ]
+
+            def post_json(self, url, payload, *, timeout_seconds):
+                del url, timeout_seconds
+                self.chat_ids.append(payload["chat_id"])
+                return self.responses.pop(0)
+
+        config = build_dr_telegram_sink_config_from_env(self._env())
+        assert config is not None
+        config = dataclasses.replace(
+            config,
+            recipients=ReaderRecipientProvider(("owner", "subscriber")),
+            attach_html=False,
+        )
+        fake = FakeClient()
+
+        receipt = DRTelegramSink(config=config, http_client=fake).submit(
+            DRDispatchMessage(
+                text="body",
+                format="telegram_html",
+                run_label="r",
+                date="2026-06-18",
+                html_path="unused.html",
+                attach_html=False,
+            ),
+            message_index=0,
+        )
+
+        self.assertEqual(fake.chat_ids, ["owner", "subscriber"])
+        self.assertTrue(receipt.accepted)
+        self.assertTrue(receipt.text_accepted)
+        self.assertEqual(receipt.status, "accepted_partial")
+        self.assertIn("recipients=2,text_ok=1,text_failed=1", receipt.detail)
 
 
 class TestDRSourceBoundaries(unittest.TestCase):

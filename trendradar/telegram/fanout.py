@@ -81,6 +81,7 @@ def send_to_recipients(
     disable_web_page_preview: bool,
     document_path: Path | None = None,
     document_caption: str = "",
+    document_content_type: str | None = None,
 ) -> TelegramFanoutSummary:
     """Deliver one rendered product message without aborting later recipients."""
     targets = _unique_targets(provider)
@@ -122,6 +123,7 @@ def send_to_recipients(
                 chat_id=target.chat_id,
                 file_path=document_path,
                 caption=document_caption,
+                content_type=document_content_type,
             )
         except _TRANSPORT_ERRORS:
             document_failed += 1
