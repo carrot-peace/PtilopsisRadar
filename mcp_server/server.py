@@ -16,6 +16,7 @@ from fastmcp import FastMCP
 from .context import MCPContext, get_request_tools
 from .features import (
     register_analysis_search_features,
+    register_crawl_features,
     register_management_features,
     register_query_features,
 )
@@ -29,6 +30,7 @@ _surface = FastMCP("trendradar-news-surface")
 register_query_features(_surface)
 register_analysis_search_features(_surface)
 register_management_features(_surface)
+register_crawl_features(_surface)
 
 
 def _get_tools():
@@ -57,37 +59,6 @@ def create_server(
     )
     server.mount(_surface, as_proxy=False)
     return server
-
-
-# ==================== 爬取工具 ====================
-
-@_surface.tool
-async def trigger_crawl(
-    platforms: Optional[List[str]] = None,
-    save_to_local: bool = False,
-    include_url: bool = False
-) -> str:
-    """
-    手动触发一次爬取任务（可选持久化）
-
-    Args:
-        platforms: 平台ID列表，如 ['zhihu', 'weibo']，不指定则使用所有平台
-        save_to_local: 是否保存到本地 output 目录，默认 False
-        include_url: 是否包含URL链接，默认False（节省token）
-
-    Returns:
-        JSON格式的任务状态信息，包含成功/失败平台列表和新闻数据
-
-    Examples:
-        - trigger_crawl(platforms=['zhihu'])
-        - trigger_crawl(save_to_local=True)
-    """
-    tools = _get_tools()
-    result = await asyncio.to_thread(
-        tools['system'].trigger_crawl,
-        platforms=platforms, save_to_local=save_to_local, include_url=include_url
-    )
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 # ==================== 存储同步工具 ====================

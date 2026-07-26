@@ -97,6 +97,7 @@ class MCPApplicationFactoryTests(unittest.TestCase):
             "SearchTools": "search",
             "ConfigManagementTools": "config",
             "SystemManagementTools": "system",
+            "CrawlTools": "crawl",
             "StorageSyncTools": "storage",
             "ArticleReaderTools": "article",
         }
@@ -111,6 +112,7 @@ class MCPApplicationFactoryTests(unittest.TestCase):
         with patches["DataQueryTools"], patches["AnalyticsTools"], \
                 patches["SearchTools"], patches["ConfigManagementTools"], \
                 patches["SystemManagementTools"], \
+                patches["CrawlTools"], \
                 patches["StorageSyncTools"], patches["ArticleReaderTools"]:
             first = MCPContext.create("/tmp/first")
             second = MCPContext.create("/tmp/second")

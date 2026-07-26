@@ -12,6 +12,7 @@ from fastmcp.server.dependencies import get_context
 from .tools.analytics import AnalyticsTools
 from .tools.article_reader import ArticleReaderTools
 from .tools.config_mgmt import ConfigManagementTools
+from .tools.crawl import CrawlTools
 from .tools.data_query import DataQueryTools
 from .tools.search_tools import SearchTools
 from .tools.storage_sync import StorageSyncTools
@@ -53,6 +54,7 @@ class MCPContext:
                 "search": SearchTools(root_text),
                 "config": ConfigManagementTools(root_text),
                 "system": SystemManagementTools(root_text),
+                "crawl": CrawlTools(root_text),
                 "storage": StorageSyncTools(root_text),
                 "article": ArticleReaderTools(root_text),
             },
