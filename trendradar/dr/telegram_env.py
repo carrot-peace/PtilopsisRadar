@@ -9,6 +9,7 @@ from trendradar.dr.telegram_sink import (
     DRTelegramSink,
     DRTelegramSinkConfig,
 )
+from trendradar.telegram.recipients import ReaderRecipientProvider
 from trendradar.telegram.transport import TelegramHTTPClient
 
 
@@ -75,7 +76,7 @@ def build_dr_telegram_sink_config_from_env(
 
     return DRTelegramSinkConfig(
         bot_token=bot_token,
-        chat_id=chat_id,
+        recipients=ReaderRecipientProvider(owner_chat_ids=(chat_id,)),
         api_base_url=api_base_url,
         timeout_seconds=timeout_seconds,
         parse_mode=parse_mode,

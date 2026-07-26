@@ -12,10 +12,10 @@ from pathlib import Path
 
 from trendradar.dr.dispatch_executor import DRDispatchReceipt
 from trendradar.dr.dispatch_plan import DRDispatchMessage
+from trendradar.telegram.fanout import RecipientProvider, send_to_recipients
 from trendradar.telegram.transport import (
     DEFAULT_API_BASE_URL,
     TelegramHTTPClient,
-    TelegramHTTPResponse,
     TelegramTransport,
     TelegramTransportConfig,
 )
@@ -24,38 +24,27 @@ from trendradar.telegram.transport import (
 @dataclass(frozen=True)
 class DRTelegramSinkConfig:
     bot_token: str = field(repr=False)
-    chat_id: str
+    recipients: RecipientProvider = field(repr=False)
     api_base_url: str = DEFAULT_API_BASE_URL
     timeout_seconds: float = 10.0
     parse_mode: str | None = "HTML"
     attach_html: bool = True
 
     def __post_init__(self) -> None:
-        if not self.chat_id:
-            raise ValueError("chat_id must be non-empty")
         TelegramTransportConfig(
             bot_token=self.bot_token,
             api_base_url=self.api_base_url,
             timeout_seconds=self.timeout_seconds,
         )
 
-
-def _sanitize(raw: str, config: DRTelegramSinkConfig) -> str:
-    cleaned = raw.replace(config.bot_token, "***")
-    cleaned = cleaned.replace(config.chat_id, "***")
-    cleaned = " ".join(cleaned.split())
-    return cleaned[:77] + "..." if len(cleaned) > 80 else cleaned
-
-
 @dataclass
 class DRTelegramSink:
     config: DRTelegramSinkConfig
     http_client: TelegramHTTPClient | None = None
+    transport: TelegramTransport = field(init=False, repr=False)
 
-    def submit(
-        self, message: DRDispatchMessage, *, message_index: int
-    ) -> DRDispatchReceipt:
-        transport = TelegramTransport(
+    def __post_init__(self) -> None:
+        self.transport = TelegramTransport(
             TelegramTransportConfig(
                 bot_token=self.config.bot_token,
                 api_base_url=self.config.api_base_url,
@@ -63,91 +52,42 @@ class DRTelegramSink:
             ),
             http_client=self.http_client,
         )
-        text_response = transport.send_message(
-            chat_id=self.config.chat_id,
+
+    def submit(
+        self, message: DRDispatchMessage, *, message_index: int
+    ) -> DRDispatchReceipt:
+        attach_document = self.config.attach_html and message.attach_html
+        summary = send_to_recipients(
+            self.transport,
+            self.config.recipients,
             text=message.text,
             parse_mode=self.config.parse_mode,
             disable_web_page_preview=True,
+            document_path=Path(message.html_path) if attach_document else None,
+            document_caption="DR HTML",
+            document_content_type="text/html; charset=utf-8",
         )
-        if not text_response.ok:
-            return self._receipt(
-                message,
-                message_index,
-                accepted=False,
-                status="text_rejected",
-                detail=self._detail("text", text_response),
-                text_accepted=False,
-                document_accepted=None,
-            )
+        if not summary.accepted:
+            status = "text_rejected"
+        elif summary.partial:
+            status = "accepted_partial"
+        else:
+            status = "accepted"
 
         document_accepted: bool | None = None
-        if self.config.attach_html and message.attach_html:
-            html_path = Path(message.html_path)
-            if html_path.exists():
-                doc_response = transport.send_document(
-                    chat_id=self.config.chat_id,
-                    file_path=html_path,
-                    caption="DR HTML",
-                    content_type="text/html; charset=utf-8",
-                )
-                document_accepted = doc_response.ok
-                if not document_accepted:
-                    return self._receipt(
-                        message,
-                        message_index,
-                        accepted=True,
-                        status="accepted_document_failed",
-                        detail=self._detail("document", doc_response),
-                        text_accepted=True,
-                        document_accepted=False,
-                    )
-            else:
-                document_accepted = False
-                return self._receipt(
-                    message,
-                    message_index,
-                    accepted=True,
-                    status="accepted_document_missing",
-                    detail="html_missing",
-                    text_accepted=True,
-                    document_accepted=False,
-                )
-
-        return self._receipt(
-            message,
-            message_index,
-            accepted=True,
-            status="accepted",
-            detail="telegram_ok",
-            text_accepted=True,
-            document_accepted=document_accepted,
-        )
-
-    def _detail(self, stage: str, response: TelegramHTTPResponse) -> str:
-        desc = response.description
-        raw = f"{stage}_http_{response.status_code}"
-        if desc:
-            raw = f"{raw}:{desc}"
-        return _sanitize(raw, self.config)
-
-    @staticmethod
-    def _receipt(
-        message: DRDispatchMessage,
-        message_index: int,
-        *,
-        accepted: bool,
-        status: str,
-        detail: str,
-        text_accepted: bool,
-        document_accepted: bool | None,
-    ) -> DRDispatchReceipt:
+        if attach_document and summary.text_accepted_count > 0:
+            document_accepted = (
+                summary.document_failed_count == 0
+                and summary.document_accepted_count
+                == summary.text_accepted_count
+            )
         return DRDispatchReceipt(
             message_index=message_index,
-            accepted=accepted,
+            accepted=summary.accepted,
             status=status,
-            detail=detail,
+            detail=summary.detail(),
             run_label=message.run_label,
             date=message.date,
-            text_accepted=text_accepted,
+            text_accepted=summary.accepted,
             document_accepted=document_accepted,
         )
