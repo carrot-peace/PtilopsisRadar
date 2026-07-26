@@ -134,6 +134,14 @@ class HTTPApplicationPolicyTests(unittest.IsolatedAsyncioTestCase):
             "diagnostics": {
                 "error": "nested provider secret",
             },
+            "data": {
+                "failed_dates": [
+                    {
+                        "date": "2026-07-26",
+                        "error": "provider path /secret/cache",
+                    },
+                ],
+            },
         }
         context = MCPContext.from_tools(
             project_root="/tmp/project",
@@ -153,6 +161,7 @@ class HTTPApplicationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/secret/path", encoded)
         self.assertNotIn("private stack", encoded)
         self.assertNotIn("nested provider secret", encoded)
+        self.assertNotIn("provider path", encoded)
 
     async def test_trusted_context_preserves_legacy_error_payload(self):
         data = Mock()

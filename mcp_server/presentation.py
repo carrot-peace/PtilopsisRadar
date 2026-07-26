@@ -17,6 +17,8 @@ _MASKED_ERROR_CODES = {
 
 
 def _mask_internal_error(payload: Any) -> Any:
+    if isinstance(payload, list):
+        return [_mask_internal_error(item) for item in payload]
     if not isinstance(payload, dict):
         return payload
 
