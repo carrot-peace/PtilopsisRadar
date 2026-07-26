@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from trendradar.deployment.operator_alert import (
     SharedTransportOperatorTelegramSender,
@@ -12,6 +15,7 @@ from trendradar.telegram.transport import (
     TelegramHTTPResponse,
     TelegramTransport,
     TelegramTransportConfig,
+    UrllibTelegramHTTPClient,
 )
 
 
@@ -22,6 +26,28 @@ class FakeHTTPClient:
 
     def post_json(self, url, payload, *, timeout_seconds):
         self.calls.append((url, payload, timeout_seconds))
+        return self.response
+
+    def post_multipart(
+        self,
+        url,
+        *,
+        fields,
+        file_field,
+        file_path,
+        timeout_seconds,
+        content_type=None,
+    ):
+        self.calls.append(
+            (
+                url,
+                fields,
+                file_field,
+                file_path,
+                timeout_seconds,
+                content_type,
+            )
+        )
         return self.response
 
 
@@ -81,6 +107,49 @@ class TestTelegramTransport(unittest.TestCase):
         self.assertTrue(TelegramHTTPResponse(200, '{"ok": true}').ok)
         self.assertFalse(TelegramHTTPResponse(500, '{"ok": true}').ok)
         self.assertFalse(TelegramHTTPResponse(200, "not-json").ok)
+
+    def test_send_document_uses_shared_multipart_client(self):
+        fake = FakeHTTPClient()
+        transport = TelegramTransport(
+            TelegramTransportConfig(bot_token="secret"),
+            http_client=fake,
+        )
+        path = Path("daily.html")
+        response = transport.send_document(
+            chat_id="11",
+            file_path=path,
+            caption="DR HTML",
+            content_type="text/html; charset=utf-8",
+        )
+        self.assertTrue(response.ok)
+        url, fields, file_field, file_path, timeout, content_type = fake.calls[0]
+        self.assertEqual(url, "https://api.telegram.org/botsecret/sendDocument")
+        self.assertEqual(fields, {"chat_id": "11", "caption": "DR HTML"})
+        self.assertEqual(file_field, "document")
+        self.assertEqual(file_path, path)
+        self.assertEqual(timeout, 10.0)
+        self.assertEqual(content_type, "text/html; charset=utf-8")
+
+    def test_multipart_content_type_override_is_written_to_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "daily"
+            path.write_text("<html>DR</html>", encoding="utf-8")
+            client = UrllibTelegramHTTPClient()
+            response = TelegramHTTPResponse(200, '{"ok": true}')
+            with patch.object(client, "_open", return_value=response) as opened:
+                client.post_multipart(
+                    "https://telegram.test/sendDocument",
+                    fields={"chat_id": "11"},
+                    file_field="document",
+                    file_path=path,
+                    timeout_seconds=10.0,
+                    content_type="text/html; charset=utf-8",
+                )
+            request = opened.call_args.args[0]
+            self.assertIn(
+                b"Content-Type: text/html; charset=utf-8\r\n",
+                request.data,
+            )
 
     def test_operator_adapter_uses_shared_transport_without_behavior_change(self):
         fake = FakeHTTPClient(TelegramHTTPResponse(400, '{"ok": false}'))

@@ -39,11 +39,9 @@ from trendradar.dr.telegram_env import (
     dr_telegram_send_enabled,
 )
 from trendradar.dr.telegram_sink import (
-    DRTelegramHTTPResponse,
     DRTelegramSink,
-    build_telegram_send_document_fields,
-    build_telegram_send_message_payload,
 )
+from trendradar.telegram.transport import TelegramHTTPResponse
 
 
 FAKE_TOKEN = "FAKE-DR-TOKEN-000:abc"
@@ -403,19 +401,6 @@ class TestDREnvAndSink(unittest.TestCase):
         self.assertEqual(config.timeout_seconds, 10.0)
         self.assertTrue(config.attach_html)
 
-    def test_payload_builders(self) -> None:
-        config = build_dr_telegram_sink_config_from_env(self._env())
-        assert config is not None
-        msg = DRDispatchMessage(
-            text="body", format="telegram_html", run_label="r",
-            date="2026-06-18", html_path="daily.html",
-        )
-        payload = build_telegram_send_message_payload(msg, config)
-        self.assertEqual(payload["chat_id"], FAKE_CHAT)
-        self.assertEqual(payload["parse_mode"], "HTML")
-        fields = build_telegram_send_document_fields(msg, config)
-        self.assertEqual(fields["caption"], "DR HTML")
-
     def test_sink_sends_text_and_document(self) -> None:
         class FakeClient:
             def __init__(self):
@@ -424,13 +409,22 @@ class TestDREnvAndSink(unittest.TestCase):
 
             def post_json(self, url, payload, *, timeout_seconds):
                 self.json_payloads.append((url, payload))
-                return DRTelegramHTTPResponse(200, '{"ok": true}')
+                return TelegramHTTPResponse(200, '{"ok": true}')
 
             def post_multipart(
-                self, url, *, fields, file_field, file_path, timeout_seconds
+                self,
+                url,
+                *,
+                fields,
+                file_field,
+                file_path,
+                timeout_seconds,
+                content_type=None,
             ):
-                self.multipart_payloads.append((url, fields, file_field, file_path))
-                return DRTelegramHTTPResponse(200, '{"ok": true}')
+                self.multipart_payloads.append(
+                    (url, fields, file_field, file_path, content_type)
+                )
+                return TelegramHTTPResponse(200, '{"ok": true}')
 
         with tempfile.TemporaryDirectory() as td:
             html_path = Path(td) / "full.html"
@@ -455,16 +449,30 @@ class TestDREnvAndSink(unittest.TestCase):
         self.assertTrue(receipt.document_accepted)
         self.assertEqual(len(fake.json_payloads), 1)
         self.assertEqual(len(fake.multipart_payloads), 1)
+        self.assertEqual(fake.json_payloads[0][1]["chat_id"], FAKE_CHAT)
+        self.assertEqual(fake.json_payloads[0][1]["parse_mode"], "HTML")
+        self.assertEqual(fake.multipart_payloads[0][1]["caption"], "DR HTML")
+        self.assertEqual(
+            fake.multipart_payloads[0][4],
+            "text/html; charset=utf-8",
+        )
 
     def test_document_failure_keeps_text_accepted(self) -> None:
         class FakeClient:
             def post_json(self, url, payload, *, timeout_seconds):
-                return DRTelegramHTTPResponse(200, '{"ok": true}')
+                return TelegramHTTPResponse(200, '{"ok": true}')
 
             def post_multipart(
-                self, url, *, fields, file_field, file_path, timeout_seconds
+                self,
+                url,
+                *,
+                fields,
+                file_field,
+                file_path,
+                timeout_seconds,
+                content_type=None,
             ):
-                return DRTelegramHTTPResponse(400, '{"ok": false}')
+                return TelegramHTTPResponse(400, '{"ok": false}')
 
         with tempfile.TemporaryDirectory() as td:
             html_path = Path(td) / "full.html"

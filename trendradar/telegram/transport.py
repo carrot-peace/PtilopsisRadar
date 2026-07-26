@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from functools import cached_property
+from pathlib import Path
 from typing import Mapping, Protocol, runtime_checkable
 
 
@@ -35,6 +38,11 @@ class TelegramHTTPResponse:
     def ok(self) -> bool:
         return 200 <= self.status_code < 300 and self.json_object().get("ok") is True
 
+    @property
+    def description(self) -> str:
+        value = self.json_object().get("description")
+        return value if isinstance(value, str) else ""
+
 
 @runtime_checkable
 class TelegramHTTPClient(Protocol):
@@ -44,6 +52,18 @@ class TelegramHTTPClient(Protocol):
         payload: Mapping[str, object],
         *,
         timeout_seconds: float,
+    ) -> TelegramHTTPResponse:
+        ...
+
+    def post_multipart(
+        self,
+        url: str,
+        *,
+        fields: Mapping[str, object],
+        file_field: str,
+        file_path: Path,
+        timeout_seconds: float,
+        content_type: str | None = None,
     ) -> TelegramHTTPResponse:
         ...
 
@@ -63,6 +83,69 @@ class UrllibTelegramHTTPClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        return self._open(request, timeout_seconds=timeout_seconds)
+
+    def post_multipart(
+        self,
+        url: str,
+        *,
+        fields: Mapping[str, object],
+        file_field: str,
+        file_path: Path,
+        timeout_seconds: float,
+        content_type: str | None = None,
+    ) -> TelegramHTTPResponse:
+        boundary = f"----PtilopsisTelegram{uuid.uuid4().hex}"
+        body_parts: list[bytes] = []
+        for key, value in fields.items():
+            body_parts.extend(
+                (
+                    f"--{boundary}\r\n".encode("ascii"),
+                    (
+                        f'Content-Disposition: form-data; name="{key}"'
+                        "\r\n\r\n"
+                    ).encode("utf-8"),
+                    str(value).encode("utf-8"),
+                    b"\r\n",
+                )
+            )
+        resolved_content_type = content_type
+        if resolved_content_type is None:
+            resolved_content_type = (
+                mimetypes.guess_type(file_path.name)[0]
+                or "application/octet-stream"
+            )
+            if resolved_content_type.startswith("text/"):
+                resolved_content_type = (
+                    f"{resolved_content_type}; charset=utf-8"
+                )
+        body_parts.extend(
+            (
+                f"--{boundary}\r\n".encode("ascii"),
+                (
+                    f'Content-Disposition: form-data; name="{file_field}"; '
+                    f'filename="{file_path.name}"\r\n'
+                ).encode("utf-8"),
+                f"Content-Type: {resolved_content_type}\r\n\r\n".encode("ascii"),
+                file_path.read_bytes(),
+                b"\r\n",
+                f"--{boundary}--\r\n".encode("ascii"),
+            )
+        )
+        request = urllib.request.Request(
+            url,
+            data=b"".join(body_parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        return self._open(request, timeout_seconds=timeout_seconds)
+
+    @staticmethod
+    def _open(
+        request: urllib.request.Request,
+        *,
+        timeout_seconds: float,
+    ) -> TelegramHTTPResponse:
         try:
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 status = int(getattr(response, "status", None) or response.getcode())
@@ -117,14 +200,35 @@ class TelegramTransport:
         *,
         chat_id: str,
         text: str,
+        parse_mode: str | None = None,
         disable_web_page_preview: bool = True,
     ) -> TelegramHTTPResponse:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": disable_web_page_preview,
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         return self.client.post_json(
             self.endpoint("sendMessage"),
-            {
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": disable_web_page_preview,
-            },
+            payload,
             timeout_seconds=self.config.timeout_seconds,
+        )
+
+    def send_document(
+        self,
+        *,
+        chat_id: str,
+        file_path: Path,
+        caption: str,
+        content_type: str | None = None,
+    ) -> TelegramHTTPResponse:
+        return self.client.post_multipart(
+            self.endpoint("sendDocument"),
+            fields={"chat_id": chat_id, "caption": caption},
+            file_field="document",
+            file_path=file_path,
+            timeout_seconds=self.config.timeout_seconds,
+            content_type=content_type,
         )

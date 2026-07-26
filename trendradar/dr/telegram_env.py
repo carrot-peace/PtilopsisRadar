@@ -6,10 +6,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from trendradar.dr.telegram_sink import (
-    DRTelegramHTTPClient,
     DRTelegramSink,
     DRTelegramSinkConfig,
 )
+from trendradar.telegram.transport import TelegramHTTPClient
 
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -86,7 +86,7 @@ def build_dr_telegram_sink_config_from_env(
 def build_dr_telegram_sink_from_env(
     env: Mapping[str, str],
     *,
-    http_client: DRTelegramHTTPClient | None = None,
+    http_client: TelegramHTTPClient | None = None,
 ) -> DRTelegramSink | None:
     config = build_dr_telegram_sink_config_from_env(env)
     if config is None:
