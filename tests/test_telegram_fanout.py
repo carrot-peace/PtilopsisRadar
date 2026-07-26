@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from http.client import IncompleteRead
 from pathlib import Path
 
 from trendradar.telegram.fanout import (
@@ -120,6 +121,30 @@ class TestTelegramFanout(unittest.TestCase):
             provider,
             text="reader message",
             parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+
+        self.assertEqual(transport.text_chat_ids, ["1", "2"])
+        self.assertEqual(summary.text_accepted_count, 1)
+        self.assertEqual(summary.text_failed_count, 1)
+
+    def test_truncated_http_response_does_not_abort_later_recipients(
+        self,
+    ) -> None:
+        provider = FakeProvider(
+            [RecipientTarget("1"), RecipientTarget("2")]
+        )
+        transport = FakeTransport()
+        transport.text_results = [
+            IncompleteRead(b"partial"),
+            _response(),
+        ]
+
+        summary = send_to_recipients(
+            transport,  # type: ignore[arg-type]
+            provider,
+            text="reader message",
+            parse_mode=None,
             disable_web_page_preview=True,
         )
 

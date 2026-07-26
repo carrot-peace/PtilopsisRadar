@@ -4,13 +4,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from http.client import HTTPException
 from pathlib import Path
 from typing import Protocol, Sequence
 
 from trendradar.telegram.transport import TelegramTransport
 
 
-_TRANSPORT_ERRORS = (ConnectionError, OSError, TimeoutError)
+_TRANSPORT_ERRORS = (
+    ConnectionError,
+    HTTPException,
+    OSError,
+    TimeoutError,
+)
 
 
 @dataclass(frozen=True)
