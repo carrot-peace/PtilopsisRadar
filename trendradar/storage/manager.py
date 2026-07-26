@@ -138,6 +138,15 @@ class StorageManager:
                 enable_txt=self.enable_txt,
                 enable_html=self.enable_html,
                 timezone=self.timezone,
+                single_writer=(
+                    str(
+                        self.remote_config.get(
+                            "single_writer",
+                            os.environ.get("S3_SINGLE_WRITER", False),
+                        )
+                    ).lower()
+                    in ("1", "true", "yes", "on")
+                ),
             )
         except ImportError as e:
             print(f"[存储管理器] 远程后端导入失败: {e}")

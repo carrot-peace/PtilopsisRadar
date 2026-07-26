@@ -344,6 +344,8 @@ storage:
     access_key_id: ""                 # 访问密钥 ID
     secret_access_key: ""             # 访问密钥
     region: ""                        # 区域（可选，部分服务商需要）
+    single_writer: false              # 仅当服务商不支持条件 PUT 且部署确保单写者时启用
+                                      # 也可使用环境变量 S3_SINGLE_WRITER=true
 
   # 数据拉取（从远程同步到本地，用于 MCP Server 等场景）
   pull:

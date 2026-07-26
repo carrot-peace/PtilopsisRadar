@@ -196,6 +196,7 @@ class AppContext:
                     "secret_access_key": remote_config.get("SECRET_ACCESS_KEY", ""),
                     "endpoint_url": remote_config.get("ENDPOINT_URL", ""),
                     "region": remote_config.get("REGION", ""),
+                    "single_writer": remote_config.get("SINGLE_WRITER", False),
                 },
                 local_retention_days=local_config.get("RETENTION_DAYS", 0),
                 remote_retention_days=remote_config.get("RETENTION_DAYS", 0),
