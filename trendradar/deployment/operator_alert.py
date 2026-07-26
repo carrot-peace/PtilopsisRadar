@@ -9,18 +9,21 @@ import hashlib
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Mapping, Protocol, Sequence
 
 from trendradar.deployment.telegram_owner import resolve_telegram_owner_chat_ids
+from trendradar.telegram.transport import (
+    DEFAULT_API_BASE_URL,
+    TelegramHTTPClient,
+    TelegramTransport,
+    TelegramTransportConfig,
+)
 
 
 logger = logging.getLogger(__name__)
-DEFAULT_API_BASE_URL = "https://api.telegram.org"
 DEFAULT_ALERT_STATE_PATH = Path("output/meta/supervisor-alerts.json")
 ALERT_STATE_SCHEMA = "supervisor-alerts-v1"
 
@@ -45,7 +48,9 @@ class OperatorTelegramSender(Protocol):
 
 
 @dataclass
-class UrllibOperatorTelegramSender:
+class SharedTransportOperatorTelegramSender:
+    http_client: TelegramHTTPClient | None = None
+
     def send(
         self,
         *,
@@ -55,40 +60,23 @@ class UrllibOperatorTelegramSender:
         api_base_url: str,
         timeout_seconds: float,
     ) -> TelegramSendResult:
-        url = f"{api_base_url.rstrip('/')}/bot{bot_token}/sendMessage"
-        payload = json.dumps(
-            {
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": True,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        transport = TelegramTransport(
+            TelegramTransportConfig(
+                bot_token=bot_token,
+                api_base_url=api_base_url,
+                timeout_seconds=timeout_seconds,
+            ),
+            http_client=self.http_client,
         )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=timeout_seconds
-            ) as response:
-                status = int(
-                    getattr(response, "status", None) or response.getcode()
-                )
-                body = response.read().decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as exc:
-            status = int(exc.code)
-            body = exc.read().decode("utf-8", errors="replace")
-
-        try:
-            decoded = json.loads(body)
-        except (TypeError, ValueError):
-            decoded = {}
-        accepted = 200 <= status < 300 and decoded.get("ok") is True
+        response = transport.send_message(chat_id=chat_id, text=text)
+        accepted = response.ok
         return TelegramSendResult(
             ok=accepted,
-            detail="telegram_ok" if accepted else f"telegram_http_{status}",
+            detail=(
+                "telegram_ok"
+                if accepted
+                else f"telegram_http_{response.status_code}"
+            ),
         )
 
 
@@ -153,7 +141,7 @@ def send_owner_alert(
     except (TypeError, ValueError):
         timeout = 10.0
 
-    transport = sender or UrllibOperatorTelegramSender()
+    transport = sender or SharedTransportOperatorTelegramSender()
     api_base_url = _clean(
         env.get("TELEGRAM_API_BASE_URL"), DEFAULT_API_BASE_URL
     )
