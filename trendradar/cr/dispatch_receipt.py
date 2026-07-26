@@ -47,6 +47,7 @@ STATUS_SKIPPED_INSUFFICIENT_FRESH_SOURCES = "skipped_insufficient_fresh_sources"
 STATUS_QUIET_HOURS_CONFIG_ERROR = "quiet_hours_config_error"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_ACCEPTED = "accepted"
+STATUS_ACCEPTED_PARTIAL = "accepted_partial"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED_TRANSPORT = "failed_transport"
 STATUS_FAILED_RENDER = "failed_render"
@@ -65,6 +66,7 @@ def _resolve_receipt_status(
     """Map an execution receipt status to the JSON receipt status vocabulary."""
     mapping = {
         "accepted": STATUS_ACCEPTED,
+        "accepted_partial": STATUS_ACCEPTED_PARTIAL,
         "rejected": STATUS_REJECTED,
         "failed_transport": STATUS_FAILED_TRANSPORT,
         "http_error": STATUS_HTTP_ERROR,

@@ -169,7 +169,10 @@ class TestNormalConfigConstruction(unittest.TestCase):
     def test_chat_id_matches(self) -> None:
         config = build_cr_telegram_sink_config_from_env(self._default_env())
         assert config is not None
-        self.assertEqual(config.chat_id, FAKE_CHAT_ID)
+        self.assertEqual(
+            [target.chat_id for target in config.recipients.get_targets()],
+            [FAKE_CHAT_ID],
+        )
 
     def test_api_base_url_uses_default(self) -> None:
         config = build_cr_telegram_sink_config_from_env(self._default_env())
@@ -274,7 +277,10 @@ class TestOptionalValues(unittest.TestCase):
             self._env(PTILOPSIS_CR_TELEGRAM_CHAT_ID=f"  {FAKE_CHAT_ID}  ")
         )
         assert config is not None
-        self.assertEqual(config.chat_id, FAKE_CHAT_ID)
+        self.assertEqual(
+            [target.chat_id for target in config.recipients.get_targets()],
+            [FAKE_CHAT_ID],
+        )
 
 
 # ---------------------------------------------------------------------------

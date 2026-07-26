@@ -613,7 +613,13 @@ def _flush_deferred_queue(
             )
             continue
         status = sink_receipt.status
-        if status not in {"accepted", "rejected", "failed_transport", "http_error"}:
+        if status not in {
+            "accepted",
+            "accepted_partial",
+            "rejected",
+            "failed_transport",
+            "http_error",
+        }:
             status = "unknown"
         detail = "flushed_deferred" if sink_receipt.accepted else sink_receipt.detail
         receipts.append(
