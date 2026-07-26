@@ -1,11 +1,31 @@
 import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 
 from trendradar.storage.base import NewsData, NewsItem, RSSData, RSSItem
 
 
 class SQLiteQueryRepositoryTests(unittest.TestCase):
+    def test_available_dates_rejects_noncanonical_date_filenames(self):
+        from trendradar.storage.query import SQLiteQueryRepository
+
+        with tempfile.TemporaryDirectory() as tmp:
+            news_dir = Path(tmp) / "news"
+            news_dir.mkdir()
+            for filename in (
+                "2026-07-02.db",
+                "2026-7-2.db",
+                "2026-02-30.db",
+                "notes.db",
+            ):
+                (news_dir / filename).touch()
+
+            self.assertEqual(
+                SQLiteQueryRepository(tmp).available_dates(),
+                ["2026-07-02"],
+            )
+
     def test_runtime_and_mcp_read_the_same_news_database(self):
         from mcp_server.services.parser_service import ParserService
         from trendradar.storage.local import LocalStorageBackend

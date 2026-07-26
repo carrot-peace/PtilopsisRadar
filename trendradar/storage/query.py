@@ -218,7 +218,7 @@ class SQLiteQueryRepository:
     @staticmethod
     def _is_date(value: str) -> bool:
         try:
-            datetime.strptime(value, "%Y-%m-%d")
+            parsed = datetime.strptime(value, "%Y-%m-%d")
         except ValueError:
             return False
-        return True
+        return parsed.strftime("%Y-%m-%d") == value
