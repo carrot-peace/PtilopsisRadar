@@ -7,6 +7,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Mapping, Protocol, runtime_checkable
 
 
@@ -19,12 +20,16 @@ class TelegramHTTPResponse:
     status_code: int
     body: str
 
-    def json_object(self) -> dict[str, object]:
+    @cached_property
+    def _decoded_json_object(self) -> dict[str, object]:
         try:
             value = json.loads(self.body)
         except (TypeError, ValueError):
             return {}
         return value if isinstance(value, dict) else {}
+
+    def json_object(self) -> dict[str, object]:
+        return dict(self._decoded_json_object)
 
     @property
     def ok(self) -> bool:
@@ -87,10 +92,19 @@ class TelegramTransportConfig:
 class TelegramTransport:
     config: TelegramTransportConfig
     http_client: TelegramHTTPClient | None = None
+    _default_http_client: TelegramHTTPClient | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
 
     @property
     def client(self) -> TelegramHTTPClient:
-        return self.http_client or UrllibTelegramHTTPClient()
+        if self.http_client is not None:
+            return self.http_client
+        if self._default_http_client is None:
+            self._default_http_client = UrllibTelegramHTTPClient()
+        return self._default_http_client
 
     def endpoint(self, method: str) -> str:
         return (

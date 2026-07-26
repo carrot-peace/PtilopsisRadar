@@ -25,6 +25,11 @@ class FakeHTTPClient:
         return self.response
 
 
+class FalsyFakeHTTPClient(FakeHTTPClient):
+    def __bool__(self):
+        return False
+
+
 class TestTelegramTransport(unittest.TestCase):
     def test_config_hides_token_and_validates_timeout(self):
         config = TelegramTransportConfig(bot_token="secret")
@@ -55,6 +60,22 @@ class TestTelegramTransport(unittest.TestCase):
             },
         )
         self.assertEqual(timeout, 7.5)
+
+    def test_falsy_injected_client_is_preserved(self):
+        fake = FalsyFakeHTTPClient()
+        transport = TelegramTransport(
+            TelegramTransportConfig(bot_token="secret"),
+            http_client=fake,
+        )
+        self.assertIs(transport.client, fake)
+        transport.send_message(chat_id="11", text="diagnostic")
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_default_http_client_is_reused(self):
+        transport = TelegramTransport(
+            TelegramTransportConfig(bot_token="secret")
+        )
+        self.assertIs(transport.client, transport.client)
 
     def test_response_requires_http_success_and_ok_true(self):
         self.assertTrue(TelegramHTTPResponse(200, '{"ok": true}').ok)

@@ -2,7 +2,8 @@
 
 Ptilopsis Radar has three explicit Telegram transport planes. They do not
 share a fallback sender, report formatter, notification facade, or implicit
-configuration path.
+configuration path. Product adapters may share the low-level Telegram HTTP
+implementation under `trendradar/telegram/`.
 
 ## CR dispatch
 
@@ -35,6 +36,9 @@ input for deployed installations.
 - No generic notification, alert-cooldown, attachment, or channel configuration
   in `config/config.yaml`.
 
-Low-level Telegram HTTP is confined to the CR sink, DR sink, and deployment
-operator sender. Tests enforce this allowlist and the absence of prohibited
-generic runtime calls.
+During the incremental transport migration, low-level Telegram HTTP is confined
+to the CR sink, DR sink, and `trendradar/telegram/transport.py`. The shared
+transport is consumed only by the deployment operator sender at this stage.
+Tests enforce both the HTTP implementation allowlist and the shared transport
+import-site allowlist, together with the absence of prohibited generic runtime
+calls.

@@ -17,6 +17,10 @@ TELEGRAM_HTTP_ALLOWLIST = {
     "trendradar/dr/telegram_sink.py",
     "trendradar/telegram/transport.py",
 }
+TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST = {
+    "trendradar/deployment/operator_alert.py",
+    "trendradar/telegram/__init__.py",
+}
 FORBIDDEN_RUNTIME_SYMBOLS = {
     "NotificationDispatcher",
     "dispatch_all",
@@ -40,6 +44,36 @@ def test_telegram_http_primitives_are_confined_to_explicit_senders() -> None:
             actual.add(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert actual == TELEGRAM_HTTP_ALLOWLIST
+
+
+def test_shared_telegram_transport_imports_are_confined_to_adapters() -> None:
+    actual: set[str] = set()
+    for path in _python_sources():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            imports_transport = (
+                isinstance(node, ast.Import)
+                and any(
+                    alias.name
+                    in {"trendradar.telegram", "trendradar.telegram.transport"}
+                    for alias in node.names
+                )
+            ) or (
+                isinstance(node, ast.ImportFrom)
+                and (
+                    node.module == "trendradar.telegram"
+                    and any(alias.name == "TelegramTransport" for alias in node.names)
+                    or node.module == "trendradar.telegram.transport"
+                    and any(alias.name == "TelegramTransport" for alias in node.names)
+                    or node.module == "trendradar"
+                    and any(alias.name == "telegram" for alias in node.names)
+                )
+            )
+            if imports_transport:
+                actual.add(path.relative_to(PROJECT_ROOT).as_posix())
+                break
+
+    assert actual == TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST
 
 
 def test_generic_notification_package_and_runtime_symbols_stay_absent() -> None:

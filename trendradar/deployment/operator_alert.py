@@ -69,11 +69,12 @@ class SharedTransportOperatorTelegramSender:
             http_client=self.http_client,
         )
         response = transport.send_message(chat_id=chat_id, text=text)
+        accepted = response.ok
         return TelegramSendResult(
-            ok=response.ok,
+            ok=accepted,
             detail=(
                 "telegram_ok"
-                if response.ok
+                if accepted
                 else f"telegram_http_{response.status_code}"
             ),
         )
