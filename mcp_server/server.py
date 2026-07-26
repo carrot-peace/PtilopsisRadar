@@ -5,20 +5,19 @@ Ptilopsis Radar MCP Server - FastMCP 2.0 实现
 支持 stdio 和 HTTP 两种传输模式。
 """
 
-import asyncio
-import json
 import logging
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import Optional
 
 from fastmcp import FastMCP
 
-from .context import MCPContext, get_request_tools
+from .context import MCPContext
 from .features import (
     register_analysis_search_features,
     register_crawl_features,
     register_management_features,
     register_query_features,
+    register_reader_features,
     register_storage_features,
 )
 
@@ -33,10 +32,7 @@ register_analysis_search_features(_surface)
 register_management_features(_surface)
 register_crawl_features(_surface)
 register_storage_features(_surface)
-
-
-def _get_tools():
-    return get_request_tools()
+register_reader_features(_surface)
 
 
 def create_server(
@@ -61,87 +57,6 @@ def create_server(
     )
     server.mount(_surface, as_proxy=False)
     return server
-
-
-# ==================== 文章内容读取工具 ====================
-
-@_surface.tool
-async def read_article(
-    url: str,
-    timeout: int = 30
-) -> str:
-    """
-    读取指定 URL 的文章内容，返回 LLM 友好的 Markdown 格式
-
-    通过 Jina AI Reader 将网页转换为干净的 Markdown，自动去除广告、导航栏等噪音内容。
-    适合用于：阅读新闻正文、获取文章详情、分析文章内容。
-
-    **典型使用流程：**
-    1. 先用 search_news(include_url=True) 搜索新闻获取链接
-    2. 再用 read_article(url=链接) 读取正文内容
-    3. AI 对 Markdown 正文进行分析、摘要、翻译等
-
-    Args:
-        url: 文章链接（必需），以 http:// 或 https:// 开头
-        timeout: 请求超时时间（秒），默认 30，最大 60
-
-    Returns:
-        JSON格式的文章内容，包含完整 Markdown 正文
-
-    Examples:
-        - read_article(url="https://example.com/news/123")
-
-    Note:
-        - 使用 Jina AI Reader 免费服务（100 RPM 限制）
-        - 每次请求间隔 5 秒（内置速率控制）
-        - 部分付费墙/登录墙页面可能无法完整获取
-    """
-    tools = _get_tools()
-    timeout = min(max(timeout, 10), 60)
-    result = await asyncio.to_thread(
-        tools['article'].read_article,
-        url=url, timeout=timeout
-    )
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-@_surface.tool
-async def read_articles_batch(
-    urls: List[str],
-    timeout: int = 30
-) -> str:
-    """
-    批量读取多篇文章内容（最多 5 篇，间隔 5 秒）
-
-    逐篇请求文章内容，每篇之间自动间隔 5 秒以遵守速率限制。
-
-    **典型使用流程：**
-    1. 先用 search_news(include_url=True) 搜索新闻获取多个链接
-    2. 再用 read_articles_batch(urls=[...]) 批量读取正文
-    3. AI 对多篇文章进行对比分析、综合报告
-
-    Args:
-        urls: 文章链接列表（必需），最多处理 5 篇
-        timeout: 每篇的请求超时时间（秒），默认 30
-
-    Returns:
-        JSON格式的批量读取结果，包含每篇的完整内容和状态
-
-    Examples:
-        - read_articles_batch(urls=["https://a.com/1", "https://b.com/2"])
-
-    Note:
-        - 单次最多读取 5 篇，超出部分会被跳过
-        - 5 篇约需 25-30 秒（每篇间隔 5 秒）
-        - 单篇失败不影响其他篇的读取
-    """
-    tools = _get_tools()
-    timeout = min(max(timeout, 10), 60)
-    result = await asyncio.to_thread(
-        tools['article'].read_articles_batch,
-        urls=urls, timeout=timeout
-    )
-    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 # ==================== 启动入口 ====================
