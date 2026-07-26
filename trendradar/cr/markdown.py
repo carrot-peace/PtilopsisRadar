@@ -22,26 +22,23 @@ from trendradar.cr.decision import (
     DECISION_WATCH,
 )
 from trendradar.cr.cooldown_policy import (
-    CRCooldownDecision,
     CRCooldownPolicy,
-    decide_cr_cooldown,
 )
-from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
 from trendradar.cr.models import CRSourceItem
-from trendradar.cr.presentation import (
-    CRPresentedCandidate,
-    sort_cr_presented_candidates,
-)
+from trendradar.cr.presentation import CRPresentedCandidate
 from trendradar.cr.repeat_preview import (
     CRRepeatPreview,
     CRSeenEventState,
-    preview_cr_repeat,
+)
+from trendradar.cr.render_model import (
+    CRAuditRenderModel,
+    build_cr_audit_render_model,
 )
 from trendradar.cr.scoring import CRScoreResult
 from trendradar.cr.state_transition_preview import (
     CREventStateTransitionPreview,
 )
-from trendradar.cr.input_health import CRInputHealth, input_health_to_json_dict
+from trendradar.cr.input_health import CRInputHealth
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +208,7 @@ def _render_debug(pc: CRPresentedCandidate) -> list[str]:
     return lines
 
 
-def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
+def _render_event_identity(identity) -> list[str]:
     """Render audit-only event identity evidence for one candidate.
 
     Observability only: this evidence exists so future PR10b/c work can ask
@@ -221,7 +218,6 @@ def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
     The raw, verbose ``cluster_key`` is intentionally NOT emitted here — only
     its short fingerprint — to keep the section readable.
     """
-    identity = build_cr_event_identity_from_candidate(pc.candidate)
     lines: list[str] = []
     lines.append("#### Event Identity")
     lines.append("")
@@ -290,7 +286,7 @@ def _render_repeat_preview(preview: CRRepeatPreview) -> list[str]:
     return lines
 
 
-def _render_cooldown_decision(decision: CRCooldownDecision) -> list[str]:
+def _render_cooldown_decision(decision) -> list[str]:
     """Render audit-only cooldown policy preview for one candidate.
 
     This is a preview of what a cooldown policy *would* decide. It does NOT
@@ -364,66 +360,39 @@ def _render_state_transition_preview(
 # ---------------------------------------------------------------------------
 
 
-def render_cr_markdown_audit(
-    candidates: list[CRPresentedCandidate],
+def render_cr_markdown_model(
+    model: CRAuditRenderModel,
     *,
-    run_label: str,
     config: CRMarkdownRenderConfig | None = None,
-    urgent_threshold: float = 80.0,
 ) -> str:
-    """Render all presented candidates as a Markdown audit document.
+    """Purely format a precomputed CR audit model as Markdown.
 
-    Includes every decision level (urgent / alert / watch / suppress) without
-    filtering.  Does NOT re-score, re-decide, filter, or write files.
-
-    Parameters
-    ----------
-    candidates:
-        All presented candidates — not just CR-A selected ones.
-    run_label:
-        Human-readable run label (e.g. ``"2026-06-09 23:30"``).
-    config:
-        Rendering config.  Defaults to ``CRMarkdownRenderConfig()``.
-    urgent_threshold:
-        Score threshold for counting high-score suppressed candidates.
-        Defaults to 80.0.
-
-    Returns
-    -------
-    str
-        Markdown audit text.
+    All identity, repeat, cooldown, health, sorting, and grouping work must
+    already be represented by ``model``.
     """
     if config is None:
         config = CRMarkdownRenderConfig()
 
-    # Sort using existing PR9f sort (returns new list, does not mutate).
-    sorted_candidates = sort_cr_presented_candidates(candidates)
-
-    # High-score suppressed count.
-    high_score_suppressed = sum(
-        1
-        for pc in sorted_candidates
-        if pc.decision_level == DECISION_SUPPRESS
-        and pc.total_score >= urgent_threshold
-    )
-
-    # Group by level.
-    by_level: dict[str, list[CRPresentedCandidate]] = {lv: [] for lv in _SECTION_ORDER}
-    for pc in sorted_candidates:
-        if pc.decision_level in by_level:
-            by_level[pc.decision_level].append(pc)
+    sorted_candidates = model.candidates
+    by_level = {
+        section.level: section.candidates
+        for section in model.sections
+    }
 
     lines: list[str] = []
 
     # --- Header ---
     lines.append(f"# {_escape_markdown_text(config.title)}")
     lines.append("")
-    lines.append(f"Run: {_escape_markdown_text(run_label)}")
+    lines.append(f"Run: {_escape_markdown_text(model.run_label)}")
     lines.append(f"Candidates: {len(sorted_candidates)}")
-    lines.append(f"High-score suppressed candidates: {high_score_suppressed}")
+    lines.append(
+        "High-score suppressed candidates: "
+        f"{model.high_score_suppressed_count}"
+    )
 
-    if config.input_health is not None:
-        health = input_health_to_json_dict(config.input_health)
+    if model.input_health is not None:
+        health = model.input_health
         lines.append("")
         lines.append("## Input Health")
         lines.append("")
@@ -466,11 +435,13 @@ def render_cr_markdown_audit(
 
     if (
         config.include_state_transition_preview
-        and config.state_transition_preview is not None
+        and model.state_transition_preview is not None
     ):
         lines.append("")
         lines.extend(
-            _render_state_transition_preview(config.state_transition_preview)
+            _render_state_transition_preview(
+                model.state_transition_preview
+            )
         )
 
     # --- Sections ---
@@ -484,7 +455,8 @@ def render_cr_markdown_audit(
             lines.append("_No candidates._")
             continue
 
-        for idx, pc in enumerate(section_candidates, start=1):
+        for idx, view in enumerate(section_candidates, start=1):
+            pc = view.presented
             lines.append(f"### {idx}. {_escape_markdown_text(pc.display_title)}")
             lines.append("")
             lines.append(f"Candidate ID: {_escape_markdown_text(pc.candidate_id)}")
@@ -511,40 +483,32 @@ def render_cr_markdown_audit(
                 lines.append(f"Link: {pc.representative_url}")
 
             # Event identity evidence (audit-only; no enforcement).
-            if config.include_event_identity:
+            if config.include_event_identity and view.identity is not None:
                 lines.append("")
-                lines.extend(_render_event_identity(pc))
+                lines.extend(_render_event_identity(view.identity))
 
             # Repeat preview evidence (audit-only; no enforcement).
-            if config.include_repeat_preview:
-                identity = build_cr_event_identity_from_candidate(pc.candidate)
-                seen_state = (
-                    config.seen_event_states.get(identity.event_key)
-                    if config.seen_event_states is not None
-                    else None
-                )
-                preview = preview_cr_repeat(
-                    event_key=identity.event_key,
-                    current_decision_level=pc.decision_level,
-                    current_score=pc.total_score,
-                    seen_state=seen_state,
-                    prior_state_snapshot_provided=(
-                        config.seen_event_states is not None
-                    ),
-                )
+            if (
+                config.include_repeat_preview
+                and view.repeat_preview is not None
+            ):
                 lines.append("")
-                lines.extend(_render_repeat_preview(preview))
+                lines.extend(
+                    _render_repeat_preview(view.repeat_preview)
+                )
 
                 # Cooldown policy preview (audit-only; no enforcement). Gated
                 # on repeat preview being enabled so a preview already exists.
-                if config.include_cooldown_decision:
-                    decision = decide_cr_cooldown(
-                        event_key=identity.event_key,
-                        repeat_preview=preview,
-                        policy=config.cooldown_policy,
-                    )
+                if (
+                    config.include_cooldown_decision
+                    and view.cooldown_decision is not None
+                ):
                     lines.append("")
-                    lines.extend(_render_cooldown_decision(decision))
+                    lines.extend(
+                        _render_cooldown_decision(
+                            view.cooldown_decision
+                        )
+                    )
 
             # Score components.
             if config.include_score_components:
@@ -565,3 +529,28 @@ def render_cr_markdown_audit(
                 lines.extend(_render_debug(pc))
 
     return "\n".join(lines)
+
+
+def render_cr_markdown_audit(
+    candidates: list[CRPresentedCandidate],
+    *,
+    run_label: str,
+    config: CRMarkdownRenderConfig | None = None,
+    urgent_threshold: float = 80.0,
+) -> str:
+    """Compatibility façade that prepares evidence before pure rendering."""
+    if config is None:
+        config = CRMarkdownRenderConfig()
+    model = build_cr_audit_render_model(
+        candidates,
+        run_label=run_label,
+        urgent_threshold=urgent_threshold,
+        include_event_identity=config.include_event_identity,
+        include_repeat_preview=config.include_repeat_preview,
+        seen_event_states=config.seen_event_states,
+        include_cooldown_decision=config.include_cooldown_decision,
+        cooldown_policy=config.cooldown_policy,
+        input_health=config.input_health,
+        state_transition_preview=config.state_transition_preview,
+    )
+    return render_cr_markdown_model(model, config=config)
