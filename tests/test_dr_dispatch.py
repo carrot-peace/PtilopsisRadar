@@ -358,8 +358,8 @@ class TestDREnvAndSink(unittest.TestCase):
     def _env(self, **overrides: str) -> dict[str, str]:
         env = {
             "PTILOPSIS_DR_TELEGRAM_SEND": "1",
-            "PTILOPSIS_DR_TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
-            "PTILOPSIS_DR_TELEGRAM_CHAT_ID": FAKE_CHAT,
+            "TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
+            "TELEGRAM_OWNER_CHAT_IDS": FAKE_CHAT,
         }
         env.update(overrides)
         return env
@@ -382,10 +382,22 @@ class TestDREnvAndSink(unittest.TestCase):
         self.assertFalse(dr_telegram_send_enabled({"PTILOPSIS_DR_TELEGRAM_SEND": " 1 "}))
 
     def test_missing_credentials_raise_when_enabled(self) -> None:
-        env = self._env()
-        del env["PTILOPSIS_DR_TELEGRAM_BOT_TOKEN"]
-        with self.assertRaises(ValueError):
-            build_dr_telegram_sink_config_from_env(env)
+        for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_OWNER_CHAT_IDS"):
+            with self.subTest(key=key):
+                env = self._env()
+                del env[key]
+                with self.assertRaisesRegex(ValueError, key):
+                    build_dr_telegram_sink_config_from_env(env)
+
+    def test_legacy_pipeline_credentials_are_not_fallbacks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "TELEGRAM_BOT_TOKEN"):
+            build_dr_telegram_sink_config_from_env(
+                {
+                    "PTILOPSIS_DR_TELEGRAM_SEND": "1",
+                    "PTILOPSIS_DR_TELEGRAM_BOT_TOKEN": "legacy-token",
+                    "PTILOPSIS_DR_TELEGRAM_CHAT_ID": "legacy-chat",
+                }
+            )
 
     def test_disabled_returns_none(self) -> None:
         self.assertIsNone(build_dr_telegram_sink_config_from_env({}))
@@ -394,13 +406,29 @@ class TestDREnvAndSink(unittest.TestCase):
     def test_empty_optional_env_values_use_safe_defaults(self) -> None:
         config = build_dr_telegram_sink_config_from_env(
             self._env(
-                PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS="",
+                TELEGRAM_TIMEOUT_SECONDS="",
                 PTILOPSIS_DR_TELEGRAM_ATTACH_HTML="",
             )
         )
         assert config is not None
         self.assertEqual(config.timeout_seconds, 10.0)
         self.assertTrue(config.attach_html)
+
+    def test_canonical_transport_and_owner_options(self) -> None:
+        config = build_dr_telegram_sink_config_from_env(
+            self._env(
+                TELEGRAM_API_BASE_URL="https://telegram.test/",
+                TELEGRAM_TIMEOUT_SECONDS="7.5",
+                TELEGRAM_OWNER_CHAT_IDS="one,two,one",
+            )
+        )
+        assert config is not None
+        self.assertEqual(config.api_base_url, "https://telegram.test/")
+        self.assertEqual(config.timeout_seconds, 7.5)
+        self.assertEqual(
+            [target.chat_id for target in config.recipients.get_targets()],
+            ["one", "two"],
+        )
 
     def test_sink_sends_text_and_document(self) -> None:
         class FakeClient:
