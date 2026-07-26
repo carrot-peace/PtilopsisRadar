@@ -1,36 +1,53 @@
 # coding=utf-8
 """
-CR Telegram dispatch sink / external channel boundary (PR9n) v0.1.
+CR Telegram dispatch adapter.
 
 A Telegram-specific implementation of the PR9m ``CRDispatchSink`` boundary.
 It can submit a planned :class:`CRDispatchMessage` to Telegram's send-message
 endpoint when explicitly injected by the caller.
 
-This PR adds the sink module only.  It is NOT wired into the CR runtime or
-default dispatch execution — nothing sends by default.  There is no
-configuration wiring, no rate limiting, no repeat-suppression state, no
-retry / backoff, and no scheduled runtime sending.
+The adapter is wired into the CR runtime only when live dispatch mode and the
+CR-specific Telegram send gate are both enabled.  Nothing sends by default.
+There is no rate limiting, repeat-suppression state, retry / backoff, or
+scheduled runtime sending.
 
-Secrecy: the bot token is never placed into a :class:`CRDispatchReceipt`
-detail, never embedded in an exception this module raises, and is excluded from
-the config ``repr``.
-
-Uses the standard library only (``json`` + ``urllib``).  No third-party HTTP
-dependency.  Tests inject a fake HTTP client and never touch the network.
-
-Design reference: PR9n.
+Telegram HTTP details live in :mod:`trendradar.telegram.transport`; this module
+retains only CR configuration and receipt semantics.
 """
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from trendradar.cr.dispatch_executor import CRDispatchReceipt
 from trendradar.cr.dispatch_plan import CRDispatchMessage
+from trendradar.telegram.transport import (
+    DEFAULT_API_BASE_URL,
+    TelegramHTTPClient,
+    TelegramHTTPResponse,
+    TelegramTransport,
+    TelegramTransportConfig,
+    UrllibTelegramHTTPClient,
+)
+
+
+CRTelegramHTTPResponse = TelegramHTTPResponse
+
+
+@runtime_checkable
+class CRTelegramHTTPClient(Protocol):
+    def post_json(
+        self,
+        url: str,
+        payload: dict[str, object],
+        *,
+        timeout_seconds: float,
+    ) -> TelegramHTTPResponse:
+        ...
+
+
+CRUrllibTelegramHTTPClient = UrllibTelegramHTTPClient
 
 
 # ---------------------------------------------------------------------------
@@ -48,122 +65,28 @@ class CRTelegramSinkConfig:
 
     bot_token: str = field(repr=False)
     chat_id: str
-    api_base_url: str = "https://api.telegram.org"
+    api_base_url: str = DEFAULT_API_BASE_URL
     timeout_seconds: float = 10.0
     parse_mode: str | None = None
     disable_web_page_preview: bool = True
+    transport_config: TelegramTransportConfig = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
-        if not self.bot_token:
-            raise ValueError("bot_token must be non-empty")
         if not self.chat_id:
             raise ValueError("chat_id must be non-empty")
-        if not self.api_base_url:
-            raise ValueError("api_base_url must be non-empty")
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
-
-
-# ---------------------------------------------------------------------------
-# HTTP transport
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class CRTelegramHTTPResponse:
-    """A minimal HTTP response (status + raw body text)."""
-
-    status_code: int
-    body: str
-
-
-@runtime_checkable
-class CRTelegramHTTPClient(Protocol):
-    """Transport abstraction so tests can inject a fake client."""
-
-    def post_json(
-        self,
-        url: str,
-        payload: dict[str, object],
-        *,
-        timeout_seconds: float,
-    ) -> CRTelegramHTTPResponse:
-        ...
-
-
-@dataclass
-class CRUrllibTelegramHTTPClient:
-    """Standard-library HTTP client using :mod:`urllib.request`.
-
-    Posts a JSON body with ``Content-Type: application/json``.  Non-2xx
-    responses (e.g. HTTP 400 from Telegram) are returned as a
-    :class:`CRTelegramHTTPResponse` so the sink can classify them; genuine
-    transport failures (connection errors, timeouts) propagate.  No retry or
-    backoff in this PR.
-    """
-
-    def post_json(
-        self,
-        url: str,
-        payload: dict[str, object],
-        *,
-        timeout_seconds: float,
-    ) -> CRTelegramHTTPResponse:
-        data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        object.__setattr__(
+            self,
+            "transport_config",
+            TelegramTransportConfig(
+                bot_token=self.bot_token,
+                api_base_url=self.api_base_url,
+                timeout_seconds=self.timeout_seconds,
+            ),
         )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=timeout_seconds
-            ) as response:
-                body = response.read().decode("utf-8", errors="replace")
-                status_code = getattr(response, "status", None) or response.getcode()
-                return CRTelegramHTTPResponse(
-                    status_code=int(status_code), body=body
-                )
-        except urllib.error.HTTPError as exc:
-            # An HTTP-level error response (4xx/5xx) is still a response we can
-            # classify — read its body and return it rather than raising.
-            body = exc.read().decode("utf-8", errors="replace")
-            return CRTelegramHTTPResponse(status_code=int(exc.code), body=body)
-
-
-# ---------------------------------------------------------------------------
-# Payload / URL / detail helpers
-# ---------------------------------------------------------------------------
-
-
-def build_telegram_send_message_url(config: CRTelegramSinkConfig) -> str:
-    """Build the Telegram ``sendMessage`` endpoint URL.
-
-    Trailing slashes on ``api_base_url`` are trimmed.  The bot token is part of
-    the URL path; this URL is never placed into a receipt detail.
-    """
-    base = config.api_base_url.rstrip("/")
-    return f"{base}/bot{config.bot_token}/sendMessage"
-
-
-def build_telegram_send_message_payload(
-    message: CRDispatchMessage,
-    config: CRTelegramSinkConfig,
-) -> dict[str, object]:
-    """Build the ``sendMessage`` JSON payload from a planned message.
-
-    Does not mutate ``message``.  ``parse_mode`` is included only when
-    configured (non-None); web-preview suppression reflects config.
-    """
-    payload: dict[str, object] = {
-        "chat_id": config.chat_id,
-        "text": message.text,
-        "disable_web_page_preview": config.disable_web_page_preview,
-    }
-    if config.parse_mode is not None:
-        payload["parse_mode"] = config.parse_mode
-    return payload
 
 
 def _sanitize_telegram_detail(raw: str, config: CRTelegramSinkConfig) -> str:
@@ -181,28 +104,6 @@ def _sanitize_telegram_detail(raw: str, config: CRTelegramSinkConfig) -> str:
     return cleaned
 
 
-def _extract_description(body: str) -> str:
-    """Best-effort extraction of Telegram's ``description`` from a JSON body."""
-    try:
-        data = json.loads(body)
-    except (ValueError, TypeError):
-        return ""
-    if isinstance(data, dict):
-        desc = data.get("description")
-        if isinstance(desc, str):
-            return desc
-    return ""
-
-
-def _response_is_ok(body: str) -> bool:
-    """Return True only when the JSON body has ``ok: true``."""
-    try:
-        data = json.loads(body)
-    except (ValueError, TypeError):
-        return False
-    return isinstance(data, dict) and data.get("ok") is True
-
-
 # ---------------------------------------------------------------------------
 # Sink
 # ---------------------------------------------------------------------------
@@ -212,8 +113,7 @@ def _response_is_ok(body: str) -> bool:
 class CRTelegramSink:
     """Telegram-specific dispatch sink (implements ``CRDispatchSink``).
 
-    Submits a planned message to Telegram via an injected ``http_client``; when
-    none is supplied, a stdlib :class:`CRUrllibTelegramHTTPClient` is used.
+    Submits a planned message through the shared Telegram transport.
     The sink never mutates the message, re-checks eligibility, re-renders text,
     or recomputes dispatch decisions.  Transport exceptions from the HTTP
     client propagate (v0.1).
@@ -221,32 +121,38 @@ class CRTelegramSink:
 
     config: CRTelegramSinkConfig
     http_client: CRTelegramHTTPClient | None = None
+    transport: TelegramTransport = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.transport = TelegramTransport(
+            self.config.transport_config,
+            http_client=cast(TelegramHTTPClient | None, self.http_client),
+        )
 
     def submit(
         self, message: CRDispatchMessage, *, message_index: int
     ) -> CRDispatchReceipt:
-        client = self.http_client or CRUrllibTelegramHTTPClient()
-        url = build_telegram_send_message_url(self.config)
-        payload = build_telegram_send_message_payload(message, self.config)
-
-        response = client.post_json(
-            url, payload, timeout_seconds=self.config.timeout_seconds
+        response = self.transport.send_message(
+            chat_id=self.config.chat_id,
+            text=message.text,
+            parse_mode=self.config.parse_mode,
+            disable_web_page_preview=self.config.disable_web_page_preview,
         )
         return self._receipt_from_response(response, message, message_index)
 
     def _receipt_from_response(
         self,
-        response: CRTelegramHTTPResponse,
+        response: TelegramHTTPResponse,
         message: CRDispatchMessage,
         message_index: int,
     ) -> CRDispatchReceipt:
         if 200 <= response.status_code < 300:
-            if _response_is_ok(response.body):
+            if response.ok:
                 return self._receipt(
                     message_index, message,
                     accepted=True, status="accepted", detail="telegram_ok",
                 )
-            description = _extract_description(response.body)
+            description = response.description
             detail = _sanitize_telegram_detail(
                 f"telegram_rejected:{description}" if description
                 else "telegram_rejected",

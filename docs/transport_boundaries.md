@@ -36,9 +36,8 @@ input for deployed installations.
 - No generic notification, alert-cooldown, attachment, or channel configuration
   in `config/config.yaml`.
 
-During the incremental transport migration, low-level Telegram HTTP is confined
-to the CR sink and `trendradar/telegram/transport.py`. The shared transport is
-consumed only by the DR sink and deployment operator sender at this stage.
-Tests enforce both the HTTP implementation allowlist and the shared transport
-import-site allowlist, together with the absence of prohibited generic runtime
-calls.
+Low-level Telegram HTTP is confined to `trendradar/telegram/transport.py`.
+Runtime use of the shared transport is confined to the CR sink, DR sink, and
+deployment operator sender. Tests enforce both the HTTP implementation
+allowlist and the shared transport import-site allowlist, together with the
+absence of prohibited generic runtime calls.

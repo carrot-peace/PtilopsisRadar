@@ -18,7 +18,8 @@ from trendradar.cr.telegram_env import (
     build_cr_telegram_sink_from_env,
     cr_telegram_send_enabled,
 )
-from trendradar.cr.telegram_sink import CRTelegramHTTPResponse, CRTelegramSink
+from trendradar.cr.telegram_sink import CRTelegramSink
+from trendradar.telegram.transport import TelegramHTTPResponse
 
 # Fake values that do NOT match real Telegram token patterns.
 FAKE_TOKEN = "FAKE-TOKEN-000:aaaabbbbcccc"
@@ -354,8 +355,8 @@ class _FakeHTTPClient:
         payload: dict[str, object],
         *,
         timeout_seconds: float,
-    ) -> CRTelegramHTTPResponse:
-        return CRTelegramHTTPResponse(status_code=200, body='{"ok":true}')
+    ) -> TelegramHTTPResponse:
+        return TelegramHTTPResponse(status_code=200, body='{"ok":true}')
 
 
 class TestSinkConstruction(unittest.TestCase):
