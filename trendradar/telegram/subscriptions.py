@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
 );
 """
 
+
+def _execute_schema(
+    connection: sqlite3.Connection,
+    script: str,
+) -> None:
+    for statement in script.split(";"):
+        sql = statement.strip()
+        if sql:
+            connection.execute(sql)
+
+
 @dataclass(frozen=True)
 class UpdateMutationResult:
     applied: bool
@@ -102,17 +113,18 @@ class SubscriptionStore:
         connection = self._connect()
         try:
             connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("BEGIN IMMEDIATE")
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version not in {0, 1, 2, SCHEMA_VERSION}:
                 raise RuntimeError(
                     f"unsupported Telegram subscription schema version: {version}"
                 )
             if version == 0:
-                connection.executescript(_SCHEMA_V1)
+                _execute_schema(connection, _SCHEMA_V1)
                 connection.execute("PRAGMA user_version = 1")
                 version = 1
             if version == 1:
-                connection.executescript(_SCHEMA_V2)
+                _execute_schema(connection, _SCHEMA_V2)
                 connection.execute("PRAGMA user_version = 2")
                 version = 2
             if version == 2:
@@ -131,6 +143,10 @@ class SubscriptionStore:
                         """
                     )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
         finally:
             connection.close()
         os.chmod(self.path, 0o600)

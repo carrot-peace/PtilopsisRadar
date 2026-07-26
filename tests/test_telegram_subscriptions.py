@@ -7,6 +7,7 @@ import hashlib
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -302,6 +303,68 @@ class TestSubscriptionStore(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual(version, SCHEMA_VERSION)
+
+    def test_concurrent_v2_initialization_serializes_migration(self) -> None:
+        path = Path(self.directory.name) / "subscriptions-concurrent-v2.sqlite3"
+        connection = sqlite3.connect(path)
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE subscribers (
+                    chat_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    subscribed_at_epoch INTEGER NOT NULL,
+                    updated_at_epoch INTEGER NOT NULL
+                );
+                CREATE TABLE bot_state (
+                    singleton INTEGER PRIMARY KEY,
+                    last_update_id INTEGER NOT NULL
+                );
+                INSERT INTO bot_state VALUES (1, -1);
+                CREATE TABLE invite_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    issued_by_chat_id TEXT NOT NULL,
+                    created_at_epoch INTEGER NOT NULL,
+                    expires_at_epoch INTEGER NOT NULL,
+                    used_at_epoch INTEGER
+                );
+                PRAGMA user_version = 2;
+                """
+            )
+        finally:
+            connection.close()
+
+        barrier = threading.Barrier(8)
+
+        class CoordinatedStore(SubscriptionStore):
+            def _connect(self) -> sqlite3.Connection:
+                opened = super()._connect()
+                barrier.wait()
+                return opened
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            stores = list(
+                executor.map(
+                    lambda _index: CoordinatedStore(path),
+                    range(8),
+                )
+            )
+
+        self.assertEqual(len(stores), 8)
+        connection = sqlite3.connect(path)
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(subscribers)"
+                ).fetchall()
+            }
+        finally:
+            connection.close()
+        self.assertEqual(version, SCHEMA_VERSION)
+        self.assertIn("lifecycle_version", columns)
 
     def test_token_is_secret_hashed_and_expires_in_fifteen_minutes(self) -> None:
         issue = self._issue()
