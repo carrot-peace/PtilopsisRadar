@@ -63,6 +63,7 @@ class TelegramHTTPClient(Protocol):
         file_field: str,
         file_path: Path,
         timeout_seconds: float,
+        content_type: str | None = None,
     ) -> TelegramHTTPResponse:
         ...
 
@@ -92,6 +93,7 @@ class UrllibTelegramHTTPClient:
         file_field: str,
         file_path: Path,
         timeout_seconds: float,
+        content_type: str | None = None,
     ) -> TelegramHTTPResponse:
         boundary = f"----PtilopsisTelegram{uuid.uuid4().hex}"
         body_parts: list[bytes] = []
@@ -107,11 +109,16 @@ class UrllibTelegramHTTPClient:
                     b"\r\n",
                 )
             )
-        content_type = (
-            mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-        )
-        if content_type.startswith("text/"):
-            content_type = f"{content_type}; charset=utf-8"
+        resolved_content_type = content_type
+        if resolved_content_type is None:
+            resolved_content_type = (
+                mimetypes.guess_type(file_path.name)[0]
+                or "application/octet-stream"
+            )
+            if resolved_content_type.startswith("text/"):
+                resolved_content_type = (
+                    f"{resolved_content_type}; charset=utf-8"
+                )
         body_parts.extend(
             (
                 f"--{boundary}\r\n".encode("ascii"),
@@ -119,7 +126,7 @@ class UrllibTelegramHTTPClient:
                     f'Content-Disposition: form-data; name="{file_field}"; '
                     f'filename="{file_path.name}"\r\n'
                 ).encode("utf-8"),
-                f"Content-Type: {content_type}\r\n\r\n".encode("ascii"),
+                f"Content-Type: {resolved_content_type}\r\n\r\n".encode("ascii"),
                 file_path.read_bytes(),
                 b"\r\n",
                 f"--{boundary}--\r\n".encode("ascii"),
@@ -215,6 +222,7 @@ class TelegramTransport:
         chat_id: str,
         file_path: Path,
         caption: str,
+        content_type: str | None = None,
     ) -> TelegramHTTPResponse:
         return self.client.post_multipart(
             self.endpoint("sendDocument"),
@@ -222,4 +230,5 @@ class TelegramTransport:
             file_field="document",
             file_path=file_path,
             timeout_seconds=self.config.timeout_seconds,
+            content_type=content_type,
         )

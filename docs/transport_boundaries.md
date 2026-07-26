@@ -37,8 +37,8 @@ input for deployed installations.
   in `config/config.yaml`.
 
 During the incremental transport migration, low-level Telegram HTTP is confined
-to the CR sink, DR sink, and `trendradar/telegram/transport.py`. The shared
-transport is consumed only by the deployment operator sender at this stage.
+to the CR sink and `trendradar/telegram/transport.py`. The shared transport is
+consumed only by the DR sink and deployment operator sender at this stage.
 Tests enforce both the HTTP implementation allowlist and the shared transport
 import-site allowlist, together with the absence of prohibited generic runtime
 calls.

@@ -19,6 +19,7 @@ TELEGRAM_HTTP_ALLOWLIST = {
 }
 TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST = {
     "trendradar/deployment/operator_alert.py",
+    "trendradar/dr/telegram_sink.py",
     "trendradar/telegram/__init__.py",
 }
 FORBIDDEN_RUNTIME_SYMBOLS = {

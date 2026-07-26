@@ -88,6 +88,7 @@ class DRTelegramSink:
                     chat_id=self.config.chat_id,
                     file_path=html_path,
                     caption="DR HTML",
+                    content_type="text/html; charset=utf-8",
                 )
                 document_accepted = doc_response.ok
                 if not document_accepted:

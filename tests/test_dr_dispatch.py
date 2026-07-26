@@ -412,9 +412,18 @@ class TestDREnvAndSink(unittest.TestCase):
                 return TelegramHTTPResponse(200, '{"ok": true}')
 
             def post_multipart(
-                self, url, *, fields, file_field, file_path, timeout_seconds
+                self,
+                url,
+                *,
+                fields,
+                file_field,
+                file_path,
+                timeout_seconds,
+                content_type=None,
             ):
-                self.multipart_payloads.append((url, fields, file_field, file_path))
+                self.multipart_payloads.append(
+                    (url, fields, file_field, file_path, content_type)
+                )
                 return TelegramHTTPResponse(200, '{"ok": true}')
 
         with tempfile.TemporaryDirectory() as td:
@@ -443,6 +452,10 @@ class TestDREnvAndSink(unittest.TestCase):
         self.assertEqual(fake.json_payloads[0][1]["chat_id"], FAKE_CHAT)
         self.assertEqual(fake.json_payloads[0][1]["parse_mode"], "HTML")
         self.assertEqual(fake.multipart_payloads[0][1]["caption"], "DR HTML")
+        self.assertEqual(
+            fake.multipart_payloads[0][4],
+            "text/html; charset=utf-8",
+        )
 
     def test_document_failure_keeps_text_accepted(self) -> None:
         class FakeClient:
@@ -450,7 +463,14 @@ class TestDREnvAndSink(unittest.TestCase):
                 return TelegramHTTPResponse(200, '{"ok": true}')
 
             def post_multipart(
-                self, url, *, fields, file_field, file_path, timeout_seconds
+                self,
+                url,
+                *,
+                fields,
+                file_field,
+                file_path,
+                timeout_seconds,
+                content_type=None,
             ):
                 return TelegramHTTPResponse(400, '{"ok": false}')
 
