@@ -35,16 +35,47 @@ class TestDockerEnvExample(unittest.TestCase):
         self.assertEqual(values["PTILOPSIS_CR_TELEGRAM_SEND"], "0")
         self.assertEqual(values["PTILOPSIS_DR_DISPATCH_MODE"], "off")
         self.assertEqual(values["PTILOPSIS_DR_TELEGRAM_SEND"], "0")
+        self.assertEqual(
+            values["PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED"],
+            "0",
+        )
 
         for name in (
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_OWNER_CHAT_IDS",
+            "TELEGRAM_API_BASE_URL",
+            "TELEGRAM_TIMEOUT_SECONDS",
+            "PTILOPSIS_TELEGRAM_SUBSCRIPTION_DB_PATH",
+            "PTILOPSIS_CR_TELEGRAM_PARSE_MODE",
+            "PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW",
+            "PTILOPSIS_DR_TELEGRAM_ATTACH_HTML",
+            "PTILOPSIS_DR_TELEGRAM_PARSE_MODE",
+        ):
+            self.assertIn(name, values)
+
+    def test_removed_pipeline_credentials_are_absent_everywhere(self):
+        removed = (
             "PTILOPSIS_CR_TELEGRAM_BOT_TOKEN",
             "PTILOPSIS_CR_TELEGRAM_CHAT_ID",
             "PTILOPSIS_CR_TELEGRAM_API_BASE_URL",
             "PTILOPSIS_CR_TELEGRAM_TIMEOUT_SECONDS",
-            "PTILOPSIS_CR_TELEGRAM_PARSE_MODE",
-            "PTILOPSIS_CR_TELEGRAM_DISABLE_WEB_PAGE_PREVIEW",
-        ):
-            self.assertIn(name, values)
+            "PTILOPSIS_DR_TELEGRAM_BOT_TOKEN",
+            "PTILOPSIS_DR_TELEGRAM_CHAT_ID",
+            "PTILOPSIS_DR_TELEGRAM_API_BASE_URL",
+            "PTILOPSIS_DR_TELEGRAM_TIMEOUT_SECONDS",
+        )
+        sources = (
+            ROOT / "docker" / ".env.example",
+            ROOT / "docker" / "docker-compose.yml",
+            ROOT / "docker" / "docker-compose-build.yml",
+            ROOT / "docker" / "manage.py",
+            ROOT / ".github" / "workflows" / "crawler.yml",
+        )
+        for path in sources:
+            text = path.read_text(encoding="utf-8")
+            for name in removed:
+                with self.subTest(path=path, name=name):
+                    self.assertNotIn(name, text)
 
     def test_compose_files_honor_configured_timezone(self):
         for relative_path in (
@@ -55,6 +86,15 @@ class TestDockerEnvExample(unittest.TestCase):
             self.assertIn("TZ=${TZ:-Asia/Shanghai}", text)
             self.assertIn(
                 "PTILOPSIS_CR_DISPATCH_MODE=${PTILOPSIS_CR_DISPATCH_MODE:-off}",
+                text,
+            )
+            self.assertIn(
+                "PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED="
+                "${PTILOPSIS_TELEGRAM_SUBSCRIPTIONS_ENABLED:-0}",
+                text,
+            )
+            self.assertIn(
+                "TELEGRAM_OWNER_CHAT_IDS=${TELEGRAM_OWNER_CHAT_IDS:-}",
                 text,
             )
 
