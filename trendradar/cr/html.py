@@ -26,23 +26,22 @@ from trendradar.cr.decision import (
 from trendradar.cr.cooldown_policy import (
     CRCooldownDecision,
     CRCooldownPolicy,
-    decide_cr_cooldown,
 )
-from trendradar.cr.event_identity import build_cr_event_identity_from_candidate
-from trendradar.cr.presentation import (
-    CRPresentedCandidate,
-    sort_cr_presented_candidates,
-)
+from trendradar.cr.presentation import CRPresentedCandidate
 from trendradar.cr.repeat_preview import (
     CRRepeatPreview,
     CRSeenEventState,
-    preview_cr_repeat,
+)
+from trendradar.cr.render_model import (
+    CRAuditRenderModel,
+    CRCandidateRenderView,
+    build_cr_audit_render_model,
 )
 from trendradar.cr.scoring import CRScoreResult
 from trendradar.cr.state_transition_preview import (
     CREventStateTransitionPreview,
 )
-from trendradar.cr.input_health import CRInputHealth, input_health_to_json_dict
+from trendradar.cr.input_health import CRInputHealth
 
 
 # ---------------------------------------------------------------------------
@@ -275,14 +274,13 @@ def _render_debug(pc: CRPresentedCandidate) -> list[str]:
     return lines
 
 
-def _render_event_identity(pc: CRPresentedCandidate) -> list[str]:
+def _render_event_identity(identity) -> list[str]:
     """Render audit-only event identity evidence for one candidate.
 
     Observability only — no dedupe/cooldown enforcement, no dispatch effect.
     Every value is HTML-escaped text content; no anchors/hrefs are added and
     the raw verbose ``cluster_key`` is never emitted (only its fingerprint).
     """
-    identity = build_cr_event_identity_from_candidate(pc.candidate)
     rows: list[tuple[str, str | None]] = [
         ("Event Key", identity.event_key),
         ("Key Basis", identity.key_basis),
@@ -450,9 +448,11 @@ def _render_state_transition_preview(
 
 
 def _render_candidate_card(
-    pc: CRPresentedCandidate, config: CRHTMLRenderConfig
+    view: CRCandidateRenderView,
+    config: CRHTMLRenderConfig,
 ) -> list[str]:
     """Render a single candidate card."""
+    pc = view.presented
     lines: list[str] = []
     level = pc.decision_level
 
@@ -500,34 +500,24 @@ def _render_candidate_card(
 
     lines.append("      </dl>")
 
-    if config.include_event_identity:
-        lines.extend(_render_event_identity(pc))
+    if config.include_event_identity and view.identity is not None:
+        lines.extend(_render_event_identity(view.identity))
 
-    if config.include_repeat_preview:
-        identity = build_cr_event_identity_from_candidate(pc.candidate)
-        seen_state = (
-            config.seen_event_states.get(identity.event_key)
-            if config.seen_event_states is not None
-            else None
-        )
-        preview = preview_cr_repeat(
-            event_key=identity.event_key,
-            current_decision_level=pc.decision_level,
-            current_score=pc.total_score,
-            seen_state=seen_state,
-            prior_state_snapshot_provided=config.seen_event_states is not None,
-        )
-        lines.extend(_render_repeat_preview(preview))
+    if (
+        config.include_repeat_preview
+        and view.repeat_preview is not None
+    ):
+        lines.extend(_render_repeat_preview(view.repeat_preview))
 
         # Cooldown policy preview (audit-only; no enforcement). Gated on
         # repeat preview being enabled so a preview already exists.
-        if config.include_cooldown_decision:
-            decision = decide_cr_cooldown(
-                event_key=identity.event_key,
-                repeat_preview=preview,
-                policy=config.cooldown_policy,
+        if (
+            config.include_cooldown_decision
+            and view.cooldown_decision is not None
+        ):
+            lines.extend(
+                _render_cooldown_decision(view.cooldown_decision)
             )
-            lines.extend(_render_cooldown_decision(decision))
 
     if config.include_score_components:
         lines.extend(_render_score_components_table(pc.score_result))
@@ -543,20 +533,21 @@ def _render_candidate_card(
 
 
 def _render_section_body(
-    candidates: list[CRPresentedCandidate], config: CRHTMLRenderConfig
+    candidates: tuple[CRCandidateRenderView, ...],
+    config: CRHTMLRenderConfig,
 ) -> list[str]:
     """Render the body of a decision section (cards or empty notice)."""
     if not candidates:
         return ["      <p><em>No candidates.</em></p>"]
     lines: list[str] = []
-    for pc in candidates:
-        lines.extend(_render_candidate_card(pc, config))
+    for view in candidates:
+        lines.extend(_render_candidate_card(view, config))
     return lines
 
 
 def _render_section(
     level: str,
-    candidates: list[CRPresentedCandidate],
+    candidates: tuple[CRCandidateRenderView, ...],
     config: CRHTMLRenderConfig,
 ) -> list[str]:
     """Render one decision section, optionally collapsing its contents."""
@@ -590,56 +581,23 @@ def _render_section(
 # ---------------------------------------------------------------------------
 
 
-def render_cr_html_audit(
-    candidates: list[CRPresentedCandidate],
+def render_cr_html_model(
+    model: CRAuditRenderModel,
     *,
-    run_label: str,
     config: CRHTMLRenderConfig | None = None,
-    urgent_threshold: float = 80.0,
 ) -> str:
-    """Render all presented candidates as a single HTML audit document.
+    """Purely format a precomputed CR audit model as HTML.
 
-    Includes every decision level (urgent / alert / watch / suppress) without
-    filtering.  Does NOT re-score, re-decide, filter, or write files.
-
-    Parameters
-    ----------
-    candidates:
-        All presented candidates — not just CR-A selected ones.
-    run_label:
-        Human-readable run label (e.g. ``"2026-06-09 23:30"``).
-    config:
-        Rendering config.  Defaults to ``CRHTMLRenderConfig()``.
-    urgent_threshold:
-        Score threshold for counting high-score suppressed candidates.
-        Defaults to 80.0.
-
-    Returns
-    -------
-    str
-        Self-contained HTML document text (no external assets).
+    All identity, repeat, cooldown, health, sorting, and grouping work must
+    already be represented by ``model``.
     """
     if config is None:
         config = CRHTMLRenderConfig()
 
-    # Sort using existing PR9f sort (returns new list, does not mutate).
-    sorted_candidates = sort_cr_presented_candidates(candidates)
-
-    # High-score suppressed count.
-    high_score_suppressed = sum(
-        1
-        for pc in sorted_candidates
-        if pc.decision_level == DECISION_SUPPRESS
-        and pc.total_score >= urgent_threshold
-    )
-
-    # Group by level.
-    by_level: dict[str, list[CRPresentedCandidate]] = {
-        lv: [] for lv in _SECTION_ORDER
+    by_level = {
+        section.level: section.candidates
+        for section in model.sections
     }
-    for pc in sorted_candidates:
-        if pc.decision_level in by_level:
-            by_level[pc.decision_level].append(pc)
 
     title_text = _escape_html_text(config.title)
 
@@ -657,19 +615,21 @@ def render_cr_html_audit(
     lines.append(f"    <h1>{title_text}</h1>")
     lines.append('    <section class="run-meta">')
     lines.append(
-        f"      <p><strong>Run:</strong> {_escape_html_text(run_label)}</p>"
+        f"      <p><strong>Run:</strong> "
+        f"{_escape_html_text(model.run_label)}</p>"
     )
     lines.append(
-        f"      <p><strong>Candidates:</strong> {len(sorted_candidates)}</p>"
+        f"      <p><strong>Candidates:</strong> "
+        f"{len(model.candidates)}</p>"
     )
     lines.append(
         "      <p><strong>High-score suppressed candidates:</strong> "
-        f"{high_score_suppressed}</p>"
+        f"{model.high_score_suppressed_count}</p>"
     )
     lines.append("    </section>")
 
-    if config.input_health is not None:
-        health = input_health_to_json_dict(config.input_health)
+    if model.input_health is not None:
+        health = model.input_health
         snapshot = health["snapshot"]
         reasons = ", ".join(health["reasons"]) or "none"
         warnings = ", ".join(health["warnings"]) or "none"
@@ -710,10 +670,12 @@ def render_cr_html_audit(
 
     if (
         config.include_state_transition_preview
-        and config.state_transition_preview is not None
+        and model.state_transition_preview is not None
     ):
         lines.extend(
-            _render_state_transition_preview(config.state_transition_preview)
+            _render_state_transition_preview(
+                model.state_transition_preview
+            )
         )
 
     for level in _SECTION_ORDER:
@@ -724,3 +686,28 @@ def render_cr_html_audit(
     lines.append("</html>")
 
     return "\n".join(lines)
+
+
+def render_cr_html_audit(
+    candidates: list[CRPresentedCandidate],
+    *,
+    run_label: str,
+    config: CRHTMLRenderConfig | None = None,
+    urgent_threshold: float = 80.0,
+) -> str:
+    """Compatibility façade that prepares evidence before pure rendering."""
+    if config is None:
+        config = CRHTMLRenderConfig()
+    model = build_cr_audit_render_model(
+        candidates,
+        run_label=run_label,
+        urgent_threshold=urgent_threshold,
+        include_event_identity=config.include_event_identity,
+        include_repeat_preview=config.include_repeat_preview,
+        seen_event_states=config.seen_event_states,
+        include_cooldown_decision=config.include_cooldown_decision,
+        cooldown_policy=config.cooldown_policy,
+        input_health=config.input_health,
+        state_transition_preview=config.state_transition_preview,
+    )
+    return render_cr_html_model(model, config=config)

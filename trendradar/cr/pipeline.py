@@ -30,11 +30,12 @@ from trendradar.cr.decision import (
     count_high_score_suppressed,
     decide_cr_candidates,
 )
-from trendradar.cr.html import CRHTMLRenderConfig, render_cr_html_audit
+from trendradar.cr.html import CRHTMLRenderConfig, render_cr_html_model
 from trendradar.cr.markdown import (
     CRMarkdownRenderConfig,
-    render_cr_markdown_audit,
+    render_cr_markdown_model,
 )
+from trendradar.cr.render_model import build_cr_audit_render_model
 from trendradar.cr.models import (
     CRCandidate,
     CRClusterConfig,
@@ -234,19 +235,41 @@ def build_cr_pipeline_from_primitives(
     cr_a_text = render_cr_a_text(run, config=render_cfg.text)
 
     # 8. Render Markdown audit (all presented candidates).
-    markdown_audit_text = render_cr_markdown_audit(
+    markdown_config = render_cfg.markdown or CRMarkdownRenderConfig()
+    markdown_model = build_cr_audit_render_model(
         presented_sorted,
         run_label=run_label,
-        config=render_cfg.markdown,
         urgent_threshold=urgent_threshold,
+        include_event_identity=markdown_config.include_event_identity,
+        include_repeat_preview=markdown_config.include_repeat_preview,
+        seen_event_states=markdown_config.seen_event_states,
+        include_cooldown_decision=markdown_config.include_cooldown_decision,
+        cooldown_policy=markdown_config.cooldown_policy,
+        input_health=markdown_config.input_health,
+        state_transition_preview=markdown_config.state_transition_preview,
+    )
+    markdown_audit_text = render_cr_markdown_model(
+        markdown_model,
+        config=markdown_config,
     )
 
     # 9. Render HTML audit (all presented candidates).
-    html_audit_text = render_cr_html_audit(
+    html_config = render_cfg.html or CRHTMLRenderConfig()
+    html_model = build_cr_audit_render_model(
         presented_sorted,
         run_label=run_label,
-        config=render_cfg.html,
         urgent_threshold=urgent_threshold,
+        include_event_identity=html_config.include_event_identity,
+        include_repeat_preview=html_config.include_repeat_preview,
+        seen_event_states=html_config.seen_event_states,
+        include_cooldown_decision=html_config.include_cooldown_decision,
+        cooldown_policy=html_config.cooldown_policy,
+        input_health=html_config.input_health,
+        state_transition_preview=html_config.state_transition_preview,
+    )
+    html_audit_text = render_cr_html_model(
+        html_model,
+        config=html_config,
     )
 
     # 10. Return.
