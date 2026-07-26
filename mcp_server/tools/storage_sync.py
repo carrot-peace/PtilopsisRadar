@@ -6,7 +6,9 @@
 """
 
 import logging
+from contextlib import redirect_stdout
 from datetime import datetime
+from io import StringIO
 import os
 from pathlib import Path
 import re
@@ -117,6 +119,16 @@ class StorageSyncTools:
         except Exception as e:
             logger.warning("Failed to create remote storage backend: %s", e)
             return None
+
+    def cleanup(self) -> None:
+        """Release the cached remote backend without polluting stdio."""
+        backend, self._remote_backend = self._remote_backend, None
+        if backend is None:
+            return
+        with redirect_stdout(StringIO()) as output:
+            backend.cleanup()
+        if output.getvalue():
+            logger.debug("Suppressed remote backend cleanup output")
 
     def _get_local_data_dir(self) -> Path:
         """获取本地数据目录"""

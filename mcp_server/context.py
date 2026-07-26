@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -17,6 +19,9 @@ from .tools.data_query import DataQueryTools
 from .tools.search_tools import SearchTools
 from .tools.storage_sync import StorageSyncTools
 from .tools.system import SystemManagementTools
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +97,36 @@ class MCPContext:
             return self.tools[name]
         except KeyError as exc:
             raise KeyError(f"MCP tool dependency is not configured: {name}") from exc
+
+    async def aclose(self) -> None:
+        """Release each owned dependency once when the application stops."""
+        seen: set[int] = set()
+        for name, tool in self.tools.items():
+            identity = id(tool)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            try:
+                callback = next(
+                    (
+                        getattr(tool, method_name)
+                        for method_name in ("aclose", "close", "cleanup")
+                        if inspect.getattr_static(tool, method_name, None)
+                        is not None
+                    ),
+                    None,
+                )
+                if callback is None:
+                    continue
+                result = callback()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                logger.warning(
+                    "Failed to close MCP dependency %s: %s",
+                    name,
+                    exc,
+                )
 
 
 def get_request_context() -> MCPContext:

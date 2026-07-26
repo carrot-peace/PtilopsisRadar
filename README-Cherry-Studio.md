@@ -157,3 +157,6 @@ HTTP 模式默认仅监听本机且禁止写操作。若需要跨机器访问，
 `MCP_HTTP_BEARER_TOKEN` 并在客户端发送 `Authorization: Bearer <token>`；
 只有受信任环境才应额外设置 `MCP_HTTP_ALLOW_WRITE=true`。直接绑定公网地址而
 没有认证令牌时，服务会拒绝启动。
+
+内部模块边界、生命周期和扩展规则见
+[`docs/mcp-vnext-architecture.md`](docs/mcp-vnext-architecture.md)。
