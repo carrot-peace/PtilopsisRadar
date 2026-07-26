@@ -5,6 +5,7 @@ v2.0.0: 仅支持 SQLite 数据库，移除 TXT 文件支持
 新存储结构：output/{type}/{date}.db
 """
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -30,11 +31,14 @@ class ParserService:
         """
         if project_root is None:
             current_file = Path(__file__)
-            self.project_root = current_file.parent.parent.parent
+            self.project_root = current_file.parent.parent.parent.resolve()
         else:
-            self.project_root = Path(project_root)
+            self.project_root = Path(project_root).expanduser().resolve()
 
         self.cache = get_cache()
+        self._cache_namespace = hashlib.sha256(
+            str(self.project_root).encode("utf-8")
+        ).hexdigest()[:16]
         self.query_repository = query_repository or SQLiteQueryRepository(
             self.project_root / "output"
         )
@@ -63,6 +67,10 @@ class ParserService:
         if date is None:
             date = datetime.now()
         return date.strftime("%Y-%m-%d")
+
+    def cache_key(self, key: str) -> str:
+        """Scope a shared-cache key to this project root."""
+        return f"project:{self._cache_namespace}:{key}"
 
     def _get_db_path(
         self,
@@ -119,7 +127,9 @@ class ParserService:
         """
         date_str = self.get_date_folder_name(date)
         platform_key = ','.join(sorted(platform_ids)) if platform_ids else 'all'
-        cache_key = f"read_all:{db_type}:{date_str}:{platform_key}"
+        cache_key = self.cache_key(
+            f"read_all:{db_type}:{date_str}:{platform_key}"
+        )
 
         is_today = (date is None) or (date.date() == datetime.now().date())
         ttl = 900 if is_today else 900

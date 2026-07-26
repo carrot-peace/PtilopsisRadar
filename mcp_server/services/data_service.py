@@ -64,7 +64,9 @@ class DataService:
             DataNotFoundError: 数据不存在
         """
         # 尝试从缓存获取
-        cache_key = f"latest_news:{','.join(platforms or [])}:{limit}:{include_url}"
+        cache_key = self.parser.cache_key(
+            f"latest_news:{','.join(platforms or [])}:{limit}:{include_url}"
+        )
         cached = self.cache.get(cache_key, ttl=900)  # 15分钟缓存
         if cached:
             return cached
@@ -149,7 +151,10 @@ class DataService:
         """
         # 尝试从缓存获取
         date_str = target_date.strftime("%Y-%m-%d")
-        cache_key = f"news_by_date:{date_str}:{','.join(platforms or [])}:{limit}:{include_url}"
+        cache_key = self.parser.cache_key(
+            f"news_by_date:{date_str}:{','.join(platforms or [])}:"
+            f"{limit}:{include_url}"
+        )
         cached = self.cache.get(cache_key, ttl=900)  # 15分钟缓存
         if cached:
             return cached
@@ -352,7 +357,9 @@ class DataService:
             DataNotFoundError: 数据不存在
         """
         # 尝试从缓存获取
-        cache_key = f"trending_topics:{top_n}:{mode}:{extract_mode}"
+        cache_key = self.parser.cache_key(
+            f"trending_topics:{top_n}:{mode}:{extract_mode}"
+        )
         cached = self.cache.get(cache_key, ttl=900)  # 15分钟缓存
         if cached:
             return cached
@@ -611,7 +618,10 @@ class DataService:
             DataNotFoundError: 数据不存在
         """
         days = min(max(days, 1), 30)  # 限制 1-30 天
-        cache_key = f"latest_rss:{','.join(feeds or [])}:{days}:{limit}:{include_summary}"
+        cache_key = self.parser.cache_key(
+            f"latest_rss:{','.join(feeds or [])}:{days}:{limit}:"
+            f"{include_summary}"
+        )
         cached = self.cache.get(cache_key, ttl=900)
         if cached:
             return cached
@@ -700,7 +710,10 @@ class DataService:
         Returns:
             匹配的 RSS 条目列表（按 URL 去重）
         """
-        cache_key = f"search_rss:{keyword}:{','.join(feeds or [])}:{days}:{limit}:{include_summary}"
+        cache_key = self.parser.cache_key(
+            f"search_rss:{keyword}:{','.join(feeds or [])}:{days}:{limit}:"
+            f"{include_summary}"
+        )
         cached = self.cache.get(cache_key, ttl=900)
         if cached:
             return cached
@@ -769,7 +782,7 @@ class DataService:
         Returns:
             RSS 源状态信息
         """
-        cache_key = "rss_feeds_status"
+        cache_key = self.parser.cache_key("rss_feeds_status")
         cached = self.cache.get(cache_key, ttl=900)
         if cached:
             return cached

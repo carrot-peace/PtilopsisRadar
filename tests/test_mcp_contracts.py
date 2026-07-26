@@ -15,6 +15,9 @@ from mcp.client.stdio import stdio_client
 
 from mcp_server.context import MCPContext
 from mcp_server.server import create_server, mcp, run_server
+from mcp_server.services.cache_service import CacheService
+from mcp_server.services.data_service import DataService
+from mcp_server.services.parser_service import ParserService
 
 
 EXPECTED_TOOLS = {
@@ -141,6 +144,44 @@ class MCPApplicationFactoryTests(unittest.TestCase):
         self.assertEqual(
             set(asyncio.run(second.get_resources())),
             EXPECTED_RESOURCES,
+        )
+
+    def test_shared_cache_is_isolated_by_project_root(self):
+        cache = CacheService()
+        first_parser = ParserService(
+            "/tmp/first",
+            query_repository=SimpleNamespace(),
+        )
+        second_parser = ParserService(
+            "/tmp/second",
+            query_repository=SimpleNamespace(),
+        )
+        first_parser.cache = cache
+        second_parser.cache = cache
+
+        first = DataService.__new__(DataService)
+        first.parser = first_parser
+        first.cache = cache
+        second = DataService.__new__(DataService)
+        second.parser = second_parser
+        second.cache = cache
+
+        first.parser.read_all_titles_for_date = lambda **kwargs: (
+            {"source": {"first": {"ranks": [1]}}},
+            {"source": "First"},
+            {},
+        )
+        second.parser.read_all_titles_for_date = lambda **kwargs: (
+            {"source": {"second": {"ranks": [1]}}},
+            {"source": "Second"},
+            {},
+        )
+
+        self.assertEqual(first.get_latest_news()[0]["title"], "first")
+        self.assertEqual(second.get_latest_news()[0]["title"], "second")
+        self.assertNotEqual(
+            first_parser.cache_key("latest_news"),
+            second_parser.cache_key("latest_news"),
         )
 
 
