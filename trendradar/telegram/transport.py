@@ -43,6 +43,10 @@ class TelegramHTTPResponse:
         value = self.json_object().get("description")
         return value if isinstance(value, str) else ""
 
+    @property
+    def result(self) -> object:
+        return self.json_object().get("result")
+
 
 @runtime_checkable
 class TelegramHTTPClient(Protocol):
@@ -171,6 +175,32 @@ class TelegramTransportConfig:
             raise ValueError("timeout_seconds must be positive")
 
 
+def transport_config_from_env(
+    env: Mapping[str, str],
+) -> TelegramTransportConfig:
+    bot_token = str(env.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not bot_token:
+        raise ValueError("TELEGRAM_BOT_TOKEN is required")
+    api_base_url = (
+        str(env.get("TELEGRAM_API_BASE_URL") or "").strip()
+        or DEFAULT_API_BASE_URL
+    )
+    timeout_raw = str(env.get("TELEGRAM_TIMEOUT_SECONDS") or "").strip()
+    try:
+        timeout_seconds = (
+            float(timeout_raw) if timeout_raw else DEFAULT_TIMEOUT_SECONDS
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "TELEGRAM_TIMEOUT_SECONDS must be a positive number"
+        ) from exc
+    return TelegramTransportConfig(
+        bot_token=bot_token,
+        api_base_url=api_base_url,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 @dataclass
 class TelegramTransport:
     config: TelegramTransportConfig
@@ -195,6 +225,23 @@ class TelegramTransport:
             f"/bot{self.config.bot_token}/{method}"
         )
 
+    def _post_json(
+        self,
+        method: str,
+        payload: Mapping[str, object],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> TelegramHTTPResponse:
+        return self.client.post_json(
+            self.endpoint(method),
+            payload,
+            timeout_seconds=(
+                self.config.timeout_seconds
+                if timeout_seconds is None
+                else timeout_seconds
+            ),
+        )
+
     def send_message(
         self,
         *,
@@ -210,11 +257,7 @@ class TelegramTransport:
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
-        return self.client.post_json(
-            self.endpoint("sendMessage"),
-            payload,
-            timeout_seconds=self.config.timeout_seconds,
-        )
+        return self._post_json("sendMessage", payload)
 
     def send_document(
         self,
@@ -232,3 +275,27 @@ class TelegramTransport:
             timeout_seconds=self.config.timeout_seconds,
             content_type=content_type,
         )
+
+    def get_updates(
+        self,
+        *,
+        offset: int,
+        timeout_seconds: int = 50,
+    ) -> TelegramHTTPResponse:
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        return self._post_json(
+            "getUpdates",
+            {
+                "offset": offset,
+                "timeout": timeout_seconds,
+                "allowed_updates": ["message"],
+            },
+            timeout_seconds=max(
+                self.config.timeout_seconds,
+                float(timeout_seconds + 5),
+            ),
+        )
+
+    def get_webhook_info(self) -> TelegramHTTPResponse:
+        return self._post_json("getWebhookInfo", {})
