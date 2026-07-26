@@ -56,6 +56,33 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
 );
 """
 
+
+def _execute_schema(
+    connection: sqlite3.Connection,
+    script: str,
+) -> None:
+    for statement in script.split(";"):
+        sql = statement.strip()
+        if sql:
+            connection.execute(sql)
+
+
+def _enable_wal_mode(connection: sqlite3.Connection) -> None:
+    """Enable WAL despite concurrent initializers racing on the pragma."""
+    deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            connection.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if (
+                "locked" not in str(exc).lower()
+                or time.monotonic() >= deadline
+            ):
+                raise
+            time.sleep(0.01)
+
+
 @dataclass(frozen=True)
 class UpdateMutationResult:
     applied: bool
@@ -101,18 +128,19 @@ class SubscriptionStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = self._connect()
         try:
-            connection.execute("PRAGMA journal_mode = WAL")
+            _enable_wal_mode(connection)
+            connection.execute("BEGIN IMMEDIATE")
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version not in {0, 1, 2, SCHEMA_VERSION}:
                 raise RuntimeError(
                     f"unsupported Telegram subscription schema version: {version}"
                 )
             if version == 0:
-                connection.executescript(_SCHEMA_V1)
+                _execute_schema(connection, _SCHEMA_V1)
                 connection.execute("PRAGMA user_version = 1")
                 version = 1
             if version == 1:
-                connection.executescript(_SCHEMA_V2)
+                _execute_schema(connection, _SCHEMA_V2)
                 connection.execute("PRAGMA user_version = 2")
                 version = 2
             if version == 2:
@@ -131,6 +159,10 @@ class SubscriptionStore:
                         """
                     )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
         finally:
             connection.close()
         os.chmod(self.path, 0o600)
