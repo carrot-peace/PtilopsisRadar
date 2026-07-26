@@ -17,6 +17,7 @@ TELEGRAM_HTTP_ALLOWLIST = {
     "trendradar/telegram/transport.py",
 }
 TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST = {
+    "trendradar/cr/telegram_sink.py",
     "trendradar/deployment/operator_alert.py",
     "trendradar/dr/telegram_sink.py",
     "trendradar/telegram/__init__.py",

@@ -6,10 +6,10 @@ A Telegram-specific implementation of the PR9m ``CRDispatchSink`` boundary.
 It can submit a planned :class:`CRDispatchMessage` to Telegram's send-message
 endpoint when explicitly injected by the caller.
 
-This PR adds the sink module only.  It is NOT wired into the CR runtime or
-default dispatch execution — nothing sends by default.  There is no
-configuration wiring, no rate limiting, no repeat-suppression state, no
-retry / backoff, and no scheduled runtime sending.
+The adapter is wired into the CR runtime only when live dispatch mode and the
+CR-specific Telegram send gate are both enabled.  Nothing sends by default.
+There is no rate limiting, repeat-suppression state, retry / backoff, or
+scheduled runtime sending.
 
 Telegram HTTP details live in :mod:`trendradar.telegram.transport`; this module
 retains only CR configuration and receipt semantics.
@@ -27,7 +27,13 @@ from trendradar.telegram.transport import (
     TelegramHTTPResponse,
     TelegramTransport,
     TelegramTransportConfig,
+    UrllibTelegramHTTPClient,
 )
+
+
+CRTelegramHTTPResponse = TelegramHTTPResponse
+CRTelegramHTTPClient = TelegramHTTPClient
+CRUrllibTelegramHTTPClient = UrllibTelegramHTTPClient
 
 
 # ---------------------------------------------------------------------------
@@ -49,14 +55,23 @@ class CRTelegramSinkConfig:
     timeout_seconds: float = 10.0
     parse_mode: str | None = None
     disable_web_page_preview: bool = True
+    transport_config: TelegramTransportConfig = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if not self.chat_id:
             raise ValueError("chat_id must be non-empty")
-        TelegramTransportConfig(
-            bot_token=self.bot_token,
-            api_base_url=self.api_base_url,
-            timeout_seconds=self.timeout_seconds,
+        object.__setattr__(
+            self,
+            "transport_config",
+            TelegramTransportConfig(
+                bot_token=self.bot_token,
+                api_base_url=self.api_base_url,
+                timeout_seconds=self.timeout_seconds,
+            ),
         )
 
 
@@ -92,19 +107,18 @@ class CRTelegramSink:
 
     config: CRTelegramSinkConfig
     http_client: TelegramHTTPClient | None = None
+    transport: TelegramTransport = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.transport = TelegramTransport(
+            self.config.transport_config,
+            http_client=self.http_client,
+        )
 
     def submit(
         self, message: CRDispatchMessage, *, message_index: int
     ) -> CRDispatchReceipt:
-        transport = TelegramTransport(
-            TelegramTransportConfig(
-                bot_token=self.config.bot_token,
-                api_base_url=self.config.api_base_url,
-                timeout_seconds=self.config.timeout_seconds,
-            ),
-            http_client=self.http_client,
-        )
-        response = transport.send_message(
+        response = self.transport.send_message(
             chat_id=self.config.chat_id,
             text=message.text,
             parse_mode=self.config.parse_mode,

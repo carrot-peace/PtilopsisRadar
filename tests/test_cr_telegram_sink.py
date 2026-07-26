@@ -30,11 +30,20 @@ from trendradar.cr.dispatch_executor import (
     execute_cr_dispatch_plan,
 )
 from trendradar.cr.dispatch_plan import CRDispatchMessage, CRDispatchPlan
+from trendradar.cr import (
+    CRTelegramHTTPClient,
+    CRTelegramHTTPResponse,
+    CRUrllibTelegramHTTPClient,
+)
 from trendradar.cr.telegram_sink import (
     CRTelegramSink,
     CRTelegramSinkConfig,
 )
-from trendradar.telegram.transport import TelegramHTTPResponse
+from trendradar.telegram.transport import (
+    TelegramHTTPClient,
+    TelegramHTTPResponse,
+    UrllibTelegramHTTPClient,
+)
 
 
 # Fake, obviously-not-real credentials used throughout.
@@ -152,6 +161,14 @@ class TestConfigShape(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             resp.status_code = 500  # type: ignore[misc]
 
+    def test_legacy_transport_exports_remain_compatible(self):
+        self.assertIs(CRTelegramHTTPResponse, TelegramHTTPResponse)
+        self.assertIs(CRTelegramHTTPClient, TelegramHTTPClient)
+        self.assertIs(
+            CRUrllibTelegramHTTPClient,
+            UrllibTelegramHTTPClient,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Group B — Shared transport integration
@@ -159,6 +176,19 @@ class TestConfigShape(unittest.TestCase):
 
 
 class TestSharedTransportIntegration(unittest.TestCase):
+    def test_sink_reuses_validated_transport_config(self):
+        fake = _FakeHTTPClient(_ok_response())
+        config = _config()
+        sink = CRTelegramSink(config=config, http_client=fake)
+        transport = sink.transport
+
+        sink.submit(_message(), message_index=0)
+        sink.submit(_message(), message_index=1)
+
+        self.assertIs(sink.transport, transport)
+        self.assertIs(transport.config, config.transport_config)
+        self.assertEqual(len(fake.calls), 2)
+
     def test_token_never_in_receipt_detail(self):
         sink = CRTelegramSink(config=_config(), http_client=_FakeHTTPClient(_ok_response()))
         receipt = sink.submit(_message(), message_index=0)
