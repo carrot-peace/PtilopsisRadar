@@ -137,7 +137,11 @@ class TestSubscriptionCommandHandler(unittest.TestCase):
     def test_start_reactivates_blocked_but_not_unsubscribed(self) -> None:
         first, _ = self._issue()
         self._handle(2, 20, f"/subscribe {first}")
-        self.store.mark_blocked("20")
+        target = self.store.active_delivery_targets()[0]
+        self.store.mark_blocked(
+            "20",
+            expected_lifecycle_version=target.lifecycle_version,
+        )
         self._handle(3, 20, "/start")
         self.assertEqual(self.store.subscriber_status("20"), "active")
 

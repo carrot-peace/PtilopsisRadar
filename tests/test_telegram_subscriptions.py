@@ -13,6 +13,7 @@ from pathlib import Path
 
 from trendradar.telegram.subscriptions import (
     SCHEMA_VERSION,
+    SubscriberDeliveryTarget,
     SubscriptionStore,
     TOKEN_TTL_SECONDS,
     TokenIssue,
@@ -103,6 +104,13 @@ class TestSubscriptionStore(unittest.TestCase):
         self._seed("10", "blocked")
         self._seed("40", "unsubscribed")
         self.assertEqual(self.store.active_chat_ids(), ["20", "30"])
+        self.assertEqual(
+            self.store.active_delivery_targets(),
+            [
+                SubscriberDeliveryTarget("20", 1),
+                SubscriberDeliveryTarget("30", 1),
+            ],
+        )
 
     def test_unsubscribe_and_offset_commit_together(self) -> None:
         self._seed("20", "active")
@@ -148,10 +156,53 @@ class TestSubscriptionStore(unittest.TestCase):
     def test_mark_blocked_only_changes_active_once(self) -> None:
         self._seed("20", "active")
         self._seed("30", "unsubscribed")
-        self.assertTrue(self.store.mark_blocked("20"))
-        self.assertFalse(self.store.mark_blocked("20"))
-        self.assertFalse(self.store.mark_blocked("30"))
+        target = self.store.active_delivery_targets()[0]
+        self.assertTrue(
+            self.store.mark_blocked(
+                "20",
+                expected_lifecycle_version=target.lifecycle_version,
+            )
+        )
+        self.assertFalse(
+            self.store.mark_blocked(
+                "20",
+                expected_lifecycle_version=target.lifecycle_version,
+            )
+        )
+        self.assertFalse(
+            self.store.mark_blocked(
+                "30",
+                expected_lifecycle_version=1,
+            )
+        )
         self.assertEqual(self.store.subscriber_status("20"), "blocked")
+
+    def test_stale_delivery_cannot_overwrite_reactivation(self) -> None:
+        self._seed("20", "active")
+        stale = self.store.active_delivery_targets()[0]
+        self.assertTrue(
+            self.store.mark_blocked(
+                stale.chat_id,
+                expected_lifecycle_version=stale.lifecycle_version,
+            )
+        )
+        reactivated = self.store.reactivate_blocked(
+            update_id=1,
+            chat_id="20",
+            user_id="20",
+        )
+        self.assertEqual(reactivated.value, "reactivated")
+        self.assertFalse(
+            self.store.mark_blocked(
+                stale.chat_id,
+                expected_lifecycle_version=stale.lifecycle_version,
+            )
+        )
+        self.assertEqual(self.store.subscriber_status("20"), "active")
+        self.assertGreater(
+            self.store.active_delivery_targets()[0].lifecycle_version,
+            stale.lifecycle_version,
+        )
 
     def test_mutation_exception_rolls_back_state_and_offset(self) -> None:
         self._seed("20", "active")
@@ -193,10 +244,64 @@ class TestSubscriptionStore(unittest.TestCase):
                 WHERE type = 'table' AND name = 'invite_tokens'
                 """
             ).fetchone()
+            lifecycle_column = next(
+                row
+                for row in connection.execute(
+                    "PRAGMA table_info(subscribers)"
+                ).fetchall()
+                if row[1] == "lifecycle_version"
+            )
         finally:
             connection.close()
         self.assertEqual(version, SCHEMA_VERSION)
         self.assertIsNotNone(token_table)
+        self.assertEqual(lifecycle_column[4], "1")
+
+    def test_v2_database_adds_delivery_lifecycle_version(self) -> None:
+        path = Path(self.directory.name) / "subscriptions-v2.sqlite3"
+        connection = sqlite3.connect(path)
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE subscribers (
+                    chat_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    subscribed_at_epoch INTEGER NOT NULL,
+                    updated_at_epoch INTEGER NOT NULL
+                );
+                CREATE TABLE bot_state (
+                    singleton INTEGER PRIMARY KEY,
+                    last_update_id INTEGER NOT NULL
+                );
+                INSERT INTO bot_state VALUES (1, -1);
+                CREATE TABLE invite_tokens (
+                    token_hash TEXT PRIMARY KEY,
+                    issued_by_chat_id TEXT NOT NULL,
+                    created_at_epoch INTEGER NOT NULL,
+                    expires_at_epoch INTEGER NOT NULL,
+                    used_at_epoch INTEGER
+                );
+                INSERT INTO subscribers VALUES (
+                    '20', '20', 'active', 100, 100
+                );
+                PRAGMA user_version = 2;
+                """
+            )
+        finally:
+            connection.close()
+
+        migrated = SubscriptionStore(path, now=self.clock)
+        self.assertEqual(
+            migrated.active_delivery_targets(),
+            [SubscriberDeliveryTarget("20", 1)],
+        )
+        connection = sqlite3.connect(path)
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        finally:
+            connection.close()
+        self.assertEqual(version, SCHEMA_VERSION)
 
     def test_token_is_secret_hashed_and_expires_in_fifteen_minutes(self) -> None:
         issue = self._issue()
