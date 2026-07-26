@@ -256,9 +256,11 @@ class LocalStorageBackend(SQLiteStorageMixin, StorageBackend):
             )
             for label, committed, error in results
         )
+        committed = all(item.committed for item in databases)
         return BatchResult(
-            committed=all(item.committed for item in databases),
+            committed=committed,
             databases=databases,
+            rolled_back=bool(databases) and not committed,
         )
 
     def abort_batch(self):

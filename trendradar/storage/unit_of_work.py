@@ -2,7 +2,7 @@
 
 import sqlite3
 from types import TracebackType
-from typing import Optional, Type
+from typing import Callable, Optional, Type
 
 
 class SQLiteUnitOfWork:
@@ -36,8 +36,13 @@ class SQLiteUnitOfWork:
 class BorrowedSQLiteUnitOfWork:
     """Yield a cursor while an outer batch owns commit and rollback."""
 
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        on_error: Optional[Callable[[], None]] = None,
+    ):
         self.connection = connection
+        self.on_error = on_error
 
     def __enter__(self) -> sqlite3.Cursor:
         return self.connection.cursor()
@@ -48,4 +53,6 @@ class BorrowedSQLiteUnitOfWork:
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> bool:
+        if exc_type is not None and self.on_error is not None:
+            self.on_error()
         return False

@@ -29,6 +29,7 @@ except ImportError:
     ClientError = Exception
 
 from trendradar.storage.base import StorageBackend, NewsData, RSSItem, RSSData
+from trendradar.storage.results import BatchResult, DatabaseBatchResult
 from trendradar.storage.sqlite_mixin import SQLiteStorageMixin
 from trendradar.utils.time import (
     DEFAULT_TIMEZONE,
@@ -253,16 +254,71 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
             raise
 
     def begin_batch(self):
-        """开启批量模式：延迟上传，避免频繁上传同一文件"""
+        """开启一个延迟上传的 SQLite 事务。"""
+        if self._batch_mode:
+            raise RuntimeError("Nested storage batches are not supported")
+        self._begin_sqlite_batch()
         self._batch_mode = True
         self._batch_dirty.clear()
 
     def end_batch(self):
-        """结束批量模式：统一上传所有脏数据库"""
+        """提交本地事务，并为每个脏数据库执行一次上传。"""
+        commit_results = self._finish_sqlite_batch(commit=True)
         self._batch_mode = False
-        for date, db_type in self._batch_dirty:
-            self._upload_sqlite(date, db_type)
+        committed_by_label = {
+            label: committed
+            for label, committed, _error in commit_results
+        }
+        errors_by_label = {
+            label: error
+            for label, _committed, error in commit_results
+        }
+        databases = []
+        for date, db_type in sorted(
+            self._batch_dirty,
+            key=lambda item: (str(item[0]), item[1]),
+        ):
+            label = f"{db_type}:{self._format_date_folder(date)}"
+            committed = committed_by_label.get(label, True)
+            uploaded = committed and self._upload_sqlite(date, db_type)
+            databases.append(
+                DatabaseBatchResult(
+                    database=label,
+                    committed=committed,
+                    uploaded=uploaded,
+                    error=errors_by_label.get(label, ""),
+                )
+            )
         self._batch_dirty.clear()
+        committed = all(
+            item.committed and item.uploaded
+            for item in databases
+        )
+        return BatchResult(
+            committed=committed,
+            databases=tuple(databases),
+            rolled_back=bool(databases) and not all(
+                item.committed for item in databases
+            ),
+        )
+
+    def abort_batch(self):
+        """回滚所有已打开的 SQLite 事务，并丢弃待上传状态。"""
+        rollback_results = self._finish_sqlite_batch(commit=False)
+        self._batch_mode = False
+        self._batch_dirty.clear()
+        return BatchResult(
+            committed=False,
+            databases=tuple(
+                DatabaseBatchResult(
+                    database=label,
+                    committed=False,
+                    error=error,
+                )
+                for label, _committed, error in rollback_results
+            ),
+            rolled_back=True,
+        )
 
     def _upload_sqlite(self, date: Optional[str] = None, db_type: str = "news") -> bool:
         """
@@ -344,10 +400,18 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
 
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
             self._init_tables(conn, db_type)
             self._db_connections[db_path] = conn
 
-        return self._db_connections[db_path]
+        connection = self._db_connections[db_path]
+        labels = getattr(self, "_sqlite_connection_labels", None)
+        if labels is None:
+            labels = {}
+            self._sqlite_connection_labels = labels
+        labels[id(connection)] = f"{db_type}:{self._format_date_folder(date)}"
+        return connection
 
     # ========================================
     # StorageBackend 接口实现（委托给 mixin + 上传）
@@ -369,10 +433,9 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
             print(f"[远程存储] 已有 {existing_count} 条历史记录，将合并新数据")
 
         # 使用 mixin 的实现保存数据
-        success, new_count, updated_count, title_changed_count, off_list_count = \
-            self._save_news_data_impl(data, "[远程存储]")
+        result = self._save_news_data_impl(data, "[远程存储]")
 
-        if not success:
+        if not result.committed:
             return False
 
         # 查询合并后的总记录数
@@ -381,13 +444,13 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
         final_count = row[0] if row else 0
 
         # 输出详细的存储统计日志
-        log_parts = [f"[远程存储] 处理完成：新增 {new_count} 条"]
-        if updated_count > 0:
-            log_parts.append(f"更新 {updated_count} 条")
-        if title_changed_count > 0:
-            log_parts.append(f"标题变更 {title_changed_count} 条")
-        if off_list_count > 0:
-            log_parts.append(f"脱榜 {off_list_count} 条")
+        log_parts = [f"[远程存储] 处理完成：新增 {result.inserted} 条"]
+        if result.updated > 0:
+            log_parts.append(f"更新 {result.updated} 条")
+        if result.title_changed > 0:
+            log_parts.append(f"标题变更 {result.title_changed} 条")
+        if result.off_list > 0:
+            log_parts.append(f"脱榜 {result.off_list} 条")
         log_parts.append(f"(去重后总计: {final_count} 条)")
         print("，".join(log_parts))
 
@@ -451,15 +514,15 @@ class RemoteStorageBackend(SQLiteStorageMixin, StorageBackend):
 
         流程：下载现有数据库 → 插入/更新数据 → 上传回远程存储
         """
-        success, new_count, updated_count = self._save_rss_data_impl(data, "[远程存储]")
+        result = self._save_rss_data_impl(data, "[远程存储]")
 
-        if not success:
+        if not result.committed:
             return False
 
         # 输出统计日志
-        log_parts = [f"[远程存储] RSS 处理完成：新增 {new_count} 条"]
-        if updated_count > 0:
-            log_parts.append(f"更新 {updated_count} 条")
+        log_parts = [f"[远程存储] RSS 处理完成：新增 {result.inserted} 条"]
+        if result.updated > 0:
+            log_parts.append(f"更新 {result.updated} 条")
         print("，".join(log_parts))
 
         # 上传到远程存储

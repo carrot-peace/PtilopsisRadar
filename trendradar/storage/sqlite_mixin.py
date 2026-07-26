@@ -57,27 +57,37 @@ class SQLiteStorageMixin(
         if connection_id not in connections:
             connection.execute("BEGIN IMMEDIATE")
             connections[connection_id] = connection
-        return BorrowedSQLiteUnitOfWork(connection)
+        return BorrowedSQLiteUnitOfWork(
+            connection,
+            on_error=self._mark_sqlite_batch_failed,
+        )
 
     def _begin_sqlite_batch(self) -> None:
         if getattr(self, "_sqlite_batch_active", False):
             raise RuntimeError("Nested storage batches are not supported")
         self._sqlite_batch_active = True
+        self._sqlite_batch_failed = False
         self._sqlite_batch_connections = {}
+
+    def _mark_sqlite_batch_failed(self) -> None:
+        self._sqlite_batch_failed = True
 
     def _finish_sqlite_batch(self, commit: bool) -> list[tuple[str, bool, str]]:
         connections = getattr(self, "_sqlite_batch_connections", {})
         labels = getattr(self, "_sqlite_connection_labels", {})
+        batch_failed = getattr(self, "_sqlite_batch_failed", False)
+        should_commit = commit and not batch_failed
         results = []
         try:
             for connection_id, connection in connections.items():
                 label = labels.get(connection_id, str(connection_id))
                 try:
-                    if commit:
+                    if should_commit:
                         connection.commit()
                     else:
                         connection.rollback()
-                    results.append((label, commit, ""))
+                    error = "batch write failed" if batch_failed else ""
+                    results.append((label, should_commit, error))
                 except Exception as error:
                     try:
                         connection.rollback()
@@ -86,6 +96,7 @@ class SQLiteStorageMixin(
                     results.append((label, False, str(error)))
         finally:
             self._sqlite_batch_active = False
+            self._sqlite_batch_failed = False
             self._sqlite_batch_connections = {}
         return results
 
