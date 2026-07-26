@@ -15,8 +15,8 @@ It checks:
   - output/cr/latest/dispatch_receipts.json    parses (if present)
   - output/meta/deploy_trace/latest.json       parses (if present)
   - output/cr/state/cr_deferred_dispatch_queue.json  parses (if present)
-  - core invariant: no receipt has ``accepted == true`` unless its
-    ``status == "accepted"`` (no false success).
+  - core invariant: no receipt has ``accepted == true`` unless its status
+    records full or partial acceptance (no false success).
 
 Missing files are tolerated (a fresh checkout may not have run yet) and reported
 as ``SKIP``. Malformed JSON or an invariant violation is a hard failure.
@@ -37,7 +37,7 @@ DEFAULT_DEPLOY_TRACE_PATH = "output/meta/deploy_trace/latest.json"
 DEFAULT_DEFERRED_QUEUE_PATH = "output/cr/state/cr_deferred_dispatch_queue.json"
 DEFAULT_LIFECYCLE_REPORT_PATH = "output/cr/latest/lifecycle_report.json"
 
-ACCEPTED_STATUS = "accepted"
+ACCEPTED_STATUSES = frozenset({"accepted", "accepted_partial"})
 
 
 class SmokeCheckError(Exception):
@@ -78,16 +78,17 @@ def _iter_receipt_entries(receipts_data: object) -> list[dict]:
 
 
 def _assert_no_false_success(entries: list[dict]) -> None:
-    """Invariant: accepted == true requires status == 'accepted'."""
+    """Invariant: accepted == true requires an accepted status."""
     for entry in entries:
         accepted = entry.get("accepted")
         status = entry.get("status")
-        if accepted is True and status != ACCEPTED_STATUS:
+        if accepted is True and status not in ACCEPTED_STATUSES:
             index = entry.get("message_index", "?")
             raise SmokeCheckError(
                 "false success: receipt "
                 f"message_index={index} has accepted=true but "
-                f"status={status!r} (expected {ACCEPTED_STATUS!r})"
+                f"status={status!r} "
+                f"(expected one of {sorted(ACCEPTED_STATUSES)!r})"
             )
 
 
