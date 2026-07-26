@@ -266,4 +266,3 @@ def show_schedule(config: Dict) -> None:
 
     # 状态查看是只读操作，只关闭连接，不运行 retention 删除。
     ctx.close()
-
