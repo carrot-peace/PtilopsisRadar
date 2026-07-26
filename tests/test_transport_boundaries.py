@@ -46,34 +46,63 @@ def test_telegram_http_primitives_are_confined_to_explicit_senders() -> None:
     assert actual == TELEGRAM_HTTP_ALLOWLIST
 
 
+def _imports_shared_telegram_transport(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(
+                alias.name
+                in {"trendradar.telegram", "trendradar.telegram.transport"}
+                for alias in node.names
+            ):
+                return True
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        imported_names = {alias.name for alias in node.names}
+        if (
+            node.module == "trendradar.telegram.transport"
+            and imported_names & {"TelegramTransport", "*"}
+        ):
+            return True
+        if (
+            node.module == "trendradar.telegram"
+            and imported_names & {"TelegramTransport", "transport", "*"}
+        ):
+            return True
+        if (
+            node.module == "trendradar"
+            and imported_names & {"telegram", "*"}
+        ):
+            return True
+    return False
+
+
 def test_shared_telegram_transport_imports_are_confined_to_adapters() -> None:
     actual: set[str] = set()
     for path in _python_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            imports_transport = (
-                isinstance(node, ast.Import)
-                and any(
-                    alias.name
-                    in {"trendradar.telegram", "trendradar.telegram.transport"}
-                    for alias in node.names
-                )
-            ) or (
-                isinstance(node, ast.ImportFrom)
-                and (
-                    node.module == "trendradar.telegram"
-                    and any(alias.name == "TelegramTransport" for alias in node.names)
-                    or node.module == "trendradar.telegram.transport"
-                    and any(alias.name == "TelegramTransport" for alias in node.names)
-                    or node.module == "trendradar"
-                    and any(alias.name == "telegram" for alias in node.names)
-                )
-            )
-            if imports_transport:
-                actual.add(path.relative_to(PROJECT_ROOT).as_posix())
-                break
+        if _imports_shared_telegram_transport(tree):
+            actual.add(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert actual == TELEGRAM_TRANSPORT_IMPORT_ALLOWLIST
+
+
+def test_shared_telegram_transport_import_detection_covers_module_forms() -> None:
+    transport_imports = (
+        "import trendradar.telegram",
+        "import trendradar.telegram.transport as transport",
+        "from trendradar import telegram",
+        "from trendradar.telegram import TelegramTransport",
+        "from trendradar.telegram import transport",
+        "from trendradar.telegram.transport import TelegramTransport",
+    )
+    for source in transport_imports:
+        assert _imports_shared_telegram_transport(ast.parse(source)), source
+
+    type_only_import = ast.parse(
+        "from trendradar.telegram.transport import TelegramHTTPResponse"
+    )
+    assert not _imports_shared_telegram_transport(type_only_import)
 
 
 def test_generic_notification_package_and_runtime_symbols_stay_absent() -> None:
