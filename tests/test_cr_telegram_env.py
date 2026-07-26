@@ -155,9 +155,13 @@ class TestCRTelegramEnvBoundaries(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[1]
 
     def test_runtime_import_stays_lazy(self) -> None:
-        source = (self.ROOT / "trendradar" / "__main__.py").read_text(
-            encoding="utf-8"
-        )
+        source = (
+            self.ROOT
+            / "trendradar"
+            / "application"
+            / "services"
+            / "cr_notification.py"
+        ).read_text(encoding="utf-8")
         import_line = "from trendradar.cr.telegram_env import"
         self.assertIn(import_line, source)
         for line in source.splitlines():

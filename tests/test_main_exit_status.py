@@ -25,11 +25,15 @@ class TestMainExitStatus(unittest.TestCase):
         analyzer = object.__new__(application.NewsAnalyzer)
         analyzer.ctx = SimpleNamespace(
             config={"DEBUG": False},
+            run_retention_maintenance=Mock(),
+            close=Mock(),
             cleanup=Mock(),
         )
         analyzer.is_github_actions = False
         analyzer._initialize_and_check_config = Mock(return_value=True)
-        analyzer._get_mode_strategy = Mock(return_value={})
+        analyzer._resolve_run_plan = Mock(
+            return_value=SimpleNamespace(collect=True)
+        )
         analyzer._crawl_data = Mock(side_effect=RuntimeError("crawl failed"))
         analyzer._cr_hotlist_successful_ids = set()
         analyzer._cr_hotlist_failed_ids = set()
@@ -86,7 +90,9 @@ class TestMainExitStatus(unittest.TestCase):
         ):
             self.assertEqual(run_with_heartbeat(application.main), 1)
         heartbeat.assert_not_called()
-        analyzer.ctx.cleanup.assert_called_once_with()
+        analyzer.ctx.run_retention_maintenance.assert_called_once_with()
+        analyzer.ctx.close.assert_called_once_with()
+        analyzer.ctx.cleanup.assert_not_called()
 
 
 if __name__ == "__main__":

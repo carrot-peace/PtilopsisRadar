@@ -40,7 +40,14 @@ def _stub_pkg(name, is_pkg=True):
 
 requests = _stub_pkg("requests", is_pkg=False)
 trendradar = _stub_pkg("trendradar")
+trendradar.__path__ = [os.path.join(ROOT, "trendradar")]
 trendradar.__version__ = "test"
+application_pkg = _stub_pkg("trendradar.application")
+application_pkg.__path__ = [os.path.join(ROOT, "trendradar/application")]
+services_pkg = _stub_pkg("trendradar.application.services")
+services_pkg.__path__ = [
+    os.path.join(ROOT, "trendradar/application/services")
+]
 context = _stub_pkg("trendradar.context")
 context.AppContext = object
 core = _stub_pkg("trendradar.core")

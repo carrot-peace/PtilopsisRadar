@@ -4,7 +4,8 @@
 import sys
 import unittest
 from datetime import datetime
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytz
 
@@ -17,6 +18,7 @@ for _stale in [
     del sys.modules[_stale]
 
 from trendradar.context import AppContext
+import trendradar.__main__ as application
 
 
 def _config(data_dir):
@@ -137,6 +139,30 @@ class TestAppContextDependencies(unittest.TestCase):
         self.assertEqual(config["STORAGE"]["REMOTE"]["RETENTION_DAYS"], 9)
         self.assertEqual(manager.local_retention_days, 20)
         self.assertEqual(manager.remote_retention_days, 9)
+
+    def test_news_analyzer_applies_environment_retention_to_context(self):
+        manager = SimpleNamespace(
+            backend_name="local",
+            local_retention_days=8,
+            remote_retention_days=0,
+        )
+        ctx = SimpleNamespace(
+            set_retention_days_for_active_backend=Mock(return_value="local"),
+            get_storage_manager=Mock(return_value=manager),
+        )
+        analyzer = object.__new__(application.NewsAnalyzer)
+        analyzer.ctx = ctx
+
+        with patch.dict(
+            "os.environ",
+            {"STORAGE_RETENTION_DAYS": "8"},
+            clear=False,
+        ):
+            analyzer._init_storage_manager()
+
+        ctx.set_retention_days_for_active_backend.assert_called_once_with(8)
+        self.assertIs(analyzer.storage_manager, manager)
+
 
 if __name__ == "__main__":
     unittest.main()

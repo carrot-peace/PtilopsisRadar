@@ -6,17 +6,13 @@ Ptilopsis Radar 主程序
 支持: python -m trendradar
 """
 
-import argparse
-import json
 import logging
 import os
 import re
 import sys
 import webbrowser
-from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
 
 import requests
 
@@ -28,11 +24,18 @@ from trendradar import __version__
 from trendradar.core import load_config
 from trendradar.core.analyzer import strip_background_groups
 from trendradar.crawler import DataFetcher
-from trendradar.storage import convert_crawl_results_to_news_data
 from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_days_old
 from trendradar.ai import AIAnalyzer, AIAnalysisResult
 from trendradar.core.scheduler import ResolvedSchedule
 from trendradar.core.cdn import fetch_with_fallback
+
+if TYPE_CHECKING:
+    from trendradar.application.run_plan import RunPlan
+    from trendradar.application.run_state import (
+        AnalysisOutcome,
+        AnalysisRequest,
+    )
+
 try:
     from trendradar.versioning import compare_version_tuple, parse_version_tuple
 except ModuleNotFoundError:
@@ -55,18 +58,6 @@ except ModuleNotFoundError:
         if local_tuple > remote_tuple:
             return 1
         return 0
-
-
-DOCTOR_STATUS_LABELS = {
-    "pass": "[通过]",
-    "warn": "[警告]",
-    "fail": "[失败]",
-}
-
-
-def _format_switch_state(enabled: bool) -> str:
-    """Return a neutral label for a configured boolean switch."""
-    return "[开启]" if enabled else "[关闭]"
 
 
 def _parse_version(version_str: str) -> Tuple[int, int, int]:
@@ -225,6 +216,164 @@ class NewsAnalyzer:
         },
     }
 
+    def _new_run_state(self):
+        from trendradar.application.run_state import RunState
+
+        hotlist_ids = {
+            str(platform.get("id", ""))
+            for platform in getattr(self.ctx, "platforms", [])
+            if platform.get("id")
+        }
+        rss_ids = {
+            str(feed.get("id", ""))
+            for feed in getattr(self.ctx, "rss_feeds", [])
+            if (
+                getattr(self.ctx, "rss_enabled", False)
+                and feed.get("id")
+                and feed.get("url")
+                and feed.get("enabled", True)
+            )
+        }
+        return RunState.create(
+            hotlist_configured_ids=hotlist_ids,
+            rss_configured_ids=rss_ids,
+        )
+
+    def _ensure_run_state(self):
+        state = getattr(self, "run_state", None)
+        if state is None:
+            state = self._new_run_state()
+            self.run_state = state
+        return state
+
+    @property
+    def _rss_source_total(self):
+        return self._ensure_run_state().rss_source_total
+
+    @_rss_source_total.setter
+    def _rss_source_total(self, value):
+        self._ensure_run_state().rss_source_total = value
+
+    @property
+    def _rss_source_failed(self):
+        return self._ensure_run_state().rss_source_failed
+
+    @_rss_source_failed.setter
+    def _rss_source_failed(self, value):
+        self._ensure_run_state().rss_source_failed = value
+
+    @property
+    def _rss_total_count(self):
+        return self._ensure_run_state().rss_total_count
+
+    @_rss_total_count.setter
+    def _rss_total_count(self, value):
+        self._ensure_run_state().rss_total_count = value
+
+    @property
+    def _rss_matched_count(self):
+        return self._ensure_run_state().rss_matched_count
+
+    @_rss_matched_count.setter
+    def _rss_matched_count(self, value):
+        self._ensure_run_state().rss_matched_count = value
+
+    @property
+    def _hotlist_total_count(self):
+        return self._ensure_run_state().hotlist_total_count
+
+    @_hotlist_total_count.setter
+    def _hotlist_total_count(self, value):
+        self._ensure_run_state().hotlist_total_count = value
+
+    @property
+    def _cr_raw_rss_items(self):
+        return self._ensure_run_state().raw_rss_items
+
+    @_cr_raw_rss_items.setter
+    def _cr_raw_rss_items(self, value):
+        self._ensure_run_state().raw_rss_items = value
+
+    @property
+    def _cr_hotlist_configured_ids(self):
+        return self._ensure_run_state().hotlist.configured_ids
+
+    @_cr_hotlist_configured_ids.setter
+    def _cr_hotlist_configured_ids(self, value):
+        self._ensure_run_state().hotlist.configured_ids = frozenset(value)
+
+    @property
+    def _cr_hotlist_successful_ids(self):
+        return self._ensure_run_state().hotlist.successful_ids
+
+    @_cr_hotlist_successful_ids.setter
+    def _cr_hotlist_successful_ids(self, value):
+        self._ensure_run_state().hotlist.successful_ids = set(value)
+
+    @property
+    def _cr_hotlist_failed_ids(self):
+        return self._ensure_run_state().hotlist.failed_ids
+
+    @_cr_hotlist_failed_ids.setter
+    def _cr_hotlist_failed_ids(self, value):
+        self._ensure_run_state().hotlist.failed_ids = set(value)
+
+    @property
+    def _cr_rss_configured_ids(self):
+        return self._ensure_run_state().rss.configured_ids
+
+    @_cr_rss_configured_ids.setter
+    def _cr_rss_configured_ids(self, value):
+        self._ensure_run_state().rss.configured_ids = frozenset(value)
+
+    @property
+    def _cr_rss_successful_ids(self):
+        return self._ensure_run_state().rss.successful_ids
+
+    @_cr_rss_successful_ids.setter
+    def _cr_rss_successful_ids(self, value):
+        self._ensure_run_state().rss.successful_ids = set(value)
+
+    @property
+    def _cr_rss_failed_ids(self):
+        return self._ensure_run_state().rss.failed_ids
+
+    @_cr_rss_failed_ids.setter
+    def _cr_rss_failed_ids(self, value):
+        self._ensure_run_state().rss.failed_ids = set(value)
+
+    @property
+    def _cr_observed_item_identities(self):
+        return self._ensure_run_state().observed_item_identities
+
+    @_cr_observed_item_identities.setter
+    def _cr_observed_item_identities(self, value):
+        self._ensure_run_state().observed_item_identities = set(value)
+
+    @property
+    def _cr_input_snapshot_generated_at(self):
+        return self._ensure_run_state().input_snapshot_generated_at
+
+    @_cr_input_snapshot_generated_at.setter
+    def _cr_input_snapshot_generated_at(self, value):
+        self._ensure_run_state().input_snapshot_generated_at = value
+
+    @property
+    def _cr_historical_data_reused(self):
+        return self._ensure_run_state().historical_data_reused
+
+    @_cr_historical_data_reused.setter
+    def _cr_historical_data_reused(self, value):
+        self._ensure_run_state().historical_data_reused = bool(value)
+
+    @property
+    def _cr_rss_historical_data_reused(self):
+        return self._ensure_run_state().rss_historical_data_reused
+
+    @_cr_rss_historical_data_reused.setter
+    def _cr_rss_historical_data_reused(self, value):
+        self._ensure_run_state().rss_historical_data_reused = bool(value)
+
     def __init__(self, config: Optional[Dict] = None):
         # 使用传入的配置或加载新配置
         if config is None:
@@ -292,16 +441,23 @@ class NewsAnalyzer:
 
     def _init_storage_manager(self) -> None:
         """初始化存储管理器（使用 AppContext）"""
+        self.storage_manager = self.ctx.get_storage_manager()
+        active_backend = self.storage_manager.backend_name
+
         # 获取数据保留天数（支持环境变量覆盖）
         env_retention = os.environ.get("STORAGE_RETENTION_DAYS", "").strip()
         if env_retention:
-            # 环境变量覆盖配置
-            self.ctx.config["STORAGE"]["RETENTION_DAYS"] = int(env_retention)
+            active_backend = self.ctx.set_retention_days_for_active_backend(
+                int(env_retention)
+            )
 
-        self.storage_manager = self.ctx.get_storage_manager()
         print(f"存储后端: {self.storage_manager.backend_name}")
 
-        retention_days = self.ctx.config.get("STORAGE", {}).get("RETENTION_DAYS", 0)
+        retention_days = (
+            self.storage_manager.remote_retention_days
+            if active_backend == "remote"
+            else self.storage_manager.local_retention_days
+        )
         if retention_days > 0:
             print(f"数据保留天数: {retention_days} 天")
 
@@ -353,6 +509,28 @@ class NewsAnalyzer:
     def _get_mode_strategy(self) -> Dict:
         """获取当前模式的策略配置"""
         return self.MODE_STRATEGIES.get(self.report_mode, self.MODE_STRATEGIES["daily"])
+
+    def _resolve_run_plan(self) -> "RunPlan":
+        """Resolve and apply the effective run configuration exactly once."""
+        from trendradar.application.run_plan import RunPlanBuilder
+
+        schedule = self.ctx.create_scheduler().resolve()
+        run_plan = RunPlanBuilder.build(schedule, self.ctx.config)
+
+        if run_plan.report_mode != self.report_mode:
+            print(
+                f"[调度] 报告模式覆盖: "
+                f"{self.report_mode} -> {run_plan.report_mode}"
+            )
+
+        # Temporary compatibility mirrors.  Downstream code receives RunPlan
+        # explicitly; these fields keep existing helpers stable during the
+        # staged extraction of RunState/RunCoordinator.
+        self.report_mode = run_plan.report_mode
+        self.frequency_file = run_plan.frequency_file
+        self.filter_method = run_plan.filter_method
+        self.interests_file = run_plan.interests_file
+        return run_plan
 
     def _has_valid_content(
         self, stats: List[Dict], new_titles: Optional[Dict] = None
@@ -474,164 +652,30 @@ class NewsAnalyzer:
         current_results: Optional[Dict] = None,
         schedule: ResolvedSchedule = None,
     ) -> Optional[AIAnalysisResult]:
-        """执行 AI 分析"""
-        analysis_config = self.ctx.config.get("AI_ANALYSIS", {})
-        if not analysis_config.get("ENABLED", False):
-            return None
+        """Compatibility façade over the application AI analysis service."""
+        from trendradar.application.services.ai import (
+            AIAnalysisRequest,
+            AIAnalysisService,
+        )
 
-        if schedule is None:
-            schedule = ResolvedSchedule(
-                period_key=None,
-                period_name=None,
-                day_plan="manual",
-                collect=True,
-                analyze=True,
-                report_mode=mode,
-                ai_mode=mode,
-                once_analyze=False,
-            )
-
-        # 调度系统决策
-        if not schedule.analyze:
-            print("[AI] 调度器: 当前时间段不执行 AI 分析")
-            return None
-
-        if schedule.once_analyze and schedule.period_key:
-            scheduler = self.ctx.create_scheduler()
-            date_str = self.ctx.format_date()
-            if scheduler.already_executed(schedule.period_key, "analyze", date_str):
-                print(f"[AI] 调度器: 时间段 {schedule.period_name or schedule.period_key} 今天已分析过，跳过")
-                return None
-            else:
-                print(f"[AI] 调度器: 时间段 {schedule.period_name or schedule.period_key} 今天首次分析")
-
-        print("[AI] 正在进行 AI 分析...")
-        try:
-            ai_config = self.ctx.config.get("AI", {})
-            debug_mode = self.ctx.config.get("DEBUG", False)
-            analyzer = AIAnalyzer(ai_config, analysis_config, self.ctx.get_time, debug=debug_mode)
-
-            # 确定 AI 分析使用的模式
-            ai_mode_config = analysis_config.get("MODE", "follow_report")
-            if ai_mode_config == "follow_report":
-                # 跟随调度解析出的 AI 模式；调度未指定时再回退到运行报告模式。
-                ai_mode = getattr(schedule, "ai_mode", None) or mode
-                if ai_mode == "follow_report":
-                    ai_mode = mode
-                if ai_mode != mode:
-                    print(f"[AI] 使用调度分析模式: {ai_mode} (运行模式: {mode})")
-                    print(f"[AI] 正在准备 {ai_mode} 模式的数据...")
-                    ai_stats, ai_id_to_name = self._prepare_ai_analysis_data(
-                        ai_mode, current_results, id_to_name
-                    )
-                    if not ai_stats:
-                        print(f"[AI] 警告: 无法准备 {ai_mode} 模式的数据，回退到运行模式数据")
-                        ai_stats = stats
-                        ai_id_to_name = id_to_name
-                        ai_mode = mode
-                else:
-                    ai_stats = stats
-                    ai_id_to_name = id_to_name
-            elif ai_mode_config in ["daily", "current", "incremental"]:
-                # 使用独立配置的模式，需要重新准备数据
-                ai_mode = ai_mode_config
-                if ai_mode != mode:
-                    print(f"[AI] 使用独立分析模式: {ai_mode} (运行模式: {mode})")
-                    print(f"[AI] 正在准备 {ai_mode} 模式的数据...")
-
-                    # 根据 AI 模式重新准备数据
-                    ai_stats, ai_id_to_name = self._prepare_ai_analysis_data(
-                        ai_mode, current_results, id_to_name
-                    )
-                    if not ai_stats:
-                        print(f"[AI] 警告: 无法准备 {ai_mode} 模式的数据，回退到当前运行模式数据")
-                        ai_stats = stats
-                        ai_id_to_name = id_to_name
-                        ai_mode = mode
-                else:
-                    ai_stats = stats
-                    ai_id_to_name = id_to_name
-            else:
-                # 配置错误，回退到跟随模式
-                print(f"[AI] 警告: 无效的 ai_analysis.mode 配置 '{ai_mode_config}'，使用当前运行模式 '{mode}'")
-                ai_mode = mode
-                ai_stats = stats
-                ai_id_to_name = id_to_name
-
-            # 背景表 realtime pull-only：current/incremental 模式下，从 AI 告警输入中剔除
-            # “背景-*”组（热榜 stats + RSS 分组），使背景仅作 daily/HTML 上下文、不自推 realtime。
-            # 仅过滤 AI 输入的本地副本，不影响 HTML/raw stats（仍含背景组）。
-            ai_rss_items = rss_items
-            if self.ctx.config.get("BACKGROUND_PULL_ONLY", False) and ai_mode in ("current", "incremental"):
-                bg_prefix = self.ctx.config.get("BACKGROUND_GROUP_PREFIX", "背景-")
-                _before, _before_rss = len(ai_stats or []), len(ai_rss_items or [])
-                ai_stats = strip_background_groups(ai_stats, bg_prefix)
-                ai_rss_items = strip_background_groups(ai_rss_items, bg_prefix)
-                _removed = _before - len(ai_stats or [])
-                _removed_rss = _before_rss - len(ai_rss_items or [])
-                if _removed or _removed_rss:
-                    print(f"[AI] 背景表 pull-only：realtime 输入剔除背景组 热榜 {_removed} / RSS {_removed_rss}")
-
-            # 提取平台列表
-            platforms = list(ai_id_to_name.values()) if ai_id_to_name else []
-
-            # 提取关键词列表
-            keywords = [s.get("word", "") for s in ai_stats if s.get("word")] if ai_stats else []
-
-            # 确定报告类型
-            if ai_mode != mode:
-                # 根据 AI 模式确定报告类型
-                ai_report_type = {
-                    "daily": "当日汇总",
-                    "current": "当前榜单",
-                    "incremental": "增量更新"
-                }.get(ai_mode, report_type)
-            else:
-                ai_report_type = report_type
-
-            result = analyzer.analyze(
-                stats=ai_stats,
-                rss_stats=ai_rss_items,
-                report_mode=ai_mode,
-                report_type=ai_report_type,
-                platforms=platforms,
-                keywords=keywords,
-                source_tier_resolver=self.ctx.source_tier_resolver,
-            )
-
-            # 设置 AI 分析使用的模式
-            if result.success:
-                result.ai_mode = ai_mode
-                if result.error:
-                    # 成功但有警告（如 JSON 解析问题但使用了原始文本）
-                    print(f"[AI] 分析完成（有警告: {result.error}）")
-                else:
-                    print("[AI] 分析完成")
-
-                # 记录 AI 分析
-                if schedule.once_analyze and schedule.period_key:
-                    scheduler = self.ctx.create_scheduler()
-                    date_str = self.ctx.format_date()
-                    scheduler.record_execution(schedule.period_key, "analyze", date_str)
-            elif result.skipped:
-                print(f"[AI] {result.error}")
-            else:
-                print(f"[AI] 分析失败: {result.error}")
-
-            return result
-        except Exception as e:
-            import traceback
-            error_type = type(e).__name__
-            error_msg = str(e)
-            # 截断过长的错误消息
-            if len(error_msg) > 200:
-                error_msg = error_msg[:200] + "..."
-            print(f"[AI] 分析出错 ({error_type}): {error_msg}")
-            # 详细错误日志到 stderr
-            import sys
-            print(f"[AI] 详细错误堆栈:", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            return AIAnalysisResult(success=False, error=f"{error_type}: {error_msg}")
+        return AIAnalysisService(
+            self.ctx,
+            prepare_mode_data=getattr(
+                self,
+                "_prepare_ai_analysis_data",
+                lambda _mode, _results, names: ([], names),
+            ),
+        ).run(
+            AIAnalysisRequest(
+                stats=stats,
+                rss_items=rss_items,
+                mode=mode,
+                report_type=report_type,
+                id_to_name=id_to_name,
+                current_results=current_results,
+            ),
+            schedule,
+        )
 
     def _load_analysis_data(
         self,
@@ -639,24 +683,10 @@ class NewsAnalyzer:
     ) -> Optional[Tuple[Dict, Dict, Dict, Dict, List, List]]:
         """统一的数据加载和预处理，使用当前监控平台列表过滤历史数据"""
         try:
-            # 获取当前配置的监控平台ID列表
-            current_platform_ids = self.ctx.platform_ids
-            if not quiet:
-                print(f"当前监控平台: {current_platform_ids}")
-
-            all_results, id_to_name, title_info = self.ctx.read_today_titles(
-                current_platform_ids, quiet=quiet
-            )
-
-            if not all_results:
-                print("没有找到当天的数据")
+            history = self._load_history_input(quiet=quiet)
+            if not history:
                 return None
-
-            total_titles = sum(len(titles) for titles in all_results.values())
-            if not quiet:
-                print(f"读取到 {total_titles} 个标题（已按当前监控平台过滤）")
-
-            new_titles = self.ctx.detect_new_titles(current_platform_ids, quiet=quiet)
+            all_results, id_to_name, title_info, new_titles = history
             word_groups, filter_words, global_filters = self.ctx.load_frequency_words(self.frequency_file)
 
             return (
@@ -670,6 +700,36 @@ class NewsAnalyzer:
             )
         except Exception as e:
             print(f"数据加载失败: {e}")
+            return None
+
+    def _load_history_input(
+        self,
+        quiet: bool = False,
+    ) -> Optional[Tuple[Dict, Dict, Dict, Dict]]:
+        """Load persisted input only; frequency configuration is a separate boundary."""
+        try:
+            current_platform_ids = self.ctx.platform_ids
+            if not quiet:
+                print(f"当前监控平台: {current_platform_ids}")
+
+            all_results, id_to_name, title_info = self.ctx.read_today_titles(
+                current_platform_ids,
+                quiet=quiet,
+            )
+            if not all_results:
+                print("没有找到当天的数据")
+                return None
+
+            total_titles = sum(len(titles) for titles in all_results.values())
+            if not quiet:
+                print(f"读取到 {total_titles} 个标题（已按当前监控平台过滤）")
+            new_titles = self.ctx.detect_new_titles(
+                current_platform_ids,
+                quiet=quiet,
+            )
+            return all_results, id_to_name, title_info, new_titles
+        except Exception as exc:
+            print(f"数据加载失败: {exc}")
             return None
 
     def _prepare_current_title_info(self, results: Dict, time_info: str) -> Dict:
@@ -694,57 +754,27 @@ class NewsAnalyzer:
 
     def _run_analysis_pipeline(
         self,
-        data_source: Dict,
-        mode: str,
-        title_info: Dict,
-        new_titles: Dict,
-        word_groups: List[Dict],
-        filter_words: List[str],
-        id_to_name: Dict,
-        failed_ids: Optional[List] = None,
-        global_filters: Optional[List[str]] = None,
-        quiet: bool = False,
-        rss_items: Optional[List[Dict]] = None,
-        rss_new_items: Optional[List[Dict]] = None,
-        schedule: ResolvedSchedule = None,
-        rss_new_urls: Optional[set] = None,
-    ) -> Tuple[List[Dict], Optional[str], Optional[AIAnalysisResult], Optional[List[Dict]]]:
+        request: "AnalysisRequest",
+        schedule: "RunPlan",
+    ) -> "AnalysisOutcome":
         """统一的分析流水线：数据处理 → 统计计算（关键词/AI筛选）→ AI分析 → HTML生成"""
+        data_source = request.results
+        mode = request.mode
+        new_titles = request.new_titles
+        id_to_name = request.id_to_name
+        failed_ids = request.failed_ids
+        rss_new_items = request.rss_new_items
 
-        # 根据筛选策略选择数据处理方式
-        if self.filter_method == "ai":
-            # === AI 筛选策略 ===
-            print("[筛选] 使用 AI 智能筛选策略")
-            ai_filter_result = self.ctx.run_ai_filter(interests_file=self.interests_file)
+        from trendradar.application.services.analysis import AnalysisService
 
-            if ai_filter_result and ai_filter_result.success:
-                print(f"[筛选] AI 筛选完成: {ai_filter_result.total_matched} 条匹配, {len(ai_filter_result.tags)} 个标签")
-                # 转换为与关键词匹配相同的数据结构
-                stats, ai_rss_stats = self.ctx.convert_ai_filter_to_report_data(
-                    ai_filter_result, mode=mode,
-                    new_titles=new_titles, rss_new_urls=rss_new_urls,
-                )
-                total_titles = sum(len(titles) for titles in data_source.values())
-
-                # AI 筛选的 RSS 结果替换关键词匹配的 RSS 结果
-                if ai_rss_stats:
-                    rss_items = ai_rss_stats
-            else:
-                # AI 筛选失败，回退到关键词匹配
-                error_msg = ai_filter_result.error if ai_filter_result else "未知错误"
-                print(f"[筛选] AI 筛选失败: {error_msg}，回退到关键词匹配")
-                stats, total_titles = self.ctx.count_frequency(
-                    data_source, word_groups, filter_words,
-                    id_to_name, title_info, new_titles,
-                    mode=mode, global_filters=global_filters, quiet=quiet,
-                )
-        else:
-            # === 关键词匹配策略（默认）===
-            stats, total_titles = self.ctx.count_frequency(
-                data_source, word_groups, filter_words,
-                id_to_name, title_info, new_titles,
-                mode=mode, global_filters=global_filters, quiet=quiet,
-            )
+        selection = AnalysisService(self.ctx).analyze(
+            request,
+            filter_method=self.filter_method,
+            interests_file=self.interests_file,
+        )
+        stats = selection.stats
+        total_titles = selection.total_titles
+        rss_items = selection.rss_items
 
         self._hotlist_total_count = total_titles
 
@@ -760,299 +790,136 @@ class NewsAnalyzer:
                 current_results=data_source, schedule=schedule,
             )
 
-        # 翻译 RSS 内容（如果启用）— 在 HTML 生成前执行，确保网页版也能展示翻译内容。
-        trans_config = self.ctx.config.get("AI_TRANSLATION", {})
-        if trans_config.get("ENABLED", False):
-            from trendradar.report.translation import translate_report_content
-
-            translator = self.ctx.create_artifact_translator()
-            _, rss_items, rss_new_items = translate_report_content(
-                report_data={"stats": [], "new_titles": []},
-                rss_items=rss_items,
-                rss_new_items=rss_new_items,
-                translator=translator,
-                debug=self.ctx.config.get("DEBUG", False),
-            )
-
-        # 计算 RSS 匹配条数（供 HTML / dashboard artifact 使用）
-        self._rss_matched_count = sum(stat.get("count", 0) for stat in rss_items) if rss_items else 0
-
-        # HTML生成（如果启用）— 使用翻译后的数据
-        html_file = None
-        if self.ctx.config["STORAGE"]["FORMATS"]["HTML"]:
-            report_metadata = {
-                "hotlist_total": total_titles,
-                "platform_total": len(self.ctx.platform_ids),
-                "rss_matched_count": self._rss_matched_count,
-                "rss_total_count": self._rss_total_count,
-                "rss_source_total": self._rss_source_total,
-                "rss_source_failed": self._rss_source_failed,
-            }
-            # 路由分流：current 与 daily 是互斥的运行模式。
-            #   daily               → 完整报告 full.html（归档 + latest）
-            #   current/incremental → 轻量盘面 dashboard（不写 full.html）
-            # landing（public/index.html）由两条路径各自幂等维护。
-            if mode == "daily":
-                # renderer 根据实际分析结果显示 editorial 或 no-AI fallback notice。
-                html_ai = ai_result
-                html_file = self.ctx.generate_html(
-                    stats,
-                    total_titles,
-                    failed_ids=failed_ids,
-                    new_titles=new_titles,
-                    id_to_name=id_to_name,
-                    mode=mode,
-                    update_info=self.update_info if self.ctx.config["SHOW_VERSION_UPDATE"] else None,
-                    rss_items=rss_items,
-                    rss_new_items=rss_new_items,
-                    ai_analysis=html_ai,
-                    frequency_file=self.frequency_file,
-                    report_metadata=report_metadata,
-                )
-            else:
-                # current / incremental dashboard 与 daily 报告使用同一分析结果。
-                html_ai = ai_result
-                self.ctx.generate_dashboard(
-                    mode=mode,
-                    ai_analysis=html_ai,
-                    report_metadata=report_metadata,
-                    stats=stats,
-                    rss_items=rss_items,
-                )
-
-        dr_dispatch_hook = getattr(self, "_run_dr_dispatch_hook", None)
-        if mode == "daily" and html_file and callable(dr_dispatch_hook):
-            try:
-                dr_dispatch_hook(
-                    ai_result=ai_result,
-                    html_file=html_file,
-                    schedule=schedule,
-                )
-            except Exception as _dr_exc:
-                print(f"[DR] dispatch hook error (non-fatal): {_dr_exc}")
-
-        # CR-A dispatch hook (PR-CR-A1).
-        # Gated by PTILOPSIS_CR_DISPATCH_MODE (explicit) or
-        # PTILOPSIS_CR_DRY_RUN=1 (compatibility alias → artifact).
-        # The old PTILOPSIS_CR_DRY_RUN gate has been fully replaced; its
-        # meaning is now interpreted exclusively through
-        # resolve_cr_dispatch_mode in dispatch_mode.py.
-        # Default is off: CR-A does not run.
-        # artifact / shadow: writes CR artifacts only, no dispatch sink.
-        # live: may build a Telegram dispatch sink when the CR Telegram
-        #       send gate is also enabled (see telegram_env.py).
-        from trendradar.cr.dispatch_mode import (
-            CR_DISPATCH_LIVE,
-            CR_DISPATCH_OFF,
-            resolve_cr_dispatch_mode,
+        from trendradar.application.services.report import (
+            ContextReportGateway,
+            ReportCounters,
+            ReportRequest,
+            ReportService,
         )
 
-        _cr_mode = resolve_cr_dispatch_mode(os.environ)
-        if _cr_mode != CR_DISPATCH_OFF:
-            from trendradar.cr.models import CRRunContext
-            from trendradar.cr.input_health import (
-                RECOVERY_STATE_BASELINE,
-                RECOVERY_STATE_TRACKED,
-                RECOVERY_STATE_UNTRUSTED,
-                evaluate_cr_input_health,
-                policy_from_env,
+        report_result = ReportService(
+            ContextReportGateway(self.ctx)
+        ).render(
+            ReportRequest(
+                mode=mode,
+                stats=stats,
+                total_titles=total_titles,
+                failed_ids=failed_ids,
+                new_titles=new_titles,
+                id_to_name=id_to_name,
+                rss_items=rss_items,
+                rss_new_items=rss_new_items,
+                ai_analysis=ai_result,
+                update_info=self.update_info,
+                frequency_file=self.frequency_file,
+                counters=ReportCounters(
+                    platform_total=len(self.ctx.platform_ids),
+                    rss_total_count=self._rss_total_count,
+                    rss_source_total=self._rss_source_total,
+                    rss_source_failed=self._rss_source_failed,
+                ),
             )
-            from trendradar.cr.input_health_state import (
-                CRInputHealthState,
-                DEFAULT_CR_INPUT_HEALTH_STATE_PATH,
-                load_cr_input_health_state,
-                quarantine_invalid_cr_input_health_state,
-                recovered_source_ids,
-                save_cr_input_health_state,
+        )
+        html_file = report_result.html_file
+        rss_items = report_result.rss_items
+        self._rss_matched_count = report_result.rss_matched_count
+
+        from trendradar.application.services.notification import (
+            AnalysisNotificationEvent,
+            NotificationHook,
+            NotificationService,
+        )
+
+        dr_dispatch_hook = getattr(self, "_run_dr_dispatch_hook", None)
+        cr_dispatch_hook = getattr(self, "_run_cr_dispatch_hook", None)
+        notification_event = AnalysisNotificationEvent(
+            mode=mode,
+            ai_result=ai_result,
+            html_file=html_file,
+            schedule=schedule,
+        )
+        NotificationService(
+            error_reporter=lambda _name, exc: print(
+                f"[DR] dispatch hook error (non-fatal): {exc}"
             )
-            from trendradar.cr.runtime_dry_run import (
-                build_and_write_cr_runtime_dry_run,
-            )
-
-            _dispatch_sink = None
-            if _cr_mode == CR_DISPATCH_LIVE:
-                from trendradar.cr.telegram_env import (
-                    build_cr_telegram_sink_from_env,
-                )
-
-                try:
-                    _dispatch_sink = build_cr_telegram_sink_from_env(os.environ)
-                except ValueError as exc:
-                    print(f"[CR-A] live Telegram sink not configured: {exc}", file=sys.stderr)
-                    _dispatch_sink = None
-
-            # CR 跨证据:用原始全量 RSS 经"实体重叠准入"喂给 CR(替代中文关键词门
-            # 筛剩的 rss_items)。准入结果与关键词 RSS 合并;失败/禁用时回退,
-            # 绝不阻断主流程。
-            _cr_rss_stats = rss_items
-            from trendradar.cr.models import CRClusterConfig
-            from trendradar.cr.pipeline import CRPipelineConfig
-            from trendradar.cr.scoring import (
-                CRScoringProfile,
-                TIERED_CR_SCORING_PROFILE_VERSION,
-            )
-
-            _pipeline_cluster_cfg = CRClusterConfig()
-            _pipeline_scoring_cfg = CRScoringProfile(
-                profile_version=TIERED_CR_SCORING_PROFILE_VERSION,
-                source_tier_resolver=self.ctx.source_tier_resolver,
-            )
-            try:
-                from trendradar.cr.cross_evidence_ingest import (
-                    build_cross_evidence_cluster_config_from_env,
-                    merge_rss_stats,
-                    select_cross_evidence_rss,
-                )
-                from trendradar.cr.entity_match import load_entity_resources
-
-                _ce_cfg = build_cross_evidence_cluster_config_from_env(os.environ)
-                # Admission failures and disabled/no-input paths must retain
-                # legacy RSS-only candidates.
-                _pipeline_cluster_cfg = replace(_ce_cfg, drop_unmerged_rss=False)
-                _raw_rss = getattr(self, "_cr_raw_rss_items", None)
-                if _ce_cfg.cross_evidence_rss_enabled and _raw_rss:
-                    _hotlist_titles = [
-                        t.get("title", "")
-                        for g in (stats or [])
-                        for t in g.get("titles", [])
-                    ]
-                    _admitted_rss_stats = select_cross_evidence_rss(
-                        _raw_rss,
-                        _hotlist_titles,
-                        resources=load_entity_resources(),
-                        now=self.ctx.get_time(),
-                        window_hours=_ce_cfg.cross_evidence_window_hours,
-                        max_per_topic=_ce_cfg.cross_evidence_max_per_topic,
-                    )
-                    _cr_rss_stats = merge_rss_stats(rss_items, _admitted_rss_stats)
-                    _pipeline_cluster_cfg = _ce_cfg
-                    _admitted = sum(
-                        len(g.get("titles", [])) for g in _admitted_rss_stats
-                    )
-                    logger.info(
-                        "[CR-A] 跨证据 RSS 准入: %d 条(来自 %d 条原始 RSS)",
-                        _admitted,
-                        len(_raw_rss),
-                    )
-            except Exception as exc:  # noqa: BLE001 - 准入失败回退,不阻断
-                logger.warning(
-                    "[CR-A] 跨证据 RSS 准入失败,回退关键词 RSS: %s",
-                    exc,
-                )
-                _cr_rss_stats = rss_items
-
-            _run_label = f"{mode}-{self.ctx.get_time():%Y%m%d-%H%M%S}"
-            _health_policy, _health_warnings = policy_from_env(os.environ)
-            _health_state_path = os.environ.get(
-                "PTILOPSIS_CR_INPUT_HEALTH_STATE_PATH",
-                str(DEFAULT_CR_INPUT_HEALTH_STATE_PATH),
-            ) or str(DEFAULT_CR_INPUT_HEALTH_STATE_PATH)
-            _health_state_load = load_cr_input_health_state(_health_state_path)
-            _hotlist_recovered_ids: tuple[str, ...] = ()
-            _rss_recovered_ids: tuple[str, ...] = ()
-            _recovery_state_status = RECOVERY_STATE_BASELINE
-            _state_can_be_saved = True
-            if _health_state_load.loaded and _health_state_load.state is not None:
-                _recovery_state_status = RECOVERY_STATE_TRACKED
-                _hotlist_recovered_ids = recovered_source_ids(
-                    _health_state_load.state.hotlist_failed_ids,
-                    self._cr_hotlist_successful_ids,
-                )
-                _rss_recovered_ids = recovered_source_ids(
-                    _health_state_load.state.rss_failed_ids,
-                    self._cr_rss_successful_ids,
-                )
-            elif _health_state_load.error is not None:
-                _recovery_state_status = RECOVERY_STATE_UNTRUSTED
-                _health_warnings += (_health_state_load.error,)
-                _state_can_be_saved = quarantine_invalid_cr_input_health_state(
-                    _health_state_path,
-                    suffix=self.ctx.get_time().strftime("%Y%m%dT%H%M%S"),
-                )
-                if not _state_can_be_saved:
-                    _health_warnings += (
-                        "unable to quarantine invalid input health state",
-                    )
-
-            if _state_can_be_saved:
-                _health_state_save = save_cr_input_health_state(
-                    CRInputHealthState(
-                        recorded_at=self.ctx.get_time().isoformat(),
-                        hotlist_successful_ids=tuple(
-                            self._cr_hotlist_successful_ids
-                        ),
-                        hotlist_failed_ids=tuple(self._cr_hotlist_failed_ids),
-                        rss_successful_ids=tuple(self._cr_rss_successful_ids),
-                        rss_failed_ids=tuple(self._cr_rss_failed_ids),
+        ).notify(
+            notification_event,
+            (
+                NotificationHook(
+                    name="dr",
+                    predicate=lambda event: bool(
+                        event.mode == "daily"
+                        and event.html_file
+                        and callable(dr_dispatch_hook)
                     ),
-                    _health_state_path,
-                )
-                if not _health_state_save.saved:
-                    _recovery_state_status = RECOVERY_STATE_UNTRUSTED
-                    _health_warnings += (
-                        _health_state_save.error
-                        or "unable to save input health state",
-                    )
+                    handler=lambda event: dr_dispatch_hook(
+                        ai_result=event.ai_result,
+                        html_file=event.html_file,
+                        schedule=event.schedule,
+                    ),
+                    suppress_exceptions=True,
+                ),
+                NotificationHook(
+                    name="cr",
+                    predicate=lambda _event: callable(cr_dispatch_hook),
+                    handler=lambda event: cr_dispatch_hook(
+                        mode=event.mode,
+                        stats=stats,
+                        rss_items=rss_items,
+                    ),
+                ),
+            ),
+        )
 
-            _input_health = evaluate_cr_input_health(
-                hotlist_configured_ids=self._cr_hotlist_configured_ids,
-                hotlist_successful_ids=self._cr_hotlist_successful_ids,
-                hotlist_failed_ids=self._cr_hotlist_failed_ids,
-                rss_configured_ids=self._cr_rss_configured_ids,
-                rss_successful_ids=self._cr_rss_successful_ids,
-                rss_failed_ids=self._cr_rss_failed_ids,
-                hotlist_recovered_ids=_hotlist_recovered_ids,
-                rss_recovered_ids=_rss_recovered_ids,
-                observed_item_identities=self._cr_observed_item_identities,
-                snapshot_generated_at=self._cr_input_snapshot_generated_at,
-                now=self.ctx.get_time(),
-                historical_data_reused=self._cr_historical_data_reused,
-                recovery_state_status=_recovery_state_status,
-                policy=_health_policy,
-                warnings=_health_warnings,
-            )
-            for _warning in _input_health.warnings:
-                print(f"[CR-A] input health warning: {_warning}", file=sys.stderr)
-            build_and_write_cr_runtime_dry_run(
+        from trendradar.application.run_state import AnalysisOutcome
+
+        return AnalysisOutcome(
+            stats=stats,
+            total_titles=total_titles,
+            html_file=html_file,
+            ai_result=ai_result,
+            rss_items=rss_items,
+            rss_matched_count=report_result.rss_matched_count,
+        )
+
+    def _run_cr_dispatch_hook(
+        self,
+        *,
+        mode: str,
+        stats: List[Dict],
+        rss_items: Optional[List[Dict]],
+    ):
+        """Compatibility façade over the CR notification service."""
+        from trendradar.application.services.cr_notification import (
+            CRNotificationRequest,
+            CRNotificationService,
+        )
+
+        state = self.run_state
+        return CRNotificationService(
+            self.ctx,
+            logger=logger,
+        ).run(
+            CRNotificationRequest(
+                mode=mode,
                 hotlist_stats=stats,
-                rss_stats=_cr_rss_stats,
-                run_label=_run_label,
-                run_context=CRRunContext(
-                    mode=mode,
-                    observed_item_identities=frozenset(
-                        self._cr_observed_item_identities
-                    ),
-                    input_health=_input_health,
+                rss_stats=rss_items,
+                raw_rss_items=state.raw_rss_items,
+                hotlist_configured_ids=state.hotlist.configured_ids,
+                hotlist_successful_ids=frozenset(
+                    state.hotlist.successful_ids
                 ),
-                pipeline_config=CRPipelineConfig(
-                    cluster=_pipeline_cluster_cfg,
-                    scoring=_pipeline_scoring_cfg,
+                hotlist_failed_ids=frozenset(state.hotlist.failed_ids),
+                rss_configured_ids=state.rss.configured_ids,
+                rss_successful_ids=frozenset(state.rss.successful_ids),
+                rss_failed_ids=frozenset(state.rss.failed_ids),
+                observed_item_identities=frozenset(
+                    state.observed_item_identities
                 ),
-                dispatch_sink=_dispatch_sink,
-                dispatch_mode=_cr_mode,
-                quiet_hours_env=os.environ,
+                snapshot_generated_at=state.input_snapshot_generated_at,
+                historical_data_reused=state.historical_data_reused,
             )
-
-            # Write deploy trace observation (read-only, no CR mutation).
-            from trendradar.cr.deploy_trace_writer import write_deploy_trace
-
-            try:
-                write_deploy_trace(run_label=_run_label)
-            except Exception:
-                pass
-
-            # Lifecycle janitor post-run trigger (J2).
-            # Gated by PTILOPSIS_CR_LIFECYCLE_ENABLED; non-fatal: exceptions
-            # are caught and never propagate into the main run.
-            if os.environ.get("PTILOPSIS_CR_LIFECYCLE_ENABLED") == "1":
-                try:
-                    from trendradar.cr.lifecycle_runner import main as lifecycle_main
-
-                    lifecycle_main(["--now", self.ctx.get_time().isoformat()])
-                except Exception as _lc_exc:
-                    print(f"[lifecycle] janitor error: {_lc_exc}", file=sys.stderr)
-
-        return stats, html_file, ai_result, rss_items
+        )
 
     def _run_dr_dispatch_hook(
         self,
@@ -1060,119 +927,17 @@ class NewsAnalyzer:
         ai_result: Optional[AIAnalysisResult],
         html_file: str,
         schedule: Optional[ResolvedSchedule] = None,
-    ) -> None:
-        """Run the explicit DR dispatch hook after daily artifact generation."""
-        from trendradar.dr.dispatch_mode import (
-            DR_DISPATCH_ARTIFACT,
-            DR_DISPATCH_LIVE,
-            DR_DISPATCH_OFF,
-            resolve_dr_dispatch_mode,
+    ):
+        """Compatibility façade over the DR notification service."""
+        from trendradar.application.services.dr_notification import (
+            DRNotificationService,
         )
 
-        dispatch_mode = resolve_dr_dispatch_mode(os.environ)
-        if dispatch_mode == DR_DISPATCH_OFF:
-            return
-
-        schedule_scheduler = None
-        date_str = self.ctx.format_date()
-        once_live_period = bool(
-            dispatch_mode == DR_DISPATCH_LIVE
-            and schedule is not None
-            and getattr(schedule, "once_analyze", False)
-            and getattr(schedule, "period_key", None)
+        return DRNotificationService(self.ctx).run(
+            ai_result=ai_result,
+            html_file=html_file,
+            schedule=schedule,
         )
-        if once_live_period:
-            from trendradar.dr.dispatch_schedule import (
-                should_run_scheduled_live_dispatch,
-            )
-
-            schedule_scheduler = self.ctx.create_scheduler()
-            if not should_run_scheduled_live_dispatch(
-                schedule=schedule,
-                scheduler=schedule_scheduler,
-                date_str=date_str,
-                has_analysis_result=ai_result is not None,
-            ):
-                print("[DR] live dispatch skipped: once-only period already handled")
-                return
-
-        from trendradar.dr.artifacts import write_dr_dispatch_artifacts
-        from trendradar.dr.dispatch_executor import (
-            DRDispatchExecutionResult,
-            dr_dispatch_receipts_to_json_dict,
-            execute_dr_dispatch_plan,
-        )
-        from trendradar.dr.dispatch_plan import (
-            build_dr_dispatch_plan,
-            dr_dispatch_plan_to_json_dict,
-        )
-        from trendradar.dr.formatter import render_dr_telegram_text
-
-        now = self.ctx.get_time()
-        run_label = f"dr-{now:%Y%m%d-%H%M%S}"
-        public_html_path = Path("output/public/daily/full.html")
-        text = render_dr_telegram_text(ai_result, date=date_str, now=now)
-        _attach_raw = os.environ.get("PTILOPSIS_DR_TELEGRAM_ATTACH_HTML")
-        attach_html = True if _attach_raw is None else (
-            _attach_raw.strip().lower() not in {"0", "false", "no", "off"}
-        )
-        plan = build_dr_dispatch_plan(
-            text=text,
-            html_path=public_html_path if public_html_path.exists() else html_file,
-            run_label=run_label,
-            date=date_str,
-            attach_html=attach_html,
-        )
-
-        execution: DRDispatchExecutionResult | None = None
-        if dispatch_mode == DR_DISPATCH_ARTIFACT:
-            print("[DR] dispatch artifact mode: plan/receipt only")
-        elif dispatch_mode == DR_DISPATCH_LIVE:
-            from trendradar.dr.telegram_env import build_dr_telegram_sink_from_env
-
-            sink = None
-            try:
-                sink = build_dr_telegram_sink_from_env(os.environ)
-            except ValueError as exc:
-                print(f"[DR] live Telegram sink not configured: {exc}", file=sys.stderr)
-            execution = execute_dr_dispatch_plan(plan, sink=sink)
-            print(
-                f"[DR] dispatch live result: {execution.reason}, "
-                f"accepted={execution.accepted_count}"
-            )
-            if execution.accepted_count > 0 and schedule_scheduler is not None:
-                from trendradar.dr.dispatch_schedule import (
-                    record_scheduled_live_dispatch,
-                )
-
-                try:
-                    record_scheduled_live_dispatch(
-                        schedule=schedule,
-                        scheduler=schedule_scheduler,
-                        date_str=date_str,
-                    )
-                except Exception as exc:
-                    print(
-                        f"[DR] failed to record live dispatch dedupe: {exc}",
-                        file=sys.stderr,
-                    )
-
-        created_at = now.isoformat()
-        plan_json = dr_dispatch_plan_to_json_dict(
-            plan, dispatch_mode=dispatch_mode, created_at=created_at
-        )
-        receipt_json = dr_dispatch_receipts_to_json_dict(
-            plan=plan,
-            dispatch_mode=dispatch_mode,
-            execution=execution,
-            created_at=created_at,
-        )
-        paths = write_dr_dispatch_artifacts(
-            plan_json=plan_json,
-            receipt_json=receipt_json,
-            run_label=run_label,
-        )
-        print(f"[DR] dispatch artifacts written: {paths.latest_plan_path}")
 
     def _initialize_and_check_config(self) -> bool:
         """通用初始化和配置检查。返回 True 表示可以继续执行。"""
@@ -1190,32 +955,29 @@ class NewsAnalyzer:
 
     def _crawl_data(self) -> Tuple[Dict, Dict, List]:
         """执行数据爬取"""
-        ids = []
-        domain_rules = {}
-        for platform in self.ctx.platforms:
-            if "name" in platform:
-                ids.append((platform["id"], platform["name"]))
-            else:
-                ids.append(platform["id"])
-            expected_domain = platform.get("expected_domain", "")
-            if expected_domain:
-                domain_rules[platform["id"]] = expected_domain
-
         print(
             f"配置的监控平台: {[p.get('name', p['id']) for p in self.ctx.platforms]}"
         )
         print(f"开始爬取数据，请求间隔 {self.request_interval} 毫秒")
-        Path("output").mkdir(parents=True, exist_ok=True)
 
-        results, id_to_name, failed_ids = self.data_fetcher.crawl_websites(
-            ids, self.request_interval, domain_rules=domain_rules
+        from trendradar.application.collectors import HotlistCollector
+
+        batch = HotlistCollector(
+            fetcher=self.data_fetcher,
+            storage=self.storage_manager,
+            clock=self.ctx,
+        ).collect(
+            platforms=self.ctx.platforms,
+            request_interval=self.request_interval,
         )
+        results = dict(batch.raw_results)
+        id_to_name = dict(batch.id_to_name)
+        failed_ids = list(batch.failed_ids)
         from trendradar.cr.input_health import input_item_identity
 
-        self._cr_hotlist_failed_ids = {str(v) for v in failed_ids}
-        self._cr_hotlist_successful_ids = {
-            str(v) for v in results
-        } - self._cr_hotlist_failed_ids
+        self._cr_hotlist_configured_ids = batch.configured_ids
+        self._cr_hotlist_failed_ids = batch.failed_ids
+        self._cr_hotlist_successful_ids = batch.successful_ids
         for source_id, titles in results.items():
             if str(source_id) not in self._cr_hotlist_successful_ids:
                 continue
@@ -1226,25 +988,19 @@ class NewsAnalyzer:
         if self._cr_hotlist_successful_ids:
             self._cr_input_snapshot_generated_at = self.ctx.get_time().isoformat()
 
-        # 转换为 NewsData 格式并保存到存储后端
-        crawl_time = self.ctx.format_time()
-        crawl_date = self.ctx.format_date()
-        news_data = convert_crawl_results_to_news_data(
-            results, id_to_name, failed_ids, crawl_time, crawl_date
-        )
-
-        # 保存到存储后端（SQLite）
-        if self.storage_manager.save_news_data(news_data):
+        if batch.saved:
             print(f"数据已保存到存储后端: {self.storage_manager.backend_name}")
-
-        # 保存 TXT 快照（如果启用）
-        txt_file = self.storage_manager.save_txt_snapshot(news_data)
-        if txt_file:
-            print(f"TXT 快照已保存: {txt_file}")
+        else:
+            print("数据保存失败")
+        if batch.snapshot_path:
+            print(f"TXT 快照已保存: {batch.snapshot_path}")
 
         return results, id_to_name, failed_ids
 
-    def _crawl_rss_data(self) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
+    def _crawl_rss_data(
+        self,
+        run_plan: "RunPlan",
+    ) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
         """
         执行 RSS 数据抓取
 
@@ -1325,15 +1081,23 @@ class NewsAnalyzer:
                 default_max_age_days=default_max_age_days,
             )
 
-            # 抓取数据
-            rss_data = fetcher.fetch_all()
+            from trendradar.application.collectors import RSSCollector
+
+            batch = RSSCollector(
+                fetcher=fetcher,
+                storage=self.storage_manager,
+            ).collect(configured_ids={feed.id for feed in feeds})
+            rss_data = batch.rss_data
 
             self._rss_source_total = len(feeds)
+            # Keep the wire-health source explicit at the compatibility façade:
+            # CR input health is defined by the fetcher's RSSData contract.
             self._rss_source_failed = len(rss_data.failed_ids)
-            self._cr_rss_failed_ids = {str(v) for v in rss_data.failed_ids}
-            self._cr_rss_successful_ids = {
-                str(v) for v in rss_data.items
-            } - self._cr_rss_failed_ids
+            self._cr_rss_configured_ids = batch.configured_ids
+            self._cr_rss_failed_ids = {
+                str(value) for value in rss_data.failed_ids
+            }
+            self._cr_rss_successful_ids = batch.successful_ids
             from trendradar.cr.input_health import input_item_identity
 
             for feed_id, items in rss_data.items.items():
@@ -1349,12 +1113,11 @@ class NewsAnalyzer:
             if self._cr_rss_successful_ids:
                 self._cr_input_snapshot_generated_at = self.ctx.get_time().isoformat()
 
-            # 保存到存储后端
-            if self.storage_manager.save_rss_data(rss_data):
+            if batch.saved:
                 print(f"[RSS] 数据已保存到存储后端")
 
                 # 处理 RSS 数据（按模式过滤）并返回用于 artifact 生成
-                return self._process_rss_data_by_mode(rss_data)
+                return self._process_rss_data_by_mode(rss_data, run_plan)
             else:
                 print(f"[RSS] 数据保存失败")
                 return None, None, None, set()
@@ -1369,7 +1132,11 @@ class NewsAnalyzer:
             print(f"[RSS] 抓取失败: {e}")
             return None, None, None, set()
 
-    def _process_rss_data_by_mode(self, rss_data) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
+    def _process_rss_data_by_mode(
+        self,
+        rss_data,
+        run_plan: "RunPlan",
+    ) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
         """
         按报告模式处理 RSS 数据，返回与热榜相同格式的统计结构
 
@@ -1392,7 +1159,9 @@ class NewsAnalyzer:
 
         # 加载关键词配置
         try:
-            word_groups, filter_words, global_filters = self.ctx.load_frequency_words(self.frequency_file)
+            word_groups, filter_words, global_filters = self.ctx.load_frequency_words(
+                run_plan.frequency_file
+            )
         except FileNotFoundError:
             word_groups, filter_words, global_filters = [], [], []
 
@@ -1407,11 +1176,11 @@ class NewsAnalyzer:
 
         # 1. 首先获取原始条目（供下游分析与 CR 输入使用）
         # 根据模式获取原始条目
-        if self.report_mode == "incremental":
+        if run_plan.report_mode == "incremental":
             new_items_dict = self.storage_manager.detect_new_rss_items(rss_data)
             if new_items_dict:
                 raw_rss_items = self._convert_rss_items_to_list(new_items_dict, rss_data.id_to_name)
-        elif self.report_mode == "current":
+        elif run_plan.report_mode == "current":
             latest_data = self.storage_manager.get_latest_rss_data(rss_data.date)
             if latest_data:
                 self._cr_rss_historical_data_reused = True
@@ -1433,7 +1202,7 @@ class NewsAnalyzer:
                 rss_new_urls = {item["url"] for item in new_items_list if item.get("url")}
 
         # 3. 根据模式获取统计条目
-        if self.report_mode == "incremental":
+        if run_plan.report_mode == "incremental":
             # 增量模式：统计条目就是新增条目
             if not new_items_list:
                 print("[RSS] 增量模式：没有新增 RSS 条目")
@@ -1456,7 +1225,7 @@ class NewsAnalyzer:
                 # 即使关键词匹配为空，也返回原始条目供下游分析使用
                 return None, None, raw_rss_items, rss_new_urls
 
-        elif self.report_mode == "current":
+        elif run_plan.report_mode == "current":
             # 当前榜单模式：统计=当前榜单所有条目
             # raw_rss_items 已在前面获取
             if not raw_rss_items:
@@ -1641,7 +1410,7 @@ class NewsAnalyzer:
         return rss_items
 
     def _execute_mode_strategy(
-        self, mode_strategy: Dict, results: Dict, id_to_name: Dict, failed_ids: List,
+        self, run_plan: "RunPlan", results: Dict, id_to_name: Dict, failed_ids: List,
         rss_items: Optional[List[Dict]] = None,
         rss_new_items: Optional[List[Dict]] = None,
         raw_rss_items: Optional[List[Dict]] = None,
@@ -1655,160 +1424,56 @@ class NewsAnalyzer:
         # 暴露原始全量 RSS 给 CR 跨证据准入(_run_analysis_pipeline 读取)。
         self._cr_raw_rss_items = raw_rss_items
 
-        # 调度系统
-        scheduler = self.ctx.create_scheduler()
-        schedule = scheduler.resolve()
+        schedule = run_plan
 
-        # 使用 schedule 决定的 report_mode 覆盖全局配置
-        effective_mode = schedule.report_mode
-        if effective_mode != self.report_mode:
-            print(f"[调度] 报告模式覆盖: {self.report_mode} -> {effective_mode}")
-        self.report_mode = effective_mode
-
-        # 重新获取 mode_strategy，确保 report_type 与覆盖后的 report_mode 一致
-        mode_strategy = self._get_mode_strategy()
-
-        # 使用 schedule 决定的 frequency_file 覆盖默认值
-        self.frequency_file = schedule.frequency_file
-
-        # 使用 schedule 决定的筛选策略覆盖默认值
-        self.filter_method = schedule.filter_method or self.ctx.filter_method
-
-        # 使用 schedule 决定的 AI 筛选兴趣文件覆盖默认值
-        self.interests_file = schedule.interests_file
-
-        # 如果调度器说不采集，则直接跳过
-        if not schedule.collect:
-            print("[调度] 当前时间段不执行数据采集，跳过分析流水线")
-            return None
-        # 获取当前监控平台ID列表
         current_platform_ids = self.ctx.platform_ids
-
-        new_titles = self.ctx.detect_new_titles(current_platform_ids)
-        time_info = self.ctx.format_time()
-        word_groups, filter_words, global_filters = self.ctx.load_frequency_words(self.frequency_file)
-
-        html_file = None
-        stats = []
-        ai_result = None
-        title_info = None
         self._cr_historical_data_reused = self._cr_rss_historical_data_reused
 
-        # current 模式需要使用完整的历史数据
-        if self.report_mode == "current":
-            analysis_data = self._load_analysis_data()
-            if analysis_data:
-                self._cr_historical_data_reused = True
-                (
-                    all_results,
-                    historical_id_to_name,
-                    historical_title_info,
-                    historical_new_titles,
-                    _,
-                    _,
-                    _,
-                ) = analysis_data
+        from trendradar.application.analysis_input import (
+            AnalysisInputBuilder,
+            AnalysisInputUnavailable,
+        )
 
-                print(
-                    f"current模式：使用过滤后的历史数据，包含平台：{list(all_results.keys())}"
-                )
-
-                stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
-                    all_results,
-                    self.report_mode,
-                    historical_title_info,
-                    historical_new_titles,
-                    word_groups,
-                    filter_words,
-                    historical_id_to_name,
-                    failed_ids=failed_ids,
-                    global_filters=global_filters,
-                    rss_items=rss_items,
-                    rss_new_items=rss_new_items,
-                    schedule=schedule,
-                    rss_new_urls=rss_new_urls,
-                )
-
-                combined_id_to_name = {**historical_id_to_name, **id_to_name}
-                new_titles = historical_new_titles
-                id_to_name = combined_id_to_name
-                title_info = historical_title_info
-                results = all_results
-            else:
-                print("[失败] 严重错误：无法读取刚保存的数据文件")
-                raise RuntimeError("数据一致性检查失败：保存后立即读取失败")
-        elif self.report_mode == "daily":
-            # daily 模式：使用全天累计数据
-            analysis_data = self._load_analysis_data()
-            if analysis_data:
-                self._cr_historical_data_reused = True
-                (
-                    all_results,
-                    historical_id_to_name,
-                    historical_title_info,
-                    historical_new_titles,
-                    _,
-                    _,
-                    _,
-                ) = analysis_data
-
-                stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
-                    all_results,
-                    self.report_mode,
-                    historical_title_info,
-                    historical_new_titles,
-                    word_groups,
-                    filter_words,
-                    historical_id_to_name,
-                    failed_ids=failed_ids,
-                    global_filters=global_filters,
-                    rss_items=rss_items,
-                    rss_new_items=rss_new_items,
-                    schedule=schedule,
-                    rss_new_urls=rss_new_urls,
-                )
-
-                combined_id_to_name = {**historical_id_to_name, **id_to_name}
-                new_titles = historical_new_titles
-                id_to_name = combined_id_to_name
-                title_info = historical_title_info
-                results = all_results
-            else:
-                # 没有历史数据时使用当前数据
-                title_info = self._prepare_current_title_info(results, time_info)
-                stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
-                    results,
-                    self.report_mode,
-                    title_info,
-                    new_titles,
-                    word_groups,
-                    filter_words,
-                    id_to_name,
-                    failed_ids=failed_ids,
-                    global_filters=global_filters,
-                    rss_items=rss_items,
-                    rss_new_items=rss_new_items,
-                    schedule=schedule,
-                    rss_new_urls=rss_new_urls,
-                )
-        else:
-            # incremental 模式：只使用当前抓取的数据
-            title_info = self._prepare_current_title_info(results, time_info)
-            stats, html_file, ai_result, rss_items = self._run_analysis_pipeline(
-                results,
-                self.report_mode,
-                title_info,
-                new_titles,
-                word_groups,
-                filter_words,
-                id_to_name,
+        builder = AnalysisInputBuilder(
+            load_history=lambda: self._load_history_input(),
+            prepare_current_title_info=self._prepare_current_title_info,
+            detect_new_titles=lambda: self.ctx.detect_new_titles(
+                current_platform_ids
+            ),
+            load_frequency_words=lambda: self.ctx.load_frequency_words(
+                run_plan.frequency_file
+            ),
+            format_time=self.ctx.format_time,
+        )
+        try:
+            request = builder.build(
+                plan=run_plan,
+                results=results,
+                id_to_name=id_to_name,
                 failed_ids=failed_ids,
-                global_filters=global_filters,
                 rss_items=rss_items,
                 rss_new_items=rss_new_items,
-                schedule=schedule,
                 rss_new_urls=rss_new_urls,
             )
+        except AnalysisInputUnavailable as exc:
+            print("[失败] 严重错误：无法读取刚保存的数据文件")
+            raise RuntimeError("数据一致性检查失败：保存后立即读取失败") from exc
+
+        self._cr_historical_data_reused = (
+            request.historical_data_reused
+            or self._cr_rss_historical_data_reused
+        )
+        if run_plan.report_mode == "current" and request.historical_data_reused:
+            print(
+                "current模式：使用过滤后的历史数据，包含平台："
+                f"{list(request.results.keys())}"
+            )
+
+        outcome = self._run_analysis_pipeline(
+            request,
+            schedule,
+        )
+        html_file = outcome.html_file
 
         if html_file:
             print(f"HTML报告已生成: {html_file}")
@@ -1825,363 +1490,28 @@ class NewsAnalyzer:
         return html_file
 
     def run(self) -> None:
-        """执行分析流程"""
-        try:
-            if not self._initialize_and_check_config():
-                return
+        """Compatibility façade over the application run coordinator."""
+        from trendradar.application.coordinator import RunCoordinator
 
-            self._cr_hotlist_successful_ids.clear()
-            self._cr_hotlist_failed_ids.clear()
-            self._cr_rss_successful_ids.clear()
-            self._cr_rss_failed_ids.clear()
-            self._cr_observed_item_identities.clear()
-            self._cr_input_snapshot_generated_at = None
-            self._cr_historical_data_reused = False
-            self._cr_rss_historical_data_reused = False
-
-            mode_strategy = self._get_mode_strategy()
-
-            # 抓取热榜数据
-            results, id_to_name, failed_ids = self._crawl_data()
-
-            # 抓取 RSS 数据（如果启用），返回统计条目、新增条目和原始条目
-            rss_items, rss_new_items, raw_rss_items, rss_new_urls = self._crawl_rss_data()
-
-            # 执行模式策略，传递 RSS 数据用于 artifact 生成
-            self._execute_mode_strategy(
-                mode_strategy, results, id_to_name, failed_ids,
-                rss_items=rss_items, rss_new_items=rss_new_items,
-                raw_rss_items=raw_rss_items, rss_new_urls=rss_new_urls
-            )
-
-        except Exception as e:
-            print(f"分析流程执行出错: {e}")
-            # The process entrypoint owns the user-facing exit policy.  Do not
-            # turn an incomplete analysis into a successful process (and, in
-            # scheduled runs, a successful task heartbeat).
-            raise
-        finally:
-            # 清理资源（包括过期数据清理和数据库连接关闭）
-            self.ctx.cleanup()
-
-
-def _record_doctor_result(results: List[Tuple[str, str, str]], status: str, item: str, detail: str) -> None:
-    """记录并打印 doctor 检查结果"""
-    label = DOCTOR_STATUS_LABELS.get(status, "[未知]")
-    results.append((status, item, detail))
-    print(f"{label} {item}: {detail}")
-
-
-def _save_doctor_report(
-    results: List[Tuple[str, str, str]],
-    pass_count: int,
-    warn_count: int,
-    fail_count: int,
-    config_path: Optional[str],
-) -> None:
-    """保存 doctor 体检报告到 JSON 文件"""
-    report = {
-        "version": __version__,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "config_path": config_path or os.environ.get("CONFIG_PATH", "config/config.yaml"),
-        "summary": {
-            "pass": pass_count,
-            "warn": warn_count,
-            "fail": fail_count,
-            "ok": fail_count == 0,
-        },
-        "checks": [
-            {"status": status, "item": item, "detail": detail}
-            for status, item, detail in results
-        ],
-    }
-
-    try:
-        output_dir = Path("output") / "meta"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / "doctor_report.json"
-        output_path.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"体检报告已保存: {output_path}")
-    except Exception as e:
-        print(f"[警告] 体检报告保存失败: {e}")
-
-
-def _run_doctor(config_path: Optional[str] = None) -> bool:
-    """运行环境体检"""
-    print("=" * 60)
-    print(f"Ptilopsis Radar v{__version__} 环境体检")
-    print("=" * 60)
-
-    results: List[Tuple[str, str, str]] = []
-    config = None
-
-    # 1) Python 版本检查
-    py_ok = sys.version_info >= (3, 10)
-    py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    if py_ok:
-        _record_doctor_result(results, "pass", "Python版本", f"{py_version} (满足 >= 3.10)")
-    else:
-        _record_doctor_result(results, "fail", "Python版本", f"{py_version} (不满足 >= 3.10)")
-
-    # 2) 关键文件检查
-    if config_path is None:
-        config_path = os.environ.get("CONFIG_PATH", "config/config.yaml")
-
-    required_files = [
-        (config_path, "主配置文件"),
-        ("config/frequency_words.txt", "关键词文件"),
-    ]
-    optional_files = [
-        ("config/timeline.yaml", "调度文件"),
-    ]
-
-    for path_str, desc in required_files:
-        if Path(path_str).exists():
-            _record_doctor_result(results, "pass", desc, f"已找到: {path_str}")
-        else:
-            _record_doctor_result(results, "fail", desc, f"缺失: {path_str}")
-
-    for path_str, desc in optional_files:
-        if Path(path_str).exists():
-            _record_doctor_result(results, "pass", desc, f"已找到: {path_str}")
-        else:
-            _record_doctor_result(results, "warn", desc, f"未找到: {path_str}（将使用默认调度模板）")
-
-    # 3) 配置加载检查
-    try:
-        config = load_config(config_path)
-        _record_doctor_result(results, "pass", "配置加载", f"加载成功: {config_path}")
-    except Exception as e:
-        _record_doctor_result(results, "fail", "配置加载", f"加载失败: {e}")
-
-    # 后续检查依赖配置对象
-    if config:
-        # 4) 调度配置检查
-        try:
-            ctx = AppContext(config)
-            schedule = ctx.create_scheduler().resolve()
-            detail = f"调度解析成功（report_mode={schedule.report_mode}, ai_mode={schedule.ai_mode}）"
-            _record_doctor_result(results, "pass", "调度配置", detail)
-        except Exception as e:
-            _record_doctor_result(results, "fail", "调度配置", f"解析失败: {e}")
-
-        # 5) AI 配置检查（按功能场景区分严重级别）
-        ai_analysis_enabled = config.get("AI_ANALYSIS", {}).get("ENABLED", False)
-        ai_translation_enabled = config.get("AI_TRANSLATION", {}).get("ENABLED", False)
-        ai_filter_enabled = config.get("FILTER", {}).get("METHOD", "keyword") == "ai"
-        ai_enabled = ai_analysis_enabled or ai_translation_enabled or ai_filter_enabled
-
-        if ai_enabled:
-            try:
-                from trendradar.ai.client import AIClient
-                valid, message = AIClient(config.get("AI", {})).validate_config()
-                if valid:
-                    _record_doctor_result(results, "pass", "AI配置", f"模型: {config.get('AI', {}).get('MODEL', '')}")
-                else:
-                    # AI 分析/翻译是硬依赖；AI 筛选缺失时会自动回退关键词匹配
-                    if ai_analysis_enabled or ai_translation_enabled:
-                        _record_doctor_result(results, "fail", "AI配置", message)
-                    else:
-                        _record_doctor_result(results, "warn", "AI配置", f"{message}（AI 筛选将回退关键词模式）")
-            except Exception as e:
-                _record_doctor_result(results, "fail", "AI配置", f"校验异常: {e}")
-        else:
-            _record_doctor_result(results, "warn", "AI配置", "未启用 AI 功能，跳过校验")
-
-        # 6) 存储配置检查
-        try:
-            storage_cfg = config.get("STORAGE", {})
-            backend = storage_cfg.get("BACKEND", "auto")
-            remote = storage_cfg.get("REMOTE", {})
-            missing_remote_keys = [
-                k for k in ("BUCKET_NAME", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ENDPOINT_URL")
-                if not remote.get(k)
-            ]
-
-            if backend == "remote" and missing_remote_keys:
-                _record_doctor_result(
-                    results, "fail", "存储配置",
-                    f"remote 模式缺少配置: {', '.join(missing_remote_keys)}"
-                )
-            elif backend == "auto" and os.environ.get("GITHUB_ACTIONS") == "true" and missing_remote_keys:
-                _record_doctor_result(
-                    results, "warn", "存储配置",
-                    "GitHub Actions + auto 模式未完整配置远程存储，可能导致数据丢失"
-                )
-            else:
-                sm = AppContext(config).get_storage_manager()
-                _record_doctor_result(results, "pass", "存储配置", f"当前后端: {sm.backend_name}")
-        except Exception as e:
-            _record_doctor_result(results, "fail", "存储配置", f"检查失败: {e}")
-
-        # 7) 输出目录可写检查
-        try:
-            output_dir = Path("output")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            probe_file = output_dir / ".doctor_write_probe"
-            probe_file.write_text("ok", encoding="utf-8")
-            probe_file.unlink(missing_ok=True)
-            _record_doctor_result(results, "pass", "输出目录", f"可写: {output_dir}")
-        except Exception as e:
-            _record_doctor_result(results, "fail", "输出目录", f"不可写: {e}")
-
-    pass_count = sum(1 for status, _, _ in results if status == "pass")
-    warn_count = sum(1 for status, _, _ in results if status == "warn")
-    fail_count = sum(1 for status, _, _ in results if status == "fail")
-
-    _save_doctor_report(results, pass_count, warn_count, fail_count, config_path)
-
-    print("-" * 60)
-    print(
-        "体检结果: "
-        f"{DOCTOR_STATUS_LABELS['pass']} {pass_count} 项通过  "
-        f"{DOCTOR_STATUS_LABELS['warn']} {warn_count} 项警告  "
-        f"{DOCTOR_STATUS_LABELS['fail']} {fail_count} 项失败"
-    )
-    print("=" * 60)
-
-    if fail_count == 0:
-        print("体检通过。")
-        return True
-
-    print("体检未通过，请先修复失败项。")
-    return False
+        RunCoordinator(self).run()
 
 
 def main() -> int:
-    """主程序入口"""
-    # 解析命令行参数
-    parser = argparse.ArgumentParser(
-        description="Ptilopsis Radar - 热点新闻聚合与分析工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-调度状态命令:
-  --show-schedule        显示当前调度状态（时间段、行为开关）
-诊断命令:
-  --doctor               运行环境与配置体检
-
-示例:
-  python -m trendradar                    # 正常运行
-  python -m trendradar --show-schedule    # 查看当前调度状态
-  python -m trendradar --doctor           # 运行一键体检
-"""
+    """Assemble the CLI shell from concrete application dependencies."""
+    from trendradar.application.cli import CLIApplication
+    from trendradar.application.diagnostics import (
+        run_doctor,
+        show_schedule,
     )
-    parser.add_argument(
-        "--show-schedule",
-        action="store_true",
-        help="显示当前调度状态"
-    )
-    parser.add_argument(
-        "--doctor",
-        action="store_true",
-        help="运行环境与配置体检"
-    )
-    args = parser.parse_args()
 
-    debug_mode = False
-    try:
-        # 处理 doctor 命令（不依赖完整运行流程）
-        if args.doctor:
-            ok = _run_doctor()
-            return 0 if ok else 1
-
-        # 先加载配置
-        config = load_config()
-
-        # 处理状态查看命令
-        if args.show_schedule:
-            _handle_status_commands(config)
-            return 0
-
-        version_url = config.get("VERSION_CHECK_URL", "")
-        configs_version_url = config.get("CONFIGS_VERSION_CHECK_URL", "")
-
-        # 统一版本检查（程序版本 + 配置文件版本，只请求一次远程）
-        need_update = False
-        remote_version = None
-        if version_url:
-            need_update, remote_version = check_all_versions(version_url, configs_version_url)
-
-        # 复用已加载的配置，避免重复加载
-        analyzer = NewsAnalyzer(config=config)
-
-        # 设置更新信息（复用已获取的远程版本，不再重复请求）
-        if analyzer.is_github_actions and need_update and remote_version:
-            analyzer.update_info = {
-                "current_version": __version__,
-                "remote_version": remote_version,
-            }
-
-        # 获取 debug 配置
-        debug_mode = analyzer.ctx.config.get("DEBUG", False)
-        analyzer.run()
-        return 0
-    except FileNotFoundError as e:
-        print(f"[失败] 配置文件错误: {e}")
-        print("\n请确保以下文件存在:")
-        print("  • config/config.yaml")
-        print("  • config/frequency_words.txt")
-        print("\n参考项目文档进行正确配置")
-        return 1
-    except Exception as e:
-        print(f"[失败] 程序运行错误: {e}")
-        if debug_mode:
-            raise
-        return 1
-
-
-def _handle_status_commands(config: Dict) -> None:
-    """处理状态查看命令 - 显示当前调度状态"""
-    from trendradar.context import AppContext
-
-    ctx = AppContext(config)
-
-    print("=" * 60)
-    print(f"Ptilopsis Radar v{__version__} 调度状态")
-    print("=" * 60)
-
-    try:
-        scheduler = ctx.create_scheduler()
-        schedule = scheduler.resolve()
-
-        now = ctx.get_time()
-        date_str = ctx.format_date()
-
-        print(f"\n 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')} ({ctx.timezone})")
-        print(f" 当前日期: {date_str}")
-
-        print(f"\n 调度信息:")
-        print(f"  日计划: {schedule.day_plan}")
-        if schedule.period_key:
-            print(f"  当前时间段: {schedule.period_name or schedule.period_key} ({schedule.period_key})")
-        else:
-            print(f"  当前时间段: 无（使用默认配置）")
-
-        print(f"\n 行为开关:")
-        print(f"  采集数据: {_format_switch_state(schedule.collect)}")
-        print(f"  AI 分析:  {_format_switch_state(schedule.analyze)}")
-        print(f"  报告模式: {schedule.report_mode}")
-        print(f"  AI 模式:  {schedule.ai_mode}")
-
-        if schedule.period_key:
-            print("\n一次性控制:")
-            if schedule.once_analyze:
-                already_analyzed = scheduler.already_executed(schedule.period_key, "analyze", date_str)
-                once_state = "[已执行]" if already_analyzed else "[待执行]"
-                print(f"  AI 分析:  仅一次 {once_state}")
-            else:
-                print(f"  AI 分析:  不限次数")
-
-    except Exception as e:
-        print(f"\n[失败] 获取调度状态失败: {e}")
-
-    print("\n" + "=" * 60)
-
-    # 清理资源
-    ctx.cleanup()
+    return CLIApplication(
+        load_config=load_config,
+        analyzer_factory=NewsAnalyzer,
+        check_versions=check_all_versions,
+        run_doctor=run_doctor,
+        show_schedule=show_schedule,
+        version=__version__,
+    ).run()
 
 
 if __name__ == "__main__":
