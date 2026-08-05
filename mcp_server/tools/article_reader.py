@@ -6,6 +6,8 @@
 
 """
 
+import logging
+import threading
 import time
 from typing import Dict, List
 
@@ -19,6 +21,11 @@ JINA_READER_BASE = "https://r.jina.ai"
 DEFAULT_TIMEOUT = 30  # 秒
 MAX_BATCH_SIZE = 5  # 单次批量最大篇数
 BATCH_INTERVAL = 5.0  # 批量请求间隔（秒）
+MIN_TIMEOUT = 10
+MAX_TIMEOUT = 60
+
+
+logger = logging.getLogger(__name__)
 
 
 class ArticleReaderTools:
@@ -35,6 +42,7 @@ class ArticleReaderTools:
         self.project_root = project_root
         self.jina_api_key = jina_api_key
         self._last_request_time = 0.0
+        self._throttle_lock = threading.Lock()
 
     def _build_headers(self) -> Dict[str, str]:
         """构建请求头"""
@@ -49,11 +57,18 @@ class ArticleReaderTools:
 
     def _throttle(self):
         """速率控制：确保请求间隔 5 秒"""
-        now = time.time()
-        elapsed = now - self._last_request_time
-        if elapsed < BATCH_INTERVAL:
-            time.sleep(BATCH_INTERVAL - elapsed)
-        self._last_request_time = time.time()
+        with self._throttle_lock:
+            now = time.time()
+            elapsed = now - self._last_request_time
+            if elapsed < BATCH_INTERVAL:
+                time.sleep(BATCH_INTERVAL - elapsed)
+            self._last_request_time = time.time()
+
+    @staticmethod
+    def _normalize_timeout(timeout: int) -> int:
+        if isinstance(timeout, bool) or not isinstance(timeout, int):
+            raise InvalidParameterError("timeout 必须是整数")
+        return min(max(timeout, MIN_TIMEOUT), MAX_TIMEOUT)
 
     def read_article(
         self,
@@ -71,6 +86,7 @@ class ArticleReaderTools:
             文章内容字典
         """
         try:
+            timeout = self._normalize_timeout(timeout)
             if not url or not url.startswith(("http://", "https://")):
                 raise InvalidParameterError(
                     f"无效的 URL: {url}",
@@ -126,13 +142,15 @@ class ArticleReaderTools:
             }
         except MCPError as e:
             return {"success": False, "error": e.to_dict()}
-        except Exception as e:
+        except Exception:
+            logger.exception("Unexpected article reader failure")
             return {
                 "success": False,
                 "error": {
                     "code": "REQUEST_ERROR",
-                    "message": str(e),
-                    "url": url
+                    "message": "文章读取请求失败",
+                    "url": url,
+                    "suggestion": "请检查服务日志获取详细信息",
                 }
             }
 
@@ -152,6 +170,9 @@ class ArticleReaderTools:
             批量读取结果
         """
         try:
+            timeout = self._normalize_timeout(timeout)
+            if not isinstance(urls, list):
+                raise InvalidParameterError("urls 必须是 URL 列表")
             if not urls:
                 raise InvalidParameterError(
                     "URL 列表不能为空",
@@ -199,11 +220,13 @@ class ArticleReaderTools:
 
         except MCPError as e:
             return {"success": False, "error": e.to_dict()}
-        except Exception as e:
+        except Exception:
+            logger.exception("Unexpected batch article reader failure")
             return {
                 "success": False,
                 "error": {
                     "code": "BATCH_ERROR",
-                    "message": str(e)
+                    "message": "批量文章读取失败",
+                    "suggestion": "请检查服务日志获取详细信息",
                 }
             }

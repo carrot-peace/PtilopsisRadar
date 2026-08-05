@@ -152,14 +152,14 @@ class AnalyticsInsightsMixin:
                     date_range=date_range
                 )
             elif analysis_type == "viral":
-                # viral模式不需要topic参数，使用通用检测
                 return self.detect_viral_topics(
+                    topic=topic,
                     threshold=threshold,
                     time_window=time_window
                 )
             else:  # predict
-                # predict模式不需要topic参数，使用通用预测
                 return self.predict_trending_topics(
+                    topic=topic,
                     lookahead_hours=lookahead_hours,
                     confidence_threshold=confidence_threshold
                 )

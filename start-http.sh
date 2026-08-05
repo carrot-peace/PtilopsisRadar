@@ -13,9 +13,9 @@ if [ ! -d ".venv" ]; then
     exit 1
 fi
 
-echo "[模式] HTTP (适合远程访问)"
+echo "[模式] HTTP (本机只读)"
 echo "[地址] http://localhost:3333/mcp"
 echo "[提示] 按 Ctrl+C 停止服务"
 echo ""
 
-uv run python -m mcp_server.server --transport http --host 0.0.0.0 --port 3333
+uv run python -m mcp_server.server --transport http --host 127.0.0.1 --port 3333

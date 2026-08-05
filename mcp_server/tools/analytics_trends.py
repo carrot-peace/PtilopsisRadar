@@ -7,7 +7,6 @@ from .analytics_common import (
     List,
     MCPError,
     Optional,
-    SequenceMatcher,
     Union,
     defaultdict,
     datetime,
@@ -18,6 +17,14 @@ from .analytics_common import (
     validate_limit,
     validate_threshold,
 )
+from ..domain.text import extract_keywords, sequence_similarity
+
+
+_ANALYTICS_STOPWORDS = {
+    '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一',
+    '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着',
+    '没有', '看', '好', '自己', '这',
+}
 
 
 class AnalyticsTrendsMixin:
@@ -309,7 +316,8 @@ class AnalyticsTrendsMixin:
     def detect_viral_topics(
         self,
         threshold: float = 3.0,
-        time_window: int = 24
+        time_window: int = 24,
+        topic: Optional[str] = None,
     ) -> Dict:
         """
         异常热度检测 - 自动识别突然爆火的话题
@@ -339,15 +347,19 @@ class AnalyticsTrendsMixin:
             # 参数验证
             threshold = validate_threshold(threshold, default=3.0, min_value=1.0, max_value=100.0)
             time_window = validate_limit(time_window, default=24, max_limit=72)
+            if topic:
+                topic = validate_keyword(topic)
+            topic_lower = topic.lower() if topic else None
 
             # 读取当前和之前的数据
             current_all_titles, _, _ = self.analytics_service.read_news()
 
-            # 读取昨天的数据作为基准
-            yesterday = datetime.now() - timedelta(days=1)
+            # 日级快照以向上取整的天数近似请求的小时窗口。
+            comparison_days = max(1, (time_window + 23) // 24)
+            baseline_date = datetime.now() - timedelta(days=comparison_days)
             try:
                 previous_all_titles, _, _ = self.analytics_service.read_news(
-                    date=yesterday
+                    date=baseline_date
                 )
             except DataNotFoundError:
                 previous_all_titles = {}
@@ -358,7 +370,11 @@ class AnalyticsTrendsMixin:
 
             for _, titles in current_all_titles.items():
                 for title in titles.keys():
-                    keywords = self._extract_keywords(title)
+                    keywords = self._topic_keywords(
+                        title,
+                        topic=topic,
+                        topic_lower=topic_lower,
+                    )
                     current_keywords.update(keywords)
 
                     for kw in keywords:
@@ -369,7 +385,11 @@ class AnalyticsTrendsMixin:
 
             for _, titles in previous_all_titles.items():
                 for title in titles.keys():
-                    keywords = self._extract_keywords(title)
+                    keywords = self._topic_keywords(
+                        title,
+                        topic=topic,
+                        topic_lower=topic_lower,
+                    )
                     previous_keywords.update(keywords)
 
             # 检测异常热度
@@ -413,7 +433,9 @@ class AnalyticsTrendsMixin:
                         "description": "异常热度检测结果",
                         "total": 0,
                         "threshold": threshold,
-                        "time_window": time_window
+                        "time_window": time_window,
+                        "topic": topic,
+                        "baseline_date": baseline_date.strftime("%Y-%m-%d"),
                     },
                     "data": [],
                     "message": f"未检测到热度增长超过 {threshold} 倍的话题"
@@ -426,6 +448,8 @@ class AnalyticsTrendsMixin:
                     "total": len(viral_topics),
                     "threshold": threshold,
                     "time_window": time_window,
+                    "topic": topic,
+                    "baseline_date": baseline_date.strftime("%Y-%m-%d"),
                     "detection_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 },
                 "data": viral_topics
@@ -448,7 +472,8 @@ class AnalyticsTrendsMixin:
     def predict_trending_topics(
         self,
         lookahead_hours: int = 6,
-        confidence_threshold: float = 0.7
+        confidence_threshold: float = 0.7,
+        topic: Optional[str] = None,
     ) -> Dict:
         """
         话题预测 - 基于历史数据预测未来可能的热点
@@ -484,6 +509,9 @@ class AnalyticsTrendsMixin:
                 max_value=1.0,
                 param_name="confidence_threshold"
             )
+            if topic:
+                topic = validate_keyword(topic)
+            topic_lower = topic.lower() if topic else None
 
             # 收集最近3天的数据用于预测
             keyword_trends = defaultdict(list)
@@ -500,12 +528,21 @@ class AnalyticsTrendsMixin:
                     keywords_count = Counter()
                     for _, titles in all_titles.items():
                         for title in titles.keys():
-                            keywords = self._extract_keywords(title)
+                            keywords = self._topic_keywords(
+                                title,
+                                topic=topic,
+                                topic_lower=topic_lower,
+                            )
                             keywords_count.update(keywords)
 
                     # 记录每个关键词的历史数据
-                    for keyword, count in keywords_count.items():
-                        keyword_trends[keyword].append(count)
+                    if topic:
+                        keyword_trends[topic].append(
+                            keywords_count.get(topic, 0)
+                        )
+                    else:
+                        for keyword, count in keywords_count.items():
+                            keyword_trends[keyword].append(count)
 
                 except DataNotFoundError:
                     pass
@@ -519,14 +556,23 @@ class AnalyticsTrendsMixin:
 
                 for _, titles in all_titles.items():
                     for title in titles.keys():
-                        keywords = self._extract_keywords(title)
+                        keywords = self._topic_keywords(
+                            title,
+                            topic=topic,
+                            topic_lower=topic_lower,
+                        )
                         keywords_count.update(keywords)
 
                         for kw in keywords:
                             keyword_titles[kw].append(title)
 
-                for keyword, count in keywords_count.items():
-                    keyword_trends[keyword].append(count)
+                if topic:
+                    keyword_trends[topic].append(
+                        keywords_count.get(topic, 0)
+                    )
+                else:
+                    for keyword, count in keywords_count.items():
+                        keyword_trends[keyword].append(count)
 
             except DataNotFoundError:
                 raise DataNotFoundError(
@@ -568,9 +614,17 @@ class AnalyticsTrendsMixin:
                         confidence = 0.6
 
                     if confidence >= confidence_threshold:
+                        projected_count = max(
+                            0.0,
+                            recent_value * (
+                                1
+                                + growth_rate * lookahead_hours / 24
+                            ),
+                        )
                         predicted_topics.append({
                             "keyword": keyword,
                             "current_count": recent_value,
+                            "projected_count": round(projected_count, 2),
                             "growth_rate": round(growth_rate * 100, 2),
                             "confidence": round(confidence, 2),
                             "trend_data": trend_data,
@@ -591,6 +645,7 @@ class AnalyticsTrendsMixin:
                     "total": len(predicted_topics),
                     "returned": min(20, len(predicted_topics)),
                     "lookahead_hours": lookahead_hours,
+                    "topic": topic,
                     "confidence_threshold": confidence_threshold,
                     "prediction_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 },
@@ -614,6 +669,17 @@ class AnalyticsTrendsMixin:
 
     # ==================== 辅助方法 ====================
 
+    def _topic_keywords(
+        self,
+        title: str,
+        *,
+        topic: Optional[str],
+        topic_lower: Optional[str],
+    ) -> List[str]:
+        if topic_lower is None:
+            return self._extract_keywords(title)
+        return [topic] if topic_lower in title.lower() else []
+
     def _extract_keywords(self, title: str, min_length: int = 2) -> List[str]:
         """
         从标题中提取关键词（简单实现）
@@ -625,22 +691,11 @@ class AnalyticsTrendsMixin:
         Returns:
             关键词列表
         """
-        # 移除URL和特殊字符
-        title = re.sub(r'http[s]?://\S+', '', title)
-        title = re.sub(r'[^\w\s]', ' ', title)
-
-        # 简单分词（按空格和常见分隔符）
-        words = re.split(r'[\s，。！？、]+', title)
-
-        # 过滤停用词和短词
-        stopwords = {'的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'}
-
-        keywords = [
-            word.strip() for word in words
-            if word.strip() and len(word.strip()) >= min_length and word.strip() not in stopwords
-        ]
-
-        return keywords
+        return extract_keywords(
+            title,
+            min_length=min_length,
+            stopwords=_ANALYTICS_STOPWORDS,
+        )
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """
@@ -653,8 +708,11 @@ class AnalyticsTrendsMixin:
         Returns:
             相似度分数（0-1之间）
         """
-        # 使用 SequenceMatcher 计算相似度
-        return SequenceMatcher(None, text1, text2).ratio()
+        return sequence_similarity(
+            text1,
+            text2,
+            case_sensitive=True,
+        )
 
     def _find_unique_topics(self, platform_stats: Dict) -> Dict[str, List[str]]:
         """

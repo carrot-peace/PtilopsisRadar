@@ -8,7 +8,6 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
-from difflib import SequenceMatcher
 
 import yaml
 

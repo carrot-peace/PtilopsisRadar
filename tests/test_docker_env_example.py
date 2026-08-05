@@ -98,6 +98,26 @@ class TestDockerEnvExample(unittest.TestCase):
                 text,
             )
 
+    def test_mcp_http_defaults_are_loopback_and_read_only(self):
+        values = _env_values()
+        self.assertEqual(values["MCP_HOST"], "127.0.0.1")
+        self.assertEqual(values["MCP_HTTP_ALLOW_WRITE"], "false")
+        self.assertEqual(values["MCP_HTTP_BEARER_TOKEN"], "")
+
+        for relative_path in (
+            "docker/docker-compose.yml",
+            "docker/docker-compose-build.yml",
+        ):
+            text = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertIn(
+                "MCP_HTTP_PUBLISH_HOST=${MCP_HOST:-127.0.0.1}",
+                text,
+            )
+            self.assertIn(
+                "MCP_HTTP_ALLOW_WRITE=${MCP_HTTP_ALLOW_WRITE:-false}",
+                text,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

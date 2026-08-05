@@ -64,7 +64,9 @@ class DataService:
             DataNotFoundError: 数据不存在
         """
         # 尝试从缓存获取
-        cache_key = f"latest_news:{','.join(platforms or [])}:{limit}:{include_url}"
+        cache_key = self.parser.cache_key(
+            f"latest_news:{','.join(platforms or [])}:{limit}:{include_url}"
+        )
         cached = self.cache.get(cache_key, ttl=900)  # 15分钟缓存
         if cached:
             return cached
@@ -149,7 +151,10 @@ class DataService:
         """
         # 尝试从缓存获取
         date_str = target_date.strftime("%Y-%m-%d")
-        cache_key = f"news_by_date:{date_str}:{','.join(platforms or [])}:{limit}:{include_url}"
+        cache_key = self.parser.cache_key(
+            f"news_by_date:{date_str}:{','.join(platforms or [])}:"
+            f"{limit}:{include_url}"
+        )
         cached = self.cache.get(cache_key, ttl=900)  # 15分钟缓存
         if cached:
             return cached
@@ -196,6 +201,40 @@ class DataService:
         self.cache.set(cache_key, result)
 
         return result
+
+    def get_news_by_date_range(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        platforms: Optional[List[str]] = None,
+        limit: int = 50,
+        include_url: bool = False,
+    ) -> List[Dict]:
+        """Read a bounded date range, returning newest dates first."""
+        news_list = []
+        current_date = end_date
+        while current_date >= start_date and len(news_list) < limit:
+            try:
+                daily_news = self.get_news_by_date(
+                    target_date=current_date,
+                    platforms=platforms,
+                    limit=limit,
+                    include_url=include_url,
+                )
+                news_list.extend(daily_news)
+            except DataNotFoundError:
+                pass
+            current_date -= timedelta(days=1)
+
+        if not news_list:
+            raise DataNotFoundError(
+                "指定日期范围内没有新闻数据",
+                suggestion=(
+                    "请检查日期范围，或调用 list_available_dates "
+                    "查看本地可用日期"
+                ),
+            )
+        return news_list[:limit]
 
     def search_news_by_keyword(
         self,
@@ -352,7 +391,9 @@ class DataService:
             DataNotFoundError: 数据不存在
         """
         # 尝试从缓存获取
-        cache_key = f"trending_topics:{top_n}:{mode}:{extract_mode}"
+        cache_key = self.parser.cache_key(
+            f"trending_topics:{top_n}:{mode}:{extract_mode}"
+        )
         cached = self.cache.get(cache_key, ttl=900)  # 15分钟缓存
         if cached:
             return cached
@@ -611,7 +652,10 @@ class DataService:
             DataNotFoundError: 数据不存在
         """
         days = min(max(days, 1), 30)  # 限制 1-30 天
-        cache_key = f"latest_rss:{','.join(feeds or [])}:{days}:{limit}:{include_summary}"
+        cache_key = self.parser.cache_key(
+            f"latest_rss:{','.join(feeds or [])}:{days}:{limit}:"
+            f"{include_summary}"
+        )
         cached = self.cache.get(cache_key, ttl=900)
         if cached:
             return cached
@@ -700,7 +744,10 @@ class DataService:
         Returns:
             匹配的 RSS 条目列表（按 URL 去重）
         """
-        cache_key = f"search_rss:{keyword}:{','.join(feeds or [])}:{days}:{limit}:{include_summary}"
+        cache_key = self.parser.cache_key(
+            f"search_rss:{keyword}:{','.join(feeds or [])}:{days}:{limit}:"
+            f"{include_summary}"
+        )
         cached = self.cache.get(cache_key, ttl=900)
         if cached:
             return cached
@@ -769,7 +816,7 @@ class DataService:
         Returns:
             RSS 源状态信息
         """
-        cache_key = "rss_feeds_status"
+        cache_key = self.parser.cache_key("rss_feeds_status")
         cached = self.cache.get(cache_key, ttl=900)
         if cached:
             return cached

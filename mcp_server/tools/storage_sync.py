@@ -5,15 +5,26 @@
 实现从远程存储拉取数据到本地、获取存储状态、列出可用日期等功能。
 """
 
+import logging
+from contextlib import redirect_stdout
+from datetime import datetime
+from io import StringIO
 import os
-import re
 from pathlib import Path
-from datetime import datetime, timedelta
+import re
 from typing import Dict, List, Optional
 
 import yaml
 
+from ..services.remote_pull_service import (
+    RemotePullResult,
+    RemotePullService,
+    validate_pull_days,
+)
 from ..utils.errors import MCPError
+
+
+logger = logging.getLogger(__name__)
 
 
 class StorageSyncTools:
@@ -101,11 +112,25 @@ class StorageSyncTools:
             )
             return self._remote_backend
         except ImportError:
-            print("[存储同步] 远程存储后端需要安装 boto3: pip install boto3")
+            logger.warning(
+                "Remote storage backend requires the boto3 dependency"
+            )
             return None
         except Exception as e:
-            print(f"[存储同步] 创建远程后端失败: {e}")
+            logger.warning("Failed to create remote storage backend: %s", e)
             return None
+
+    def cleanup(self) -> None:
+        """Release the cached remote backend without polluting stdio."""
+        backend, self._remote_backend = self._remote_backend, None
+        if backend is None:
+            return
+        with redirect_stdout(StringIO()) as output:
+            backend.cleanup()
+        for line in output.getvalue().splitlines():
+            failed = "失败" in line or "failed" in line.lower()
+            log = logger.warning if failed else logger.debug
+            log("Remote backend cleanup: %s", line)
 
     def _get_local_data_dir(self) -> Path:
         """获取本地数据目录"""
@@ -221,6 +246,10 @@ class StorageSyncTools:
             同步结果字典
         """
         try:
+            days = validate_pull_days(days)
+            if days == 0:
+                return self._build_sync_response(RemotePullResult())
+
             # 检查远程配置
             if not self._has_remote_config():
                 return {
@@ -244,77 +273,31 @@ class StorageSyncTools:
                     }
                 }
 
-            # 获取本地数据目录
             local_dir = self._get_local_data_dir()
-            local_dir.mkdir(parents=True, exist_ok=True)
-
-            # 获取远程可用日期
             remote_dates = remote_backend.list_remote_dates()
-
-            # 获取本地已有日期
             local_dates = set(self._get_local_dates())
 
-            # 计算需要拉取的日期（最近 N 天）
             from trendradar.utils.time import get_configured_time
             config = self._load_config()
             timezone = config.get("app", {}).get("timezone", "Asia/Shanghai")
             now = get_configured_time(timezone)
 
-            target_dates = []
-            for i in range(days):
-                date = now - timedelta(days=i)
-                date_str = date.strftime("%Y-%m-%d")
-                if date_str in remote_dates:
-                    target_dates.append(date_str)
-
-            # 执行拉取
-            synced_dates = []
-            skipped_dates = []
-            failed_dates = []
-
-            for date_str in target_dates:
-                # 检查本地是否已存在
-                if date_str in local_dates:
-                    skipped_dates.append(date_str)
-                    continue
-
-                # 拉取单个日期
-                try:
-                    local_date_dir = local_dir / date_str
-                    local_db_path = local_date_dir / "news.db"
-                    remote_key = f"news/{date_str}.db"
-
-                    local_date_dir.mkdir(parents=True, exist_ok=True)
-                    remote_backend.s3_client.download_file(
-                        remote_backend.bucket_name,
-                        remote_key,
-                        str(local_db_path)
-                    )
-                    synced_dates.append(date_str)
-                    print(f"[存储同步] 已拉取: {date_str}")
-                except Exception as e:
-                    failed_dates.append({"date": date_str, "error": str(e)})
-                    print(f"[存储同步] 拉取失败 ({date_str}): {e}")
-
-            return {
-                "success": True,
-                "summary": {
-                    "description": "远程存储同步结果",
-                    "synced_files": len(synced_dates),
-                    "skipped_count": len(skipped_dates),
-                    "failed_count": len(failed_dates)
-                },
-                "data": {
-                    "synced_dates": synced_dates,
-                    "skipped_dates": skipped_dates,
-                    "failed_dates": failed_dates
-                },
-                "message": f"成功同步 {len(synced_dates)} 天数据" + (
-                    f"，跳过 {len(skipped_dates)} 天（本地已存在）" if skipped_dates else ""
-                ) + (
-                    f"，失败 {len(failed_dates)} 天" if failed_dates else ""
+            result = RemotePullService(
+                remote_backend,
+                local_dir,
+            ).pull_recent_news(
+                days=days,
+                now=now,
+                remote_dates=remote_dates,
+                local_dates=local_dates,
+            )
+            for failure in result.failed_dates:
+                logger.warning(
+                    "Failed to pull remote storage date=%s: %s",
+                    failure["date"],
+                    failure["error"],
                 )
-            }
+            return self._build_sync_response(result)
 
         except MCPError as e:
             return {
@@ -329,6 +312,33 @@ class StorageSyncTools:
                     "message": str(e)
                 }
             }
+
+    @staticmethod
+    def _build_sync_response(result: RemotePullResult) -> Dict:
+        synced_dates = result.synced_dates
+        skipped_dates = result.skipped_dates
+        failed_dates = result.failed_dates
+        return {
+            "success": True,
+            "summary": {
+                "description": "远程存储同步结果",
+                "synced_files": len(synced_dates),
+                "skipped_count": len(skipped_dates),
+                "failed_count": len(failed_dates),
+            },
+            "data": {
+                "synced_dates": synced_dates,
+                "skipped_dates": skipped_dates,
+                "failed_dates": failed_dates,
+            },
+            "message": f"成功同步 {len(synced_dates)} 天数据" + (
+                f"，跳过 {len(skipped_dates)} 天（本地已存在）"
+                if skipped_dates else ""
+            ) + (
+                f"，失败 {len(failed_dates)} 天"
+                if failed_dates else ""
+            ),
+        }
 
     def get_storage_status(self) -> Dict:
         """
