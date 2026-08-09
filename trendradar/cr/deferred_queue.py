@@ -155,6 +155,17 @@ def _require_str(data: Mapping[str, object], field_name: str) -> str:
     return value
 
 
+def _require_iso_datetime(data: Mapping[str, object], field_name: str) -> str:
+    value = _require_str(data, field_name)
+    try:
+        _parse_deferred_at(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            f"entry {field_name} must be an ISO-8601 datetime"
+        ) from exc
+    return value
+
+
 def _optional_str(data: Mapping[str, object], field_name: str) -> str | None:
     value = data.get(field_name)
     if value is None:
@@ -187,7 +198,7 @@ def _entry_from_mapping(data: Mapping[str, object]) -> CRDeferredDispatchEntry:
         title=_require_str(data, "title"),
         level=level,
         score=_require_score(data),
-        deferred_at=_require_str(data, "deferred_at"),
+        deferred_at=_require_iso_datetime(data, "deferred_at"),
         deferred_until=_require_str(data, "deferred_until"),
         reason=_require_str(data, "reason"),
         message_text=_require_str(data, "message_text"),

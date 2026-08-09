@@ -148,6 +148,30 @@ class TestDeferredQueueStore(unittest.TestCase):
             self.assertIsNotNone(result.error)
             self.assertEqual(malformed.read_text(encoding="utf-8"), "{not-json")
 
+    def test_invalid_deferred_at_fails_closed_without_rewriting_queue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            saved = save_deferred_dispatch_queue(
+                upsert_deferred_entry(
+                    empty_deferred_dispatch_queue(), _entry("invalid-time")
+                ).queue,
+                queue_path,
+            )
+            self.assertTrue(saved.saved, saved.error)
+            raw = json.loads(queue_path.read_text(encoding="utf-8"))
+            raw["entries"][0]["deferred_at"] = "not-an-iso-timestamp"
+            queue_path.write_text(json.dumps(raw), encoding="utf-8")
+
+            result = load_deferred_dispatch_queue(queue_path)
+
+            self.assertFalse(result.loaded)
+            self.assertEqual(result.queue.entries, ())
+            self.assertIsNotNone(result.error)
+            self.assertIn("deferred_at", result.error)
+            self.assertEqual(
+                json.loads(queue_path.read_text(encoding="utf-8")), raw
+            )
+
     def test_ordering_urgent_before_alert_then_oldest(self):
         queue = empty_deferred_dispatch_queue()
         for entry in (
