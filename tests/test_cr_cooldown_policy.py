@@ -41,8 +41,8 @@ def _preview(
 
 
 class TestPolicyDefaults(unittest.TestCase):
-    def test_same_level_cooldown_default_is_60_minutes(self):
-        self.assertEqual(CRCooldownPolicy().same_level_cooldown_minutes, 60)
+    def test_same_level_cooldown_default_is_240_minutes(self):
+        self.assertEqual(CRCooldownPolicy().same_level_cooldown_minutes, 240)
 
     def test_meaningful_escalation_allowed_by_default(self):
         self.assertTrue(CRCooldownPolicy().allow_meaningful_escalation)
@@ -89,7 +89,7 @@ class TestSingleDecision(unittest.TestCase):
             ),
         )
         self.assertEqual(decision.action, "cooldown")
-        self.assertEqual(decision.cooldown_minutes, 60)
+        self.assertEqual(decision.cooldown_minutes, 240)
 
     def test_same_event_repeat_is_cooldown(self):
         decision = decide_cr_cooldown(
@@ -97,7 +97,7 @@ class TestSingleDecision(unittest.TestCase):
             repeat_preview=_preview("same_event_repeat"),
         )
         self.assertEqual(decision.action, "cooldown")
-        self.assertEqual(decision.cooldown_minutes, 60)
+        self.assertEqual(decision.cooldown_minutes, 240)
 
     def test_meaningful_escalation_is_allow_escalation(self):
         decision = decide_cr_cooldown(
@@ -119,7 +119,7 @@ class TestSingleDecision(unittest.TestCase):
             policy=policy,
         )
         self.assertEqual(decision.action, "cooldown")
-        self.assertEqual(decision.cooldown_minutes, 60)
+        self.assertEqual(decision.cooldown_minutes, 240)
 
     def test_deescalation_is_cooldown_by_default(self):
         decision = decide_cr_cooldown(
@@ -127,7 +127,7 @@ class TestSingleDecision(unittest.TestCase):
             repeat_preview=_preview("deescalation"),
         )
         self.assertEqual(decision.action, "cooldown")
-        self.assertEqual(decision.cooldown_minutes, 60)
+        self.assertEqual(decision.cooldown_minutes, 240)
 
     def test_deescalation_with_policy_enabled_is_allow(self):
         policy = CRCooldownPolicy(allow_deescalation=True)
@@ -147,7 +147,7 @@ class TestSingleDecision(unittest.TestCase):
             policy=policy,
         )
         self.assertEqual(decision.action, "cooldown")
-        self.assertEqual(decision.cooldown_minutes, 60)
+        self.assertEqual(decision.cooldown_minutes, 240)
 
     def test_mismatched_event_key_fails_closed_to_not_evaluated(self):
         # A preview built for a different event must never yield a verdict.

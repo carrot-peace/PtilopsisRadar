@@ -73,7 +73,7 @@ class CRCooldownPolicy:
     project runtime config (config.yaml) and does NOT enforce anything.
     """
 
-    same_level_cooldown_minutes: int = 60
+    same_level_cooldown_minutes: int = 240
     allow_meaningful_escalation: bool = True
     allow_new_events: bool = True
     allow_deescalation: bool = False

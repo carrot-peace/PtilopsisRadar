@@ -211,6 +211,37 @@ class TestSameLevelRepeat(unittest.TestCase):
 
 
 class TestCooldownExpired(unittest.TestCase):
+    def test_default_cooldown_boundary_is_four_hours(self):
+        now = datetime(2026, 6, 18, 8, 0, tzinfo=timezone.utc)
+        inside = _seen_state(
+            level="alert",
+            seen_at=(now - timedelta(minutes=239, seconds=59)).isoformat(),
+        )
+        outside = _seen_state(
+            level="alert",
+            seen_at=(now - timedelta(hours=4)).isoformat(),
+        )
+
+        inside_result = enforce_cr_cooldown(
+            event_key="ev1",
+            candidate_id="c1",
+            current_level="alert",
+            seen_state=inside,
+            prior_snapshot_provided=True,
+            now=now,
+        )
+        outside_result = enforce_cr_cooldown(
+            event_key="ev1",
+            candidate_id="c1",
+            current_level="alert",
+            seen_state=outside,
+            prior_snapshot_provided=True,
+            now=now,
+        )
+
+        self.assertFalse(inside_result.should_dispatch)
+        self.assertTrue(outside_result.should_dispatch)
+
     def test_same_alert_after_cooldown(self):
         seen = _seen_state(
             level="alert",

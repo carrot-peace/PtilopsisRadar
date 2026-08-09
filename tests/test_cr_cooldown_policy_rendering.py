@@ -110,7 +110,7 @@ class TestMarkdownCooldownRendering(unittest.TestCase):
         self.assertIn("#### Cooldown Policy Preview", md)
         self.assertIn("- Action: `cooldown`", md)
         self.assertIn("- Repeat Status: `same_level_repeat`", md)
-        self.assertIn("- Cooldown Minutes: `60`", md)
+        self.assertIn("- Cooldown Minutes: `240`", md)
 
     def test_renders_allow_escalation_for_meaningful_escalation(self):
         pc = _make_presented(decision_level=DECISION_URGENT, total_score=85.0)
@@ -191,7 +191,7 @@ class TestHTMLCooldownRendering(unittest.TestCase):
         self.assertIn(
             "<dt>Repeat Status</dt><dd>same_level_repeat</dd>", block
         )
-        self.assertIn("<dt>Cooldown Minutes</dt><dd>60</dd>", block)
+        self.assertIn("<dt>Cooldown Minutes</dt><dd>240</dd>", block)
 
     def test_renders_allow_escalation(self):
         pc = _make_presented(decision_level=DECISION_URGENT, total_score=85.0)
