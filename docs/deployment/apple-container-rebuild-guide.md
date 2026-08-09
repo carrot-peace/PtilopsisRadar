@@ -112,6 +112,21 @@ curl -Is http://127.0.0.1:8080/ | head -1
 # 期望：HTTP/1.0 200 OK（这是切换前的基线）
 ```
 
+### Step 3.5：备份 CR deferred 队列（首次启用 12 小时 TTL 前）
+
+首次重启前先保留当前队列文件；新镜像的第一轮 live CR 运行会清理超过
+12 小时的条目，但不会发送这些过期正文。
+
+```fish
+set queue_backup output/cr/state/cr_deferred_dispatch_queue.json.bak.(date +%Y%m%d-%H%M%S)
+if test -f output/cr/state/cr_deferred_dispatch_queue.json
+    cp output/cr/state/cr_deferred_dispatch_queue.json $queue_backup
+    echo "CR deferred queue backup: $queue_backup"
+else
+    echo "CR deferred queue not present; no backup needed"
+end
+```
+
 ### Step 4：卸载 launchd 保活
 
 ```fish
