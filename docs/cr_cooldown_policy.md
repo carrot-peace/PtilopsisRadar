@@ -64,7 +64,7 @@ The cooldown decision resolves to exactly one action:
 
 `CRCooldownPolicy` defaults:
 
-- `same_level_cooldown_minutes = 60`
+- `same_level_cooldown_minutes = 240` (4 hours)
 - `allow_meaningful_escalation = True`
 - `allow_new_events = True`
 - `allow_deescalation = False`
@@ -114,7 +114,7 @@ Example Markdown for a same-level repeat:
 - Action: `cooldown`
 - Reason: same-level repeat is inside cooldown policy
 - Repeat Status: `same_level_repeat`
-- Cooldown Minutes: `60`
+- Cooldown Minutes: `240`
 ```
 
 Example Markdown for a meaningful escalation:
@@ -126,6 +126,15 @@ Example Markdown for a meaningful escalation:
 - Reason: meaningful escalation bypasses cooldown preview
 - Repeat Status: `meaningful_escalation`
 ```
+
+## Deferred queue runtime
+
+Deferred entries use a fixed 12-hour TTL measured from the first
+`deferred_at`; refreshes update the body but do not extend that first timestamp.
+Outside quiet hours, the queue is reconciled with the current candidates by
+`event_key`: an overlapping event sends once with the current body, and its
+queue entry is removed only after an accepted dispatch. Unmatched entries wait
+for a later current candidate or expire; they are never sent independently.
 
 ## 6. Non-Goals
 

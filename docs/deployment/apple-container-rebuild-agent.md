@@ -53,6 +53,21 @@ container image list | grep ptilopsis-radar
 
 将 DIGEST 列的值记录在输出中。
 
+### A1.6. 首次启用 CR deferred TTL 前备份队列
+
+新代码的第一轮 live CR 运行会删除首次 `deferred_at` 已超过 12 小时的
+条目；这些过期正文不会发送。重启容器前先保留队列文件：
+
+```fish
+set queue_backup output/cr/state/cr_deferred_dispatch_queue.json.bak.(date +%Y%m%d-%H%M%S)
+if test -f output/cr/state/cr_deferred_dispatch_queue.json
+    cp output/cr/state/cr_deferred_dispatch_queue.json $queue_backup
+    echo "CR deferred queue backup: $queue_backup"
+else
+    echo "CR deferred queue not present; no backup needed"
+end
+```
+
 ### A2. 构建新镜像
 
 ```fish
