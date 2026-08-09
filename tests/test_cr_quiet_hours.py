@@ -279,16 +279,13 @@ class TestQuietHoursRuntime(unittest.TestCase):
             flush_sink = CRMemoryDispatchSink()
             build_and_write_cr_runtime_dry_run(
                 **common,
-                hotlist_stats=[],
+                hotlist_stats=_hotlist_stats(new, event_id="deferred-new"),
                 run_label="deferred-flush",
                 dispatch_sink=flush_sink,
                 now=_dt("2026-06-18T08:01:00+08:00"),
             )
             self.assertEqual(len(flush_sink.submitted_messages), 1)
-            self.assertIn(
-                "Suppressed (high-score): 1",
-                flush_sink.submitted_messages[0].text,
-            )
+            self.assertIn(new, flush_sink.submitted_messages[0].text)
 
     def test_mixed_cooldown_count_survives_urgent_bypass_replan(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -5,16 +5,12 @@ CR runtime dry-run hook (PR9k) v0.1.
 CR-internal glue that connects real runtime-produced hotlist / RSS stats to
 the offline CR pipeline, then writes Markdown / HTML audit artifacts.
 
-This is a *dry-run* bridge only.  It answers exactly one system question:
-
-    Can the existing runtime produce CR Markdown / HTML artifacts from real
-    hotlist / RSS stats without sending anything?
-
-It deliberately stays inside the CR layer: it only converts stats via the
-existing CR adapter, runs the existing CR pipeline, and writes through explicit
-CR boundaries.  It performs no delivery, no suppression / de-duplication, no
-AI-result integration, and reads no runtime configuration.  CR-A text and JSON
-outputs are out of scope here.
+This is a *dry-run* bridge with an injected local execution boundary.  It
+converts stats via the existing CR adapter, runs the CR pipeline, applies the
+CR-A cooldown / quiet-hours policy, and writes through explicit CR boundaries.
+Any execution is against the caller-provided local sink; no external delivery
+client is constructed here.  It performs no AI-result integration and reads no
+runtime configuration.  CR-A text and JSON outputs are written for audit.
 
 Design reference: PR9k.
 """
@@ -45,7 +41,6 @@ from trendradar.cr.cooldown_policy import CRCooldownPolicy
 from trendradar.cr.dispatch_executor import (
     CRDispatchExecutionResult,
     CRDispatchSink,
-    TRANSPORT_EXCEPTIONS,
     execute_cr_dispatch_plan,
 )
 from trendradar.cr.dispatch_plan import (
@@ -72,8 +67,8 @@ from trendradar.cr.deferred_queue import (
     CRDeferredQueueSaveResult,
     CRDeferredQueueUpsertResult,
     DEFAULT_DEFERRED_QUEUE_PATH,
+    expire_deferred_entries,
     load_deferred_dispatch_queue,
-    ordered_entries_for_flush,
     remove_deferred_entries,
     save_deferred_dispatch_queue,
     stable_deferred_entry_id,
@@ -543,100 +538,6 @@ def _deferred_receipts_for_upserts(
     return receipts
 
 
-def _flush_receipt_entry(
-    *,
-    message_index: int,
-    attempted: bool,
-    accepted: bool,
-    status: str,
-    detail: str,
-    entry: CRDeferredDispatchEntry,
-) -> dict[str, object]:
-    return {
-        "message_index": message_index,
-        "attempted": attempted,
-        "accepted": accepted,
-        "status": status,
-        "detail": detail,
-        "transport": None,
-        "http_status": None,
-        "sink_ok": None,
-        "exception_type": None,
-        "exception_message": None,
-        "source": "deferred_queue",
-        "event_key": entry.event_key,
-        "candidate_id": entry.candidate_id,
-    }
-
-
-def _flush_deferred_queue(
-    queue: CRDeferredDispatchQueue,
-    *,
-    sink: CRDispatchSink | None,
-    run_label: str,
-) -> tuple[list[dict[str, object]], set[str]]:
-    receipts: list[dict[str, object]] = []
-    accepted_event_keys: set[str] = set()
-    for index, entry in enumerate(ordered_entries_for_flush(queue)):
-        if sink is None:
-            receipts.append(
-                _flush_receipt_entry(
-                    message_index=index,
-                    attempted=False,
-                    accepted=False,
-                    status="not_configured",
-                    detail="deferred_flush_not_configured",
-                    entry=entry,
-                )
-            )
-            continue
-        message = CRDispatchMessage(
-            text=entry.message_text,
-            format="plain_text",
-            candidate_count=1,
-            run_label=run_label,
-            urgent_count=1 if entry.level == DECISION_URGENT else 0,
-            high_score_suppressed_count=0,
-        )
-        try:
-            sink_receipt = sink.submit(message, message_index=index)
-        except TRANSPORT_EXCEPTIONS as exc:
-            receipts.append(
-                _flush_receipt_entry(
-                    message_index=index,
-                    attempted=True,
-                    accepted=False,
-                    status="failed_transport",
-                    detail=type(exc).__name__,
-                    entry=entry,
-                )
-            )
-            continue
-        status = sink_receipt.status
-        if status not in {
-            "accepted",
-            "accepted_partial",
-            "rejected",
-            "failed_transport",
-            "http_error",
-        }:
-            status = "unknown"
-        detail = "flushed_deferred" if sink_receipt.accepted else sink_receipt.detail
-        receipts.append(
-            _flush_receipt_entry(
-                message_index=index,
-                attempted=True,
-                accepted=sink_receipt.accepted,
-                status=status,
-                detail=detail,
-                entry=entry,
-            )
-        )
-        if sink_receipt.accepted:
-            accepted_event_keys.add(entry.event_key)
-    return receipts, accepted_event_keys
-
-
 def _state_entries_for_candidates(
     candidates: tuple,
     *,
@@ -675,6 +576,38 @@ def _state_entries_for_queue(
         for entry in entries
         if entry.event_key in accepted_keys
     ]
+
+
+def _load_and_expire_deferred_queue(
+    path: str | Path,
+    *,
+    now: datetime,
+) -> tuple[
+    CRDeferredQueueLoadResult,
+    CRDeferredQueueSaveResult | None,
+    int,
+    str | None,
+]:
+    """Load the deferred queue and persist removal of expired entries.
+
+    Expiry is deliberately performed before any current-run dispatch work. If
+    the pruned queue cannot be persisted, live dispatch fails closed so a
+    stale entry cannot be sent again on a later run.
+    """
+    loaded = load_deferred_dispatch_queue(path)
+    if loaded.error is not None or not loaded.queue.entries:
+        return loaded, None, 0, (
+            "skipped_deferred_queue_error" if loaded.error is not None else None
+        )
+
+    pruned, expired = expire_deferred_entries(loaded.queue, now=now)
+    if pruned.entries == loaded.queue.entries:
+        return loaded, None, 0, None
+
+    save_result = save_deferred_dispatch_queue(pruned, path)
+    if not save_result.saved:
+        return loaded, save_result, len(expired), "skipped_deferred_queue_error"
+    return replace(loaded, queue=pruned), save_result, len(expired), None
 
 
 # ---------------------------------------------------------------------------
@@ -1022,22 +955,34 @@ def build_and_write_cr_runtime_dry_run(
 
     deferred_queue_load: CRDeferredQueueLoadResult | None = None
     deferred_queue_save: CRDeferredQueueSaveResult | None = None
+    deferred_expired_count = 0
+    deferred_reconciled_keys: set[str] = set()
     pre_receipts: list[dict[str, object]] = []
     override_receipts: list[dict[str, object]] | None = None
     queue_error_reason: str | None = None
     state_update_entries: list[CREventStateEntry] = []
 
-    # 6b. Live post-quiet flush happens before current-run cooldown checks so
-    #     accepted flushes become prior state for the current run.
+    # 6b. Load and expire the deferred queue before current-run cooldown
+    #     checks.  Deferred entries are reconciled with the current candidates
+    #     after cooldown enforcement and are never sent independently here.
+    # An explicit queue path opts into the same hygiene even when a caller has
+    # disabled quiet-hours; the production default is gated by that feature.
     if (
         effective_dispatch_mode == "live"
         and not health_blocked
-        and quiet_hours.enabled
+        and (quiet_hours.enabled or deferred_queue_path is not None)
         and quiet_hours.decision != "quiet_hours_config_error"
-        and not quiet_hours.in_quiet_hours
     ):
-        deferred_queue_load = load_deferred_dispatch_queue(effective_queue_path)
-        if deferred_queue_load.error is not None:
+        (
+            deferred_queue_load,
+            deferred_queue_save,
+            deferred_expired_count,
+            queue_error_reason,
+        ) = _load_and_expire_deferred_queue(
+            effective_queue_path,
+            now=effective_now,
+        )
+        if queue_error_reason is not None:
             queue_error_reason = "skipped_deferred_queue_error"
             dispatch_plan = CRDispatchPlan(
                 should_dispatch=False,
@@ -1060,54 +1005,6 @@ def build_and_write_cr_runtime_dry_run(
                 "exception_type": None,
                 "exception_message": None,
             }]
-        elif deferred_queue_load.queue.entries:
-            queue_before_flush = deferred_queue_load.queue
-            queue_for_flush = queue_before_flush
-            if input_health is not None:
-                fresh_event_keys = {
-                    stable_event_key_for_candidate(pc)
-                    for pc in eligible_cr_a_candidates
-                }
-                queue_for_flush = replace(
-                    queue_before_flush,
-                    entries=tuple(
-                        entry for entry in queue_before_flush.entries
-                        if entry.event_key in fresh_event_keys
-                    ),
-                )
-            pre_receipts, accepted_flush_keys = _flush_deferred_queue(
-                queue_for_flush,
-                sink=dispatch_sink,
-                run_label=run_label,
-            )
-            if accepted_flush_keys:
-                flushed_entries = ordered_entries_for_flush(queue_for_flush)
-                state_update_entries.extend(
-                    _state_entries_for_queue(
-                        flushed_entries,
-                        accepted_keys=accepted_flush_keys,
-                        seen_at=now_iso,
-                    )
-                )
-                updated_snapshot = merge_cr_event_state_entries(
-                    dispatch_state_load.snapshot,
-                    tuple(state_update_entries),
-                )
-                dispatch_state_load = replace(
-                    dispatch_state_load,
-                    snapshot=updated_snapshot,
-                    loaded=True,
-                    error=None,
-                )
-                seen_states = cr_event_state_snapshot_to_seen_states(
-                    updated_snapshot
-                )
-                deferred_queue_save = save_deferred_dispatch_queue(
-                    remove_deferred_entries(
-                        queue_before_flush, accepted_flush_keys
-                    ),
-                    effective_queue_path,
-                )
 
     cooldown_enforcement: CRCooldownEnforcementResult | None = None
     cooldown_override_reason: str | None = None
@@ -1174,6 +1071,20 @@ def build_and_write_cr_runtime_dry_run(
                 high_score_suppressed_count=combined_suppressed_count,
             )
 
+    if (
+        deferred_queue_load is not None
+        and deferred_queue_load.queue.entries
+        and not quiet_hours.in_quiet_hours
+    ):
+        queued_keys = {
+            entry.event_key for entry in deferred_queue_load.queue.entries
+        }
+        current_keys = {
+            stable_event_key_for_candidate(pc)
+            for pc in eligible_cr_a_candidates
+        }
+        deferred_reconciled_keys = queued_keys & current_keys
+
     # 6c. Apply quiet-hours live policy after cooldown eligibility.
     quiet_bypass_applied = False
     quiet_suppression_summary_deferred = False
@@ -1181,6 +1092,7 @@ def build_and_write_cr_runtime_dry_run(
     quiet_receipts: list[dict[str, object]] = []
     quiet_upsert_outcomes: dict[str, CRDeferredQueueUpsertResult] = {}
     deferred_event_keys: set[str] = set()
+    post_dispatch_queue_save_failed = False
     dispatch_execution = None
     execution_state_candidates: tuple = ()
 
@@ -1235,152 +1147,127 @@ def build_and_write_cr_runtime_dry_run(
         and dispatch_plan.should_dispatch
         and eligible_cr_a_candidates
     ):
-        deferred_queue_load = load_deferred_dispatch_queue(effective_queue_path)
-        if deferred_queue_load.error is not None:
-            queue_error_reason = "skipped_deferred_queue_error"
+        bypass_candidates = tuple(
+            pc for pc in eligible_cr_a_candidates
+            if pc.decision_level == DECISION_URGENT
+            and quiet_hours.allow_urgent_bypass
+        )
+        quiet_deferred_candidates = tuple(
+            pc for pc in eligible_cr_a_candidates
+            if pc not in bypass_candidates
+        )
+        if bypass_candidates:
+            dispatch_plan = _plan_for_candidates(
+                pipeline_result,
+                bypass_candidates,
+                text_config=effective_text_config,
+                high_score_suppressed_count=(
+                    effective_high_score_suppressed_count
+                ),
+            )
+            quiet_bypass_applied = True
+            execution_state_candidates = bypass_candidates
+            if dispatch_sink is not None:
+                dispatch_execution = execute_cr_dispatch_plan(
+                    dispatch_plan, sink=dispatch_sink
+                )
+            accepted_bypass = (
+                dispatch_execution is not None
+                and dispatch_execution.accepted_count > 0
+                and dispatch_execution.receipts
+                and dispatch_execution.receipts[0].accepted
+            )
+            if accepted_bypass:
+                state_update_entries.extend(
+                    _state_entries_for_candidates(
+                        bypass_candidates, seen_at=now_iso
+                    )
+                )
+                stale_keys = {stable_event_key_for_candidate(pc) for pc in bypass_candidates}
+                base_queue = deferred_queue_load.queue
+                updated_queue = remove_deferred_entries(
+                    base_queue, stale_keys
+                )
+                if updated_queue.entries != base_queue.entries:
+                    deferred_queue_save = save_deferred_dispatch_queue(
+                        updated_queue,
+                        effective_queue_path,
+                    )
+                    if not deferred_queue_save.saved:
+                        queue_error_reason = "skipped_deferred_queue_error"
+            else:
+                quiet_deferred_candidates = (
+                    quiet_deferred_candidates + bypass_candidates
+                )
+        else:
             dispatch_plan = CRDispatchPlan(
                 should_dispatch=False,
                 messages=(),
-                reason=queue_error_reason,
+                reason="deferred_quiet_hours",
                 run_label=dispatch_plan.run_label,
                 candidate_count=dispatch_plan.candidate_count,
                 urgent_count=dispatch_plan.urgent_count,
                 high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
             )
-            override_receipts = [{
-                "message_index": 0,
-                "attempted": False,
-                "accepted": False,
-                "status": "skipped_deferred_queue_error",
-                "detail": "deferred_queue_error",
-                "transport": None,
-                "http_status": None,
-                "sink_ok": None,
-                "exception_type": None,
-                "exception_message": None,
-            }]
-        else:
-            bypass_candidates = tuple(
-                pc for pc in eligible_cr_a_candidates
-                if pc.decision_level == DECISION_URGENT
-                and quiet_hours.allow_urgent_bypass
-            )
-            quiet_deferred_candidates = tuple(
-                pc for pc in eligible_cr_a_candidates
-                if pc not in bypass_candidates
-            )
-            if bypass_candidates:
-                dispatch_plan = _plan_for_candidates(
-                    pipeline_result,
-                    bypass_candidates,
-                    text_config=effective_text_config,
-                    high_score_suppressed_count=(
-                        effective_high_score_suppressed_count
-                    ),
-                )
-                quiet_bypass_applied = True
-                execution_state_candidates = bypass_candidates
-                if dispatch_sink is not None:
-                    dispatch_execution = execute_cr_dispatch_plan(
-                        dispatch_plan, sink=dispatch_sink
-                    )
-                accepted_bypass = (
-                    dispatch_execution is not None
-                    and dispatch_execution.accepted_count > 0
-                    and dispatch_execution.receipts
-                    and dispatch_execution.receipts[0].accepted
-                )
-                if accepted_bypass:
-                    state_update_entries.extend(
-                        _state_entries_for_candidates(
-                            bypass_candidates, seen_at=now_iso
-                        )
-                    )
-                    stale_keys = {stable_event_key_for_candidate(pc) for pc in bypass_candidates}
-                    base_queue = deferred_queue_load.queue
-                    updated_queue = remove_deferred_entries(
-                        base_queue, stale_keys
-                    )
-                    if updated_queue.entries != base_queue.entries:
-                        deferred_queue_save = save_deferred_dispatch_queue(
-                            updated_queue,
-                            effective_queue_path,
-                        )
-                        if not deferred_queue_save.saved:
-                            queue_error_reason = "skipped_deferred_queue_error"
-                else:
-                    quiet_deferred_candidates = (
-                        quiet_deferred_candidates + bypass_candidates
-                    )
-            else:
-                dispatch_plan = CRDispatchPlan(
-                    should_dispatch=False,
-                    messages=(),
-                    reason="deferred_quiet_hours",
-                    run_label=dispatch_plan.run_label,
-                    candidate_count=dispatch_plan.candidate_count,
-                    urgent_count=dispatch_plan.urgent_count,
-                    high_score_suppressed_count=dispatch_plan.high_score_suppressed_count,
-                )
 
-            if quiet_deferred_candidates:
-                deferred_until = (
-                    quiet_hours.deferred_until.isoformat()
-                    if quiet_hours.deferred_until is not None
-                    else now_iso
+        if quiet_deferred_candidates:
+            deferred_until = (
+                quiet_hours.deferred_until.isoformat()
+                if quiet_hours.deferred_until is not None
+                else now_iso
+            )
+            updated_queue, upsert_outcomes = _queue_with_candidates(
+                deferred_queue_load.queue,
+                quiet_deferred_candidates,
+                deferred_at=now_iso,
+                deferred_until=deferred_until,
+                run_label=run_label,
+                high_score_suppressed_count=(
+                    effective_high_score_suppressed_count
+                ),
+                coverage_warning=pipeline_result.coverage_warning,
+            )
+            queue_changed = (
+                updated_queue.entries != deferred_queue_load.queue.entries
+            )
+            queue_state_current = not queue_changed
+            if queue_changed:
+                deferred_queue_save = save_deferred_dispatch_queue(
+                    updated_queue, effective_queue_path
                 )
-                updated_queue, upsert_outcomes = _queue_with_candidates(
-                    deferred_queue_load.queue,
-                    quiet_deferred_candidates,
-                    deferred_at=now_iso,
-                    deferred_until=deferred_until,
-                    run_label=run_label,
-                    high_score_suppressed_count=(
-                        effective_high_score_suppressed_count
-                    ),
-                    coverage_warning=pipeline_result.coverage_warning,
-                )
-                queue_changed = (
-                    updated_queue.entries != deferred_queue_load.queue.entries
-                )
-                queue_state_current = not queue_changed
-                if queue_changed:
-                    deferred_queue_save = save_deferred_dispatch_queue(
-                        updated_queue, effective_queue_path
-                    )
-                    queue_state_current = deferred_queue_save.saved
-                    if not queue_state_current:
-                        queue_error_reason = "skipped_deferred_queue_error"
-                        dispatch_plan = replace(
-                            dispatch_plan,
-                            reason=queue_error_reason,
-                        )
-                quiet_receipts = _deferred_receipts_for_upserts(
-                    upsert_outcomes,
-                    deferred_until=deferred_until,
-                    queue_state_current=queue_state_current,
-                )
-                quiet_upsert_outcomes = {
-                    outcome.event_key: outcome for outcome in upsert_outcomes
-                }
-                if queue_state_current:
-                    deferred_event_keys = {
-                        outcome.event_key
-                        for outcome in upsert_outcomes
-                        if outcome.outcome != "skipped"
-                    }
-                if upsert_outcomes and all(
-                    outcome.outcome == "skipped" for outcome in upsert_outcomes
-                ) and not bypass_candidates:
+                queue_state_current = deferred_queue_save.saved
+                if not queue_state_current:
+                    queue_error_reason = "skipped_deferred_queue_error"
                     dispatch_plan = replace(
                         dispatch_plan,
-                        reason="skipped_deferred_queue_upsert",
+                        reason=queue_error_reason,
                     )
-                if quiet_receipts:
-                    if not bypass_candidates:
-                        override_receipts = quiet_receipts
-                    else:
-                        pre_receipts.extend(quiet_receipts)
+            quiet_receipts = _deferred_receipts_for_upserts(
+                upsert_outcomes,
+                deferred_until=deferred_until,
+                queue_state_current=queue_state_current,
+            )
+            quiet_upsert_outcomes = {
+                outcome.event_key: outcome for outcome in upsert_outcomes
+            }
+            if queue_state_current:
+                deferred_event_keys = {
+                    outcome.event_key
+                    for outcome in upsert_outcomes
+                    if outcome.outcome != "skipped"
+                }
+            if upsert_outcomes and all(
+                outcome.outcome == "skipped" for outcome in upsert_outcomes
+            ) and not bypass_candidates:
+                dispatch_plan = replace(
+                    dispatch_plan,
+                    reason="skipped_deferred_queue_upsert",
+                )
+            if quiet_receipts:
+                if not bypass_candidates:
+                    override_receipts = quiet_receipts
+                else:
+                    pre_receipts.extend(quiet_receipts)
 
     # 6d. Build cooldown context for plan JSON (per-candidate entries).
     cooldown_context: dict[str, object] | None = None
@@ -1472,6 +1359,8 @@ def build_and_write_cr_runtime_dry_run(
         reason=quiet_reason,
         bypass_applied=quiet_bypass_applied,
         deferred_count=len(deferred_event_keys),
+        expired_count=deferred_expired_count,
+        reconciled_count=len(deferred_reconciled_keys),
         entries=quiet_entries,
     )
 
@@ -1536,16 +1425,102 @@ def build_and_write_cr_runtime_dry_run(
 
     # 7c. Update dispatch state on live+accepted only.
     dispatch_state_save: CREventStateSaveResult | None = None
-    if (
+    current_dispatch_accepted = (
         effective_dispatch_mode == "live"
         and not health_blocked
-        and cooldown_override_reason is None
-        and queue_error_reason is None
-        and quiet_hours.decision != "quiet_hours_config_error"
         and dispatch_execution is not None
         and dispatch_execution.accepted_count > 0
         and dispatch_execution.receipts
         and dispatch_execution.receipts[0].accepted
+    )
+    if current_dispatch_accepted and deferred_reconciled_keys:
+        executed_keys = {
+            stable_event_key_for_candidate(pc)
+            for pc in execution_state_candidates
+        }
+        accepted_reconciled_keys = deferred_reconciled_keys & executed_keys
+        if accepted_reconciled_keys and deferred_queue_load is not None:
+            updated_queue = remove_deferred_entries(
+                deferred_queue_load.queue,
+                accepted_reconciled_keys,
+            )
+            if updated_queue.entries != deferred_queue_load.queue.entries:
+                deferred_queue_save = save_deferred_dispatch_queue(
+                    updated_queue,
+                    effective_queue_path,
+                )
+                if deferred_queue_save.saved:
+                    deferred_queue_load = replace(
+                        deferred_queue_load,
+                        queue=updated_queue,
+                    )
+                else:
+                    # Keep the accepted current dispatch in cooldown state so
+                    # a queue-cleanup failure cannot cause an immediate resend.
+                    post_dispatch_queue_save_failed = True
+                    queue_error_reason = "skipped_deferred_queue_error"
+                    pre_receipts.append({
+                        "message_index": len(pre_receipts),
+                        "attempted": False,
+                        "accepted": False,
+                        "status": "skipped_deferred_queue_error",
+                        "detail": "deferred_queue_cleanup_failed",
+                        "transport": None,
+                        "http_status": None,
+                        "sink_ok": None,
+                        "exception_type": None,
+                        "exception_message": None,
+                        "source": "deferred_queue",
+                        "event_keys": sorted(accepted_reconciled_keys),
+                    })
+
+    if post_dispatch_queue_save_failed:
+        # The first plan was written before dispatch because the normal path
+        # needs no post-send mutation.  Rewrite both audit artifacts here so
+        # a cleanup failure is visible alongside the accepted send.
+        quiet_hours_context["decision"] = "skipped_deferred_queue_error"
+        quiet_hours_context["reason"] = "deferred_queue_cleanup_failed"
+        dispatch_plan_json_dict = cr_dispatch_plan_to_json_dict(
+            dispatch_plan,
+            dispatch_mode=effective_dispatch_mode,
+            presented_candidates=pipeline_result.presented_candidates,
+            cr_a_candidates=eligible_cr_a_candidates,
+            created_at=now_iso,
+            cooldown_context=cooldown_context,
+            quiet_hours_context=quiet_hours_context,
+            input_health=health_json,
+        )
+        dispatch_plan_json_paths = write_dispatch_plan_json(
+            dispatch_plan_json_dict,
+            run_label=run_label,
+            config=artifact_config,
+        )
+        dispatch_receipt_json_dict = build_dispatch_receipts_json(
+            dispatch_plan,
+            dispatch_mode=effective_dispatch_mode,
+            execution=dispatch_execution,
+            created_at=now_iso,
+            cooldown_override_reason=cooldown_override_reason,
+            cooldown_entries=cooldown_entries_for_receipt,
+            pre_receipts=pre_receipts or None,
+            override_receipts=override_receipts,
+            input_health=health_json,
+        )
+        dispatch_receipt_json_paths = write_dispatch_receipts_json(
+            dispatch_receipt_json_dict,
+            run_label=run_label,
+            config=artifact_config,
+        )
+    if (
+        effective_dispatch_mode == "live"
+        and not health_blocked
+        and cooldown_override_reason is None
+        and (
+            queue_error_reason is None
+            or post_dispatch_queue_save_failed
+        )
+        and quiet_hours.decision != "quiet_hours_config_error"
+        and current_dispatch_accepted
     ):
         state_update_entries.extend(
             _state_entries_for_candidates(
