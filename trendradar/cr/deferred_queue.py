@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping
 
@@ -20,6 +21,7 @@ from trendradar.cr.decision import CR_DECISION_LEVEL_ORDER
 
 DEFERRED_QUEUE_SCHEMA_VERSION = "cr-deferred-dispatch-queue-v1"
 DEFAULT_DEFERRED_QUEUE_PATH = "output/cr/state/cr_deferred_dispatch_queue.json"
+DEFAULT_DEFERRED_TTL_SECONDS = 12 * 60 * 60
 
 #: Only alert and urgent are eligible for deferred dispatch.
 _DEFERRED_ALLOWED_LEVELS = frozenset({"alert", "urgent"})
@@ -71,6 +73,56 @@ class CRDeferredQueueUpsertResult:
     reason: str
     event_key: str
     candidate_id: str
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Return a timezone-aware UTC datetime for deterministic comparisons."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_deferred_at(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return _as_utc(parsed)
+
+
+def expire_deferred_entries(
+    queue: CRDeferredDispatchQueue,
+    *,
+    now: datetime,
+    ttl_seconds: int = DEFAULT_DEFERRED_TTL_SECONDS,
+) -> tuple[CRDeferredDispatchQueue, tuple[CRDeferredDispatchEntry, ...]]:
+    """Remove entries older than the fixed deferred-delivery TTL.
+
+    The first ``deferred_at`` is intentionally used rather than
+    ``last_seen_at``.  Queue refreshes therefore cannot keep an old event
+    alive indefinitely.  Entries with an unparsable timestamp are retained so
+    a malformed timestamp is handled by the existing queue validation/error
+    path rather than silently deleting data.
+    """
+    if ttl_seconds <= 0:
+        raise ValueError("ttl_seconds must be positive")
+    cutoff = _as_utc(now) - timedelta(seconds=ttl_seconds)
+    kept: list[CRDeferredDispatchEntry] = []
+    expired: list[CRDeferredDispatchEntry] = []
+    for entry in queue.entries:
+        try:
+            deferred_at = _parse_deferred_at(entry.deferred_at)
+        except (TypeError, ValueError, OverflowError):
+            kept.append(entry)
+            continue
+        if deferred_at <= cutoff:
+            expired.append(entry)
+        else:
+            kept.append(entry)
+    return (
+        CRDeferredDispatchQueue(
+            queue_schema_version=queue.queue_schema_version,
+            entries=tuple(kept),
+        ),
+        tuple(expired),
+    )
 
 
 def empty_deferred_dispatch_queue() -> CRDeferredDispatchQueue:
