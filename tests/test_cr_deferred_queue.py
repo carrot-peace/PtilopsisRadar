@@ -7,11 +7,13 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from trendradar.cr.artifacts import CRArtifactConfig
 from trendradar.cr.decision import CRDecisionPolicy
 from trendradar.cr.deferred_queue import (
     CRDeferredDispatchEntry,
+    CRDeferredQueueSaveResult,
     empty_deferred_dispatch_queue,
     expire_deferred_entries,
     load_deferred_dispatch_queue,
@@ -622,6 +624,72 @@ class TestDeferredQueueRuntime(unittest.TestCase):
                         )
                     )["receipts"]
                     self.assertFalse(receipts[0]["accepted"])
+
+    def test_post_dispatch_queue_cleanup_failure_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            state_path = Path(tmp) / "state.json"
+            artifact_root = Path(tmp) / "art"
+            sink = CRMemoryDispatchSink()
+            common = {
+                "hotlist_stats": _hotlist_stats(
+                    "Cleanup Failure Event", event_id="cleanup"
+                ),
+                "artifact_config": CRArtifactConfig(root_dir=artifact_root),
+                "dispatch_mode": "live",
+                "dispatch_sink": sink,
+                "dispatch_state_path": state_path,
+                "deferred_queue_path": queue_path,
+                "quiet_hours_env": _quiet_env(),
+                "urgent_threshold": 999.0,
+            }
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="cleanup-failure-defer",
+                now=_dt("2026-06-17T23:30:00+08:00"),
+            )
+
+            failed_save = Mock(
+                return_value=CRDeferredQueueSaveResult(
+                    saved=False,
+                    error="unable to save deferred queue: OSError",
+                    path=str(queue_path),
+                )
+            )
+            with patch.dict(
+                build_and_write_cr_runtime_dry_run.__globals__,
+                {"save_deferred_dispatch_queue": failed_save},
+            ):
+                result = build_and_write_cr_runtime_dry_run(
+                    **common,
+                    run_label="cleanup-failure-reconcile",
+                    now=_dt("2026-06-18T08:01:00+08:00"),
+                )
+
+            plan = json.loads(
+                result.dispatch_plan_json_paths.dispatch_plan_latest_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                plan["quiet_hours"]["decision"],
+                "skipped_deferred_queue_error",
+            )
+            self.assertEqual(
+                plan["quiet_hours"]["reason"],
+                "deferred_queue_cleanup_failed",
+            )
+            receipt = json.loads(
+                result.dispatch_receipt_json_paths.dispatch_receipt_latest_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+            statuses = [item["status"] for item in receipt["receipts"]]
+            self.assertIn("accepted", statuses)
+            self.assertIn("skipped_deferred_queue_error", statuses)
+            self.assertEqual(
+                len(load_deferred_dispatch_queue(queue_path).queue.entries), 1
+            )
 
     def test_malformed_queue_blocks_current_send_and_preserves_file(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1459,6 +1459,58 @@ def build_and_write_cr_runtime_dry_run(
                     # a queue-cleanup failure cannot cause an immediate resend.
                     post_dispatch_queue_save_failed = True
                     queue_error_reason = "skipped_deferred_queue_error"
+                    pre_receipts.append({
+                        "message_index": len(pre_receipts),
+                        "attempted": False,
+                        "accepted": False,
+                        "status": "skipped_deferred_queue_error",
+                        "detail": "deferred_queue_cleanup_failed",
+                        "transport": None,
+                        "http_status": None,
+                        "sink_ok": None,
+                        "exception_type": None,
+                        "exception_message": None,
+                        "source": "deferred_queue",
+                        "event_keys": sorted(accepted_reconciled_keys),
+                    })
+
+    if post_dispatch_queue_save_failed:
+        # The first plan was written before dispatch because the normal path
+        # needs no post-send mutation.  Rewrite both audit artifacts here so
+        # a cleanup failure is visible alongside the accepted send.
+        quiet_hours_context["decision"] = "skipped_deferred_queue_error"
+        quiet_hours_context["reason"] = "deferred_queue_cleanup_failed"
+        dispatch_plan_json_dict = cr_dispatch_plan_to_json_dict(
+            dispatch_plan,
+            dispatch_mode=effective_dispatch_mode,
+            presented_candidates=pipeline_result.presented_candidates,
+            cr_a_candidates=eligible_cr_a_candidates,
+            created_at=now_iso,
+            cooldown_context=cooldown_context,
+            quiet_hours_context=quiet_hours_context,
+            input_health=health_json,
+        )
+        dispatch_plan_json_paths = write_dispatch_plan_json(
+            dispatch_plan_json_dict,
+            run_label=run_label,
+            config=artifact_config,
+        )
+        dispatch_receipt_json_dict = build_dispatch_receipts_json(
+            dispatch_plan,
+            dispatch_mode=effective_dispatch_mode,
+            execution=dispatch_execution,
+            created_at=now_iso,
+            cooldown_override_reason=cooldown_override_reason,
+            cooldown_entries=cooldown_entries_for_receipt,
+            pre_receipts=pre_receipts or None,
+            override_receipts=override_receipts,
+            input_health=health_json,
+        )
+        dispatch_receipt_json_paths = write_dispatch_receipts_json(
+            dispatch_receipt_json_dict,
+            run_label=run_label,
+            config=artifact_config,
+        )
     if (
         effective_dispatch_mode == "live"
         and not health_blocked
