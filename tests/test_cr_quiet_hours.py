@@ -540,7 +540,7 @@ class TestQuietHoursRuntime(unittest.TestCase):
                 dispatch_state_path=state_path,
                 deferred_queue_path=queue_path,
                 quiet_hours_env={},
-                now=_dt("2026-06-17T22:00:00+08:00"),
+                now=_dt("2026-06-17T18:00:00+08:00"),
                 urgent_threshold=999.0,
             )
 
