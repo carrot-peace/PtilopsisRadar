@@ -13,6 +13,7 @@ from trendradar.cr.decision import CRDecisionPolicy
 from trendradar.cr.deferred_queue import (
     CRDeferredDispatchEntry,
     empty_deferred_dispatch_queue,
+    expire_deferred_entries,
     load_deferred_dispatch_queue,
     ordered_entries_for_flush,
     save_deferred_dispatch_queue,
@@ -44,7 +45,9 @@ def _quiet_env() -> dict[str, str]:
     }
 
 
-def _hotlist_stats(title: str = "Current A") -> list[dict]:
+def _hotlist_stats(
+    title: str = "Current A", *, word: str = "AI", event_id: str | None = None
+) -> list[dict]:
     def item(source_id: str) -> dict:
         return {
             "title": title,
@@ -54,7 +57,10 @@ def _hotlist_stats(title: str = "Current A") -> list[dict]:
             "count": 20,
             "first_time": "09:30",
             "last_time": "12:00",
-            "url": f"https://example.com/{source_id}",
+            "url": (
+                f"https://example.com/{source_id}"
+                + (f"/{event_id}" if event_id else "")
+            ),
             "mobileUrl": "",
             "is_new": True,
             "rank_timeline": [
@@ -65,7 +71,7 @@ def _hotlist_stats(title: str = "Current A") -> list[dict]:
 
     return [
         {
-            "word": "AI",
+            "word": word,
             "titles": [item("weibo"), item("zhihu"), item("baidu")],
             "count": 3,
             "position": 0,
@@ -117,7 +123,11 @@ def _presented_candidate(title: str, *, level: str = "alert") -> object:
 
 
 class _RejectingSink:
+    def __init__(self):
+        self.submit_calls = []
+
     def submit(self, message, *, message_index):  # noqa: ANN001
+        self.submit_calls.append((message, message_index))
         return CRDispatchReceipt(
             message_index=message_index,
             accepted=False,
@@ -212,6 +222,51 @@ class TestDeferredQueueStore(unittest.TestCase):
         self.assertEqual(entry.title, "New")
         self.assertEqual(entry.score, 75.0)
         self.assertEqual(entry.message_text, "new text")
+
+    def test_expiry_uses_first_deferred_at_and_does_not_extend_on_refresh(self):
+        queue = empty_deferred_dispatch_queue()
+        queue = upsert_deferred_entry(
+            queue,
+            _entry(
+                "expired",
+                deferred_at="2026-06-17T19:59:59+08:00",
+            ),
+        ).queue
+        queue = upsert_deferred_entry(
+            queue,
+            _entry(
+                "recent",
+                deferred_at="2026-06-18T00:00:01+08:00",
+            ),
+        ).queue
+
+        pruned, expired = expire_deferred_entries(
+            queue,
+            now=_dt("2026-06-18T08:00:00+08:00"),
+        )
+
+        self.assertEqual([entry.event_key for entry in expired], ["expired"])
+        self.assertEqual(
+            [entry.event_key for entry in pruned.entries], ["recent"]
+        )
+
+        refreshed = upsert_deferred_entry(
+            queue,
+            _entry(
+                "expired",
+                deferred_at="2026-06-18T07:59:59+08:00",
+            ),
+        ).queue
+        refreshed_pruned, refreshed_expired = expire_deferred_entries(
+            refreshed,
+            now=_dt("2026-06-18T08:00:00+08:00"),
+        )
+        self.assertEqual(
+            [entry.event_key for entry in refreshed_expired], ["expired"]
+        )
+        self.assertEqual(
+            [entry.event_key for entry in refreshed_pruned.entries], ["recent"]
+        )
 
     def test_urgent_supersedes_alert_without_duplicate(self):
         queue = upsert_deferred_entry(
@@ -310,7 +365,7 @@ class TestDeferredQueueRuntime(unittest.TestCase):
         save = save_deferred_dispatch_queue(queue, path)
         self.assertTrue(save.saved, save.error)
 
-    def test_flush_accepts_in_order_then_current_receipt(self):
+    def test_unmatched_queue_entries_are_not_sent_and_current_receipt_is_single(self):
         with tempfile.TemporaryDirectory() as tmp:
             queue_path = Path(tmp) / "queue.json"
             state_path = Path(tmp) / "state.json"
@@ -322,7 +377,7 @@ class TestDeferredQueueRuntime(unittest.TestCase):
             sink = CRMemoryDispatchSink()
             result = build_and_write_cr_runtime_dry_run(
                 hotlist_stats=_hotlist_stats("Current Event"),
-                run_label="flush-current",
+                run_label="reconcile-current",
                 artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "art"),
                 dispatch_mode="live",
                 dispatch_sink=sink,
@@ -333,25 +388,21 @@ class TestDeferredQueueRuntime(unittest.TestCase):
                 urgent_threshold=999.0,
             )
 
-            self.assertEqual(
-                [message.text for message in sink.submitted_messages[:2]],
-                ["urgent message", "alert message"],
-            )
+            self.assertEqual(len(sink.submitted_messages), 1)
+            self.assertIn("Current Event", sink.submitted_messages[0].text)
             receipts = json.loads(
                 result.dispatch_receipt_json_paths.dispatch_receipt_latest_path.read_text(
                     encoding="utf-8"
                 )
             )["receipts"]
-            self.assertEqual(receipts[0]["detail"], "flushed_deferred")
-            self.assertEqual(receipts[1]["detail"], "flushed_deferred")
-            self.assertEqual(receipts[2]["status"], "accepted")
+            self.assertEqual(receipts[-1]["status"], "accepted")
             queue = json.loads(queue_path.read_text(encoding="utf-8"))
-            self.assertEqual(queue["entries"], [])
+            self.assertEqual(len(queue["entries"]), 2)
             state = load_cr_event_state_snapshot(state_path)
             self.assertTrue(state.loaded)
-            self.assertGreaterEqual(len(state.snapshot.entries), 3)
+            self.assertEqual(len(state.snapshot.entries), 1)
 
-    def test_same_event_flush_alert_and_current_urgent_persists_urgent(self):
+    def test_same_event_reconcile_alert_and_current_urgent_persists_urgent(self):
         with tempfile.TemporaryDirectory() as tmp:
             queue_path = Path(tmp) / "queue.json"
             state_path = Path(tmp) / "state.json"
@@ -377,9 +428,9 @@ class TestDeferredQueueRuntime(unittest.TestCase):
             self.assertEqual(len(queue_before_flush.entries), 1)
             event_key = queue_before_flush.entries[0].event_key
 
-            build_and_write_cr_runtime_dry_run(
+            morning_result = build_and_write_cr_runtime_dry_run(
                 **common,
-                run_label="flush-and-escalate",
+                run_label="reconcile-and-escalate",
                 now=_dt("2026-06-18T08:01:00+08:00"),
                 pipeline_config=CRPipelineConfig(
                     decision=CRDecisionPolicy(urgent_threshold=1.0)
@@ -391,7 +442,15 @@ class TestDeferredQueueRuntime(unittest.TestCase):
             by_key = {entry.event_key: entry for entry in state.snapshot.entries}
             self.assertEqual(by_key[event_key].decision_level, "urgent")
             submitted_after_escalation = len(sink.submitted_messages)
-            self.assertEqual(submitted_after_escalation, 2)
+            self.assertEqual(submitted_after_escalation, 1)
+            queue = json.loads(queue_path.read_text(encoding="utf-8"))
+            self.assertEqual(queue["entries"], [])
+            plan = json.loads(
+                morning_result.dispatch_plan_json_paths.dispatch_plan_latest_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(plan["quiet_hours"]["reconciled_count"], 1)
 
             build_and_write_cr_runtime_dry_run(
                 **common,
@@ -413,7 +472,133 @@ class TestDeferredQueueRuntime(unittest.TestCase):
                 "Suppressed (high-score): 1", repeat_summary.text
             )
 
-    def test_flush_not_configured_and_failed_retain_queue(self):
+    def test_matching_current_rejection_keeps_deferred_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            state_path = Path(tmp) / "state.json"
+            common = {
+                "hotlist_stats": _hotlist_stats("Rejected Current"),
+                "artifact_config": CRArtifactConfig(root_dir=Path(tmp) / "art"),
+                "dispatch_mode": "live",
+                "dispatch_state_path": state_path,
+                "deferred_queue_path": queue_path,
+                "quiet_hours_env": _quiet_env(),
+                "urgent_threshold": 999.0,
+            }
+
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="defer-for-rejection",
+                dispatch_sink=CRMemoryDispatchSink(),
+                now=_dt("2026-06-17T23:30:00+08:00"),
+            )
+            self.assertEqual(
+                len(load_deferred_dispatch_queue(queue_path).queue.entries), 1
+            )
+
+            sink = _RejectingSink()
+            result = build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="reject-current",
+                dispatch_sink=sink,
+                now=_dt("2026-06-18T08:01:00+08:00"),
+            )
+
+            self.assertEqual(len(sink.submit_calls), 1)
+            queue = load_deferred_dispatch_queue(queue_path).queue
+            self.assertEqual(len(queue.entries), 1)
+            self.assertIn("Rejected Current", sink.submit_calls[0][0].text)
+            receipts = json.loads(
+                result.dispatch_receipt_json_paths.dispatch_receipt_latest_path.read_text(
+                    encoding="utf-8"
+                )
+            )["receipts"]
+            self.assertFalse(receipts[-1]["accepted"])
+
+    def test_multiple_overlaps_send_one_current_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            stats = (
+                _hotlist_stats("Alpha Event", word="quake", event_id="a")
+                + _hotlist_stats("Beta Story", word="election", event_id="b")
+            )
+            common = {
+                "hotlist_stats": stats,
+                "artifact_config": CRArtifactConfig(root_dir=Path(tmp) / "art"),
+                "dispatch_mode": "live",
+                "deferred_queue_path": queue_path,
+                "quiet_hours_env": _quiet_env(),
+                "urgent_threshold": 999.0,
+            }
+
+            build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="defer-multiple",
+                dispatch_sink=CRMemoryDispatchSink(),
+                now=_dt("2026-06-17T23:30:00+08:00"),
+            )
+            self.assertEqual(
+                len(load_deferred_dispatch_queue(queue_path).queue.entries), 2
+            )
+
+            sink = CRMemoryDispatchSink()
+            result = build_and_write_cr_runtime_dry_run(
+                **common,
+                run_label="reconcile-multiple",
+                dispatch_sink=sink,
+                now=_dt("2026-06-18T08:01:00+08:00"),
+            )
+
+            self.assertEqual(len(sink.submitted_messages), 1)
+            self.assertIn("reconcile-multiple", sink.submitted_messages[0].text)
+            self.assertIn("Alpha Event", sink.submitted_messages[0].text)
+            self.assertIn("Beta Story", sink.submitted_messages[0].text)
+            self.assertEqual(
+                load_deferred_dispatch_queue(queue_path).queue.entries, ()
+            )
+            plan = json.loads(
+                result.dispatch_plan_json_paths.dispatch_plan_latest_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(plan["quiet_hours"]["reconciled_count"], 2)
+
+    def test_expired_queue_is_pruned_without_sending_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = Path(tmp) / "queue.json"
+            self._seed_queue(
+                queue_path,
+                _entry(
+                    "expired-history",
+                    deferred_at="2026-06-17T19:59:59+08:00",
+                    text="stale deferred history",
+                ),
+            )
+            sink = CRMemoryDispatchSink()
+            result = build_and_write_cr_runtime_dry_run(
+                hotlist_stats=[],
+                run_label="expire-history",
+                artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "art"),
+                dispatch_mode="live",
+                dispatch_sink=sink,
+                deferred_queue_path=queue_path,
+                quiet_hours_env=_quiet_env(),
+                now=_dt("2026-06-18T08:01:00+08:00"),
+            )
+
+            self.assertEqual(sink.submitted_messages, [])
+            self.assertEqual(
+                load_deferred_dispatch_queue(queue_path).queue.entries, ()
+            )
+            plan = json.loads(
+                result.dispatch_plan_json_paths.dispatch_plan_latest_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(plan["quiet_hours"]["expired_count"], 1)
+            self.assertEqual(plan["quiet_hours"]["reconciled_count"], 0)
+
+    def test_missing_or_failed_current_send_retain_queue(self):
         for sink in (None, _RejectingSink(), _RaisingSink()):
             with self.subTest(sink=type(sink).__name__ if sink else "None"):
                 with tempfile.TemporaryDirectory() as tmp:
@@ -421,7 +606,7 @@ class TestDeferredQueueRuntime(unittest.TestCase):
                     self._seed_queue(queue_path, _entry("alert-A"))
                     result = build_and_write_cr_runtime_dry_run(
                         hotlist_stats=[],
-                        run_label="flush-retain",
+                        run_label="reconcile-retain",
                         artifact_config=CRArtifactConfig(root_dir=Path(tmp) / "art"),
                         dispatch_mode="live",
                         dispatch_sink=sink,

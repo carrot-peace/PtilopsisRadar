@@ -177,6 +177,8 @@ def quiet_hours_evaluation_to_plan_dict(
     reason: str | None = None,
     bypass_applied: bool = False,
     deferred_count: int = 0,
+    expired_count: int = 0,
+    reconciled_count: int = 0,
     entries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Serialize quiet-hours evaluation for dispatch_plan.json."""
@@ -211,6 +213,8 @@ def quiet_hours_evaluation_to_plan_dict(
         "decision": decision or evaluation.decision,
         "reason": reason or evaluation.reason,
         "deferred_count": deferred_count,
+        "expired_count": expired_count,
+        "reconciled_count": reconciled_count,
         "entries": entries or [],
     }
     if not evaluation.window_enabled:
