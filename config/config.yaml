@@ -220,6 +220,80 @@ rss:
       url: "https://deepmind.google/blog/rss.xml"
       max_age_days: 7
 
+    # 公开账号页面直采，复用条目存储；不经 RSS 转换，不需要账号密码或 API Token。
+    - id: "lilaoshi-telegram"
+      name: "李老师不是你老师 · Telegram"
+      url: "https://t.me/s/lilaoshibushinilaoshi"
+      source_type: "telegram_html"
+      max_pages: 3
+      max_items: 100
+      max_age_days: 1
+
+    - id: "lilaoshi-x"
+      name: "李老师不是你老师 · X"
+      url: "https://x.com/whyyoutouzhele"
+      source_type: "x_public_html"
+      max_items: 25
+      max_age_days: 1
+
+    # 可选媒体账号：默认关闭；用 probe_public_sources.py 实测后再启用。
+    - id: "zaobao-telegram"
+      name: "联合早报 · Telegram"
+      url: "https://t.me/s/zaobaosg"
+      source_type: "telegram_html"
+      max_pages: 2
+      max_items: 80
+      enabled: false
+
+    - id: "zaobao-x"
+      name: "联合早报 · X"
+      url: "https://x.com/zaobaosg"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
+    - id: "thepaper-x"
+      name: "澎湃新闻 · X"
+      url: "https://x.com/thepapercn"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
+    - id: "ecns-x"
+      name: "中国新闻网 · X"
+      url: "https://x.com/Echinanews"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
+    - id: "peoples-daily-zh-x"
+      name: "人民日报中文 · X"
+      url: "https://x.com/PDChinese"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
+    - id: "xinhua-x"
+      name: "新华社 · X"
+      url: "https://x.com/XHNews"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
+    - id: "bbc-chinese-x"
+      name: "BBC中文 · X"
+      url: "https://x.com/bbcchinese"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
+    - id: "dw-chinese-x"
+      name: "德国之声中文 · X"
+      url: "https://x.com/dw_chinese"
+      source_type: "x_public_html"
+      max_items: 25
+      enabled: false
+
     # 自定义源示例
     # - id: "custom-feed"
     #   name: "自定义源"

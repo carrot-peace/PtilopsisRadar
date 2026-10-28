@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 import requests
 
 from .parser import RSSParser
+from .public_html import account_name, parse_telegram_html, parse_x_public_html
 from trendradar.storage.base import RSSItem, RSSData
 from trendradar.utils.time import get_configured_time, is_within_days, DEFAULT_TIMEZONE
 
@@ -31,7 +32,8 @@ class RSSFeedConfig:
     max_items: int = 0          # 最大条目数（0=不限制）
     enabled: bool = True        # 是否启用
     max_age_days: Optional[int] = None  # 文章最大年龄（天），覆盖全局设置；None=使用全局，0=禁用过滤
-    source_type: str = "rss"    # 源类型：rss / anthropic_html
+    source_type: str = "rss"    # rss / anthropic_html / telegram_html / x_public_html
+    max_pages: int = 1          # Telegram 有界历史回看页数（1–10）
     link_prefixes: Optional[List[str]] = None  # HTML 源允许的链接前缀
 
 
@@ -294,15 +296,42 @@ class RSSFetcher:
         """Short exponential backoff with bounded jitter."""
         return float(2 ** (retry_number - 1)) + random.uniform(0.0, 0.25)
 
+    def _parse_telegram_pages(self, content: str, feed: RSSFeedConfig):
+        pages = int(feed.max_pages)
+        if not 1 <= pages <= 10:
+            raise ValueError("Telegram max_pages must be between 1 and 10")
+        items, cursor = parse_telegram_html(content, feed.url)
+        found = {item.url: item for item in items}
+        for _ in range(pages - 1):
+            if cursor is None:
+                break
+            response = self.session.get(
+                feed.url.rstrip("/"), params={"before": cursor}, timeout=self.timeout
+            )
+            response.raise_for_status()
+            older, next_cursor = parse_telegram_html(response.text, feed.url)
+            found.update({item.url: item for item in older})
+            if next_cursor is not None and next_cursor >= cursor:
+                raise ValueError("Telegram pagination did not move backwards")
+            cursor = next_cursor
+        return sorted(found.values(), key=lambda item: item.published_at, reverse=True)
+
     def _fetch_feed_once(self, feed: RSSFeedConfig) -> List[RSSItem]:
         """Fetch and parse one feed once, allowing callers to classify errors."""
+        if feed.source_type in {"telegram_html", "x_public_html"}:
+            account_name(feed.url, feed.source_type)
         response = self.session.get(feed.url, timeout=self.timeout)
         response.raise_for_status()
 
         if feed.source_type == "anthropic_html":
             items = self._parse_anthropic_html(response.text, feed)
         else:
-            parsed_items = self.parser.parse(response.text, feed.url)
+            if feed.source_type == "telegram_html":
+                parsed_items = self._parse_telegram_pages(response.text, feed)
+            elif feed.source_type == "x_public_html":
+                parsed_items = parse_x_public_html(response.text, feed.url)
+            else:
+                parsed_items = self.parser.parse(response.text, feed.url)
 
             # 转换为 RSSItem（使用配置的时区）
             now = get_configured_time(self.timezone)
@@ -480,6 +509,7 @@ class RSSFetcher:
                 enabled=feed_config.get("enabled", True),
                 max_age_days=max_age_days,  # None=使用全局，0=禁用，>0=覆盖
                 source_type=feed_config.get("source_type", "rss"),
+                max_pages=feed_config.get("max_pages", 1),
                 link_prefixes=feed_config.get("link_prefixes"),
             )
             if feed.id and feed.url:
