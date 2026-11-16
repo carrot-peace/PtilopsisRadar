@@ -104,6 +104,27 @@ class TestPublicParsers(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_x_public_html(x_page([post]), 'https://x.com/example')
 
+    def test_x_legacy_dates_are_converted_to_utc(self):
+        post = tweet()
+        post['legacy'] = {'full_text': '旧格式正文', 'created_at': 'Wed Oct 28 16:00:00 +0800 2026'}
+        post.pop('details')
+        items = parse_x_public_html(x_page([post]), 'https://x.com/example')
+        self.assertEqual(items[0].published_at, '2026-10-28T08:00:00+00:00')
+        self.assertEqual(items[0].title, '旧格式正文')
+
+    def test_x_details_body_can_use_legacy_date(self):
+        post = tweet(); post['details'].pop('created_at_ms')
+        post['legacy'] = {'created_at': 'Wed Oct 28 16:00:00 +0000 2026'}
+        items = parse_x_public_html(x_page([post]), 'https://x.com/example')
+        self.assertEqual(items[0].published_at, '2026-10-28T16:00:00+00:00')
+
+    def test_x_invalid_or_timezone_free_legacy_dates_are_rejected(self):
+        for date in ('not a date', 'Wed Oct 28 16:00:00 2026', None):
+            post = tweet(); post.pop('details')
+            post['legacy'] = {'full_text': '正文', 'created_at': date}
+            with self.subTest(date=date), self.assertRaises(ValueError):
+                parse_x_public_html(x_page([post]), 'https://x.com/example')
+
 
 class TestPublicFetcher(unittest.TestCase):
     def make_fetcher(self):
@@ -132,6 +153,23 @@ class TestPublicFetcher(unittest.TestCase):
         items, error = fetcher.fetch_feed(feed)
         self.assertEqual(items, [])
         self.assertIn('pagination', error)
+
+    def test_overlapping_pages_keep_the_complete_caption_in_either_order(self):
+        for first, second in [('警方通报伤人事件', ''), ('', '警方通报伤人事件'),
+                              ('警方通报伤人事件及后续处理', '简报')]:
+            fetcher = self.make_fetcher()
+            feed = RSSFeedConfig('example', 'Example', 'https://t.me/s/example',
+                                 source_type='telegram_html', max_pages=2)
+            fetcher.session.get = Mock(side_effect=[
+                self.response(telegram([(3, first, '2026-10-28T10:00:00Z')], 3)),
+                self.response(telegram([(3, second, '2026-10-28T10:00:00Z'),
+                                        (2, '更早消息', '2026-10-28T09:00:00Z')], 2)),
+            ])
+            with self.subTest(first=first, second=second):
+                items, error = fetcher.fetch_feed(feed)
+                self.assertIsNone(error)
+                self.assertEqual(len(items), 2)
+                self.assertEqual(items[0].summary, max((first, second), key=len))
 
     def test_parse_failure_marks_feed_failed_in_collection_health(self):
         feed = RSSFeedConfig('example', 'Example', 'https://x.com/example', source_type='x_public_html')

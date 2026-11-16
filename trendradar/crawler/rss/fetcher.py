@@ -310,7 +310,12 @@ class RSSFetcher:
             )
             response.raise_for_status()
             older, next_cursor = parse_telegram_html(response.text, feed.url)
-            found.update({item.url: item for item in older})
+            for item in older:
+                # Overlapping album/page captures must not replace a caption
+                # with an empty media placeholder or a shorter excerpt.
+                previous = found.get(item.url)
+                if previous is None or len(item.summary) > len(previous.summary):
+                    found[item.url] = item
             if next_cursor is not None and next_cursor >= cursor:
                 raise ValueError("Telegram pagination did not move backwards")
             cursor = next_cursor

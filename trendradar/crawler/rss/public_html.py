@@ -5,6 +5,7 @@ Only the requested account's posts are emitted; quoted posts stay in context.
 """
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
 import json
@@ -180,7 +181,14 @@ def parse_x_public_html(content, url):
                     continue
                 millis = details.get("created_at_ms")
                 try:
-                    stamp = datetime.fromtimestamp(int(millis) / 1000, timezone.utc)
+                    if millis is not None:
+                        stamp = datetime.fromtimestamp(int(millis) / 1000, timezone.utc)
+                    else:
+                        created_at = details.get("created_at") or result.get("legacy", {}).get("created_at")
+                        stamp = parsedate_to_datetime(created_at)
+                        if stamp.tzinfo is None:
+                            raise ValueError("X publication date must include a timezone")
+                        stamp = stamp.astimezone(timezone.utc)
                 except (ValueError, TypeError, OverflowError, OSError):
                     continue
                 canonical = f"https://x.com/{handle}/status/{post_id}"
