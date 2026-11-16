@@ -12,6 +12,9 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, Mapping, Optional
 
+from trendradar.esports import esports_item
+from trendradar.reader_preferences import exclude_esports
+
 
 ENTERTAINMENT_WORDS = (
     "明星", "综艺", "电视剧", "电影", "演唱会", "爱豆", "偶像", "粉丝",
@@ -115,12 +118,24 @@ def is_reader_noise(
     samples: Optional[Iterable[Any]] = None,
 ) -> bool:
     """Return whether routine content should stay outside the main DR stream."""
+    # Explicit reader exclusions take precedence over public-interest words.
+    # Freeze generators because the legacy category check may also need them.
+    samples = tuple(samples or ())
     raw_topic = str(topic or "")
     blob = (
         reader_item_blob(raw_topic, samples)
         if raw_topic.startswith(_UNCLASSIFIED_PREFIXES)
         else raw_topic
     )
+    if exclude_esports() and esports_item(blob):
+        return True
     if reader_structural_reason(blob):
         return False
     return classify_reader_category(blob) is not None
+
+
+def is_excluded_reader_item(topic: str, samples: Optional[Iterable[Any]] = None) -> bool:
+    """Explicitly excluded topics are omitted even from noise examples."""
+    raw_topic = str(topic or "")
+    blob = reader_item_blob(raw_topic, samples) if raw_topic.startswith(_UNCLASSIFIED_PREFIXES) else raw_topic
+    return exclude_esports() and esports_item(blob)

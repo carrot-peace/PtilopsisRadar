@@ -839,7 +839,7 @@ class TestForbiddenImports(unittest.TestCase):
         self.assertNotIn("_run_analysis_pipeline", source)
 
     def test_allowed_imports_only(self):
-        """Only trendradar.cr.* submodules are imported."""
+        """Allow CR modules and the shared, pure esports context recognizer."""
         source = self._read_source()
         import re
 
@@ -848,7 +848,7 @@ class TestForbiddenImports(unittest.TestCase):
         )
         for imp in imports:
             self.assertTrue(
-                imp.startswith("trendradar.cr."),
+                imp.startswith("trendradar.cr.") or imp == "trendradar.esports",
                 f"Forbidden import: {imp}",
             )
 

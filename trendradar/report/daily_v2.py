@@ -51,6 +51,7 @@ from trendradar.content_policy import (
     CATEGORY_LABELS as _CATEGORY_LABELS,
     classify_reader_category as classify_category,
     is_reader_noise as is_noise_item,
+    is_excluded_reader_item,
     reader_category as _category_for_item,
     reader_structural_reason as structural_reason,
 )
@@ -539,6 +540,8 @@ def build_daily_report_v2(
                     continue
                 topic = str(entry.get("topic", "")).strip()
                 samples = _samples_of(entry)
+                if is_excluded_reader_item(topic, samples):
+                    continue
                 # Rule 4: entertainment/sports/esports → noise unless structural.
                 if is_noise_item(topic, samples):
                     cat = _category_for_item(topic, samples) or "noise"
@@ -624,7 +627,16 @@ def _build_suppressed(
 
 def _build_raw_appendix(stats: Optional[List[Dict[str, Any]]]) -> RawAppendix:
     """Cap and collapse the raw hotlist into an appendix (Rule 7)."""
-    stats = stats or []
+    # Excluded titles stay out of the expandable appendix as well.
+    filtered_stats = []
+    for group in stats or []:
+        original = group.get("titles") or []
+        visible = [t for t in original if not is_excluded_reader_item(
+            t.get("title", "") if isinstance(t, dict) else str(t))]
+        if original and not visible:
+            continue
+        filtered_stats.append({**group, "titles": visible})
+    stats = filtered_stats
     total = len(stats)
     shown = stats[:RAW_APPENDIX_MAX_GROUPS]
     groups: List[Dict[str, Any]] = []

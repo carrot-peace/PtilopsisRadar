@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from trendradar.ai.evidence import SECTION_ORDER, derive_radar_readout
 from trendradar.content_policy import is_reader_noise
+from trendradar.reader_preferences import filter_reader_stats
 
 # state.json schema 版本（future /now 据此读取）。v2 将 ``label``
 # 从关键词组 bucket 改为事件自身的读者状态。
@@ -430,7 +431,7 @@ def _render_signal_rows(ai_analysis: Any) -> str:
 def _render_hotlist_rows(stats: Optional[List[Dict[str, Any]]]) -> str:
     """热榜追踪：每个关键词组取最热标题 + 来源摘要行（source #rank [新]）。"""
     rows: List[str] = []
-    for grp in (stats or []):
+    for grp in (filter_reader_stats(stats) or []):
         word = _esc(_public_text(grp.get("word", "")))
         titles = grp.get("titles", []) or []
         if not titles:
