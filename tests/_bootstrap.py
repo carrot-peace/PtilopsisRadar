@@ -99,6 +99,7 @@ def load_all():
 
     source_tiers = _load_file("trendradar.core.source_tiers", "trendradar/core/source_tiers.py")
     _load_file("trendradar.esports", "trendradar/esports.py")
+    _load_file("trendradar.core.frequency", "trendradar/core/frequency.py")
     _load_file("trendradar.reader_preferences", "trendradar/reader_preferences.py")
     _load_file("trendradar.content_policy", "trendradar/content_policy.py")
     evidence = _load_file("trendradar.ai.evidence", "trendradar/ai/evidence.py")

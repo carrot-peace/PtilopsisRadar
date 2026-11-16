@@ -13,7 +13,7 @@ import re
 from typing import Any, Iterable, Mapping, Optional
 
 from trendradar.esports import esports_item
-from trendradar.reader_preferences import exclude_esports
+from trendradar.reader_preferences import exclude_esports, is_group_topic
 
 
 ENTERTAINMENT_WORDS = (
@@ -127,7 +127,7 @@ def is_reader_noise(
         if raw_topic.startswith(_UNCLASSIFIED_PREFIXES)
         else raw_topic
     )
-    if exclude_esports() and esports_item(blob):
+    if is_excluded_reader_item(raw_topic, samples):
         return True
     if reader_structural_reason(blob):
         return False
@@ -137,5 +137,24 @@ def is_reader_noise(
 def is_excluded_reader_item(topic: str, samples: Optional[Iterable[Any]] = None) -> bool:
     """Explicitly excluded topics are omitted even from noise examples."""
     raw_topic = str(topic or "")
-    blob = reader_item_blob(raw_topic, samples) if raw_topic.startswith(_UNCLASSIFIED_PREFIXES) else raw_topic
-    return exclude_esports() and esports_item(blob)
+    if not exclude_esports():
+        return False
+    # Evidence belongs to a specific event unless this is a broad keyword
+    # group. Group samples are filtered individually by the presentation layer.
+    if is_group_topic(raw_topic):
+        return esports_item(raw_topic)
+    return esports_item(raw_topic, samples)
+
+
+def excluded_suppressed_count(ai_analysis: Any) -> int:
+    """Excluded sentiment/background items must not survive in folded counts."""
+    count = 0
+    for item in getattr(ai_analysis, "sentiment_heavy", None) or []:
+        if not isinstance(item, Mapping):
+            continue
+        detail = item.get("evidence_detail")
+        samples = detail.get("sample_titles") if isinstance(detail, Mapping) else None
+        count += is_excluded_reader_item(str(item.get("topic", "")), samples)
+    count += sum(is_excluded_reader_item(str(note))
+                 for note in getattr(ai_analysis, "background_notes", None) or [])
+    return count

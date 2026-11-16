@@ -15,7 +15,9 @@ import unicodedata
 from datetime import datetime
 from typing import Any
 
-from trendradar.content_policy import is_reader_noise
+from trendradar.content_policy import (
+    is_reader_noise, is_excluded_reader_item, excluded_suppressed_count,
+)
 
 
 DR_TITLE = "Ptilopsis Radar｜DR"
@@ -236,6 +238,10 @@ def _deterministic_brief(ai_result: Any) -> str:
             for item in getattr(ai_result, bucket, []) or []:
                 if not isinstance(item, dict):
                     continue
+                if is_excluded_reader_item(
+                    str(item.get("topic", "") or ""), _sample_titles(item)
+                ):
+                    continue
                 if _is_noise_topic(
                     str(item.get("topic", "") or ""), _sample_titles(item)
                 ):
@@ -271,7 +277,7 @@ def _deterministic_brief(ai_result: Any) -> str:
         if count:
             clauses.append(f"{count} 个{label}")
     detail = "、".join(clauses) if clauses else "未发现达到异常阈值的主信号"
-    suppressed = background + sentiment + noise_count
+    suppressed = max(0, background + sentiment - excluded_suppressed_count(ai_result)) + noise_count
     suffix = f"；另有 {suppressed} 个非重点项已折叠" if suppressed else ""
     return f"今日识别 {anomaly} 个异常信号：{detail}{suffix}。"
 

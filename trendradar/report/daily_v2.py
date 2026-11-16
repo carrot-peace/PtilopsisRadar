@@ -52,9 +52,11 @@ from trendradar.content_policy import (
     classify_reader_category as classify_category,
     is_reader_noise as is_noise_item,
     is_excluded_reader_item,
+    excluded_suppressed_count,
     reader_category as _category_for_item,
     reader_structural_reason as structural_reason,
 )
+from trendradar.reader_preferences import filtered_title_count
 
 # ─────────────────────────────────────────────────────────────
 # Deterministic notices / labels (sober, not Telegram fallback text)
@@ -383,7 +385,7 @@ def _copy_samples(detail: Any) -> List[Dict[str, Any]]:
         if not isinstance(raw, dict):
             continue
         title = str(raw.get("title", "") or "").strip()
-        if not title:
+        if not title or is_excluded_reader_item(title):
             continue
         samples.append({
             "title": title,
@@ -405,7 +407,7 @@ def _copy_source_links(detail: Any) -> List[Dict[str, Any]]:
             continue
         url = str(raw.get("url", "") or "").strip()
         title = str(raw.get("title", "") or "").strip()
-        if not url or not title:
+        if not url or not title or is_excluded_reader_item(title):
             continue
         links.append({
             "title": title,
@@ -553,6 +555,9 @@ def build_daily_report_v2(
                 model.main_items.append(_build_main_item(entry, section))
 
         model.suppressed = _build_suppressed(ai_analysis, noise)
+        model.radar["suppressed"] = max(
+            0, int(model.radar.get("suppressed", 0) or 0) - excluded_suppressed_count(ai_analysis)
+        )
         _refresh_radar_from_visible_content(model)
         if not overview:
             model.overview = _program_overview(model.radar)
@@ -576,7 +581,8 @@ def _build_suppressed(
     # Sentiment-heavy items (program-suppressed by default).
     sentiment = [
         it for it in (getattr(ai_analysis, "sentiment_heavy", None) or [])
-        if isinstance(it, dict)
+        if isinstance(it, dict) and not is_excluded_reader_item(
+            str(it.get("topic", "")), _samples_of(it))
     ]
     if sentiment:
         examples = [
@@ -610,7 +616,7 @@ def _build_suppressed(
     notes = [
         str(n).strip()
         for n in (getattr(ai_analysis, "background_notes", None) or [])
-        if str(n).strip()
+        if str(n).strip() and not is_excluded_reader_item(str(n))
     ]
     if notes:
         groups.append(
@@ -635,7 +641,8 @@ def _build_raw_appendix(stats: Optional[List[Dict[str, Any]]]) -> RawAppendix:
             t.get("title", "") if isinstance(t, dict) else str(t))]
         if original and not visible:
             continue
-        filtered_stats.append({**group, "titles": visible})
+        filtered_stats.append({**group, "titles": visible,
+                               "count": filtered_title_count(group, visible)})
     stats = filtered_stats
     total = len(stats)
     shown = stats[:RAW_APPENDIX_MAX_GROUPS]

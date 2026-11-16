@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from trendradar.ai.evidence import SECTION_ORDER, derive_radar_readout
-from trendradar.content_policy import is_reader_noise
+from trendradar.content_policy import (
+    is_reader_noise, is_excluded_reader_item, excluded_suppressed_count,
+)
 from trendradar.reader_preferences import filter_reader_stats
 
 # state.json schema 版本（future /now 据此读取）。v2 将 ``label``
@@ -318,6 +320,8 @@ def _event_radar(ai_analysis: Any) -> Dict[str, Any]:
     total = 0
     noise_count = 0
     for fallback, item in _iter_environment_items(ai_analysis):
+        if is_excluded_reader_item(str(item.get("topic", "")), _evidence_samples(item)):
+            continue
         if not _is_visible_item(item):
             noise_count += 1
             continue
@@ -331,7 +335,8 @@ def _event_radar(ai_analysis: Any) -> Dict[str, Any]:
         "high_heat": counts.get("high_heat_unverified", 0),
         "chinese_only": counts.get("chinese_only_hot", 0),
         "silence_gap": counts.get("silence_gap", 0),
-        "suppressed": int(radar.get("suppressed", 0) or 0) + noise_count,
+        "suppressed": max(0, int(radar.get("suppressed", 0) or 0)
+                          - excluded_suppressed_count(ai_analysis)) + noise_count,
     })
     return radar
 
@@ -461,7 +466,7 @@ def _render_hotlist_rows(stats: Optional[List[Dict[str, Any]]]) -> str:
 def _render_rss_rows(rss_items: Optional[List[Dict[str, Any]]]) -> str:
     """RSS 追踪：每个 RSS 关键词组取最新一条 + 来源/时间。"""
     rows: List[str] = []
-    for grp in (rss_items or []):
+    for grp in (filter_reader_stats(rss_items) or []):
         word = _esc(_public_text(grp.get("word", "")))
         titles = grp.get("titles", []) or []
         if not titles:
@@ -555,15 +560,23 @@ def render_current_dashboard_html(
         # 已抑制脚注
         sup_names: List[str] = []
         for _bucket, item in _iter_environment_items(ai_analysis):
-            if not _is_visible_item(item):
+            if not _is_visible_item(item) and not is_excluded_reader_item(
+                str(item.get("topic", "")), _evidence_samples(item)
+            ):
                 topic = _public_text(item.get("topic", ""))
                 if topic:
                     sup_names.append(_esc(topic))
         for item in (getattr(ai_analysis, "sentiment_heavy", None) or []):
+            if isinstance(item, dict) and is_excluded_reader_item(
+                str(item.get("topic", "")), _evidence_samples(item)
+            ):
+                continue
             t = _public_text(item.get("topic", "")) if isinstance(item, dict) else ""
             if t:
                 sup_names.append(_esc(t))
         for note in (getattr(ai_analysis, "background_notes", None) or []):
+            if is_excluded_reader_item(str(note)):
+                continue
             note = _public_text(note)
             if note:
                 short = note[:28] + ("…" if len(note) > 28 else "")

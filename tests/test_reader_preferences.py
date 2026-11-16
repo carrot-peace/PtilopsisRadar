@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from trendradar.content_policy import is_reader_noise
+from trendradar.content_policy import is_reader_noise, is_excluded_reader_item
 from trendradar.esports import esports_item
 from trendradar.reader_preferences import exclude_esports
 from trendradar.cr.dispatch_plan import build_cr_a_dispatch_plan
@@ -78,6 +78,64 @@ class ReaderPreferencesTests(unittest.TestCase):
         self.assertEqual(model.main_items, [])
         self.assertEqual(model.suppressed_count, 0)
         self.assertEqual(model.raw_appendix.groups[0]["titles"], [{"title": "上海道路停车新政"}])
+        self.assertEqual(model.raw_appendix.groups[0]["count"], 1)
+
+    def test_specific_events_check_sources_but_mixed_keyword_groups_keep_other_news(self):
+        from types import SimpleNamespace
+        from trendradar.report.daily_v2 import build_daily_report_v2
+        evidence = {"sample_titles": [{"title": "KPL比赛中断"}, {"title": "上海道路停车新政"}],
+                    "source_links": [{"title": "KPL比赛中断", "url": "https://example.com/esports"},
+                                     {"title": "上海道路停车新政", "url": "https://example.com/roads"}]}
+        self.assertTrue(is_excluded_reader_item("现场情况通报", [{"title": "KPL比赛中断"}]))
+        self.assertTrue(is_reader_noise("现场情况通报", [{"title": "KPL比赛中断"}]))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "keywords.txt"
+            path.write_text("[WORD_GROUPS]\n\n[城市线索]\n上海\n")
+            with patch.dict(os.environ, {"FREQUENCY_WORDS_PATH": str(path)}):
+                self.assertFalse(is_excluded_reader_item("城市线索", evidence["sample_titles"]))
+                ai = SimpleNamespace(report_style="environment", success=True, overview="近期动态",
+                                     overview_stats={}, high_heat_unverified=[
+                                         {"topic": "城市线索", "evidence_detail": evidence}])
+                model = build_daily_report_v2(ai, {"stats": []})
+                self.assertEqual([i.topic for i in model.main_items], ["城市线索"])
+                self.assertEqual([i["title"] for i in model.main_items[0].samples], ["上海道路停车新政"])
+                self.assertEqual([i["title"] for i in model.main_items[0].source_links], ["上海道路停车新政"])
+        self.assertEqual(len(evidence["sample_titles"]), 2)
+
+    def test_folded_titles_and_counts_match_on_all_report_surfaces(self):
+        from datetime import datetime
+        from types import SimpleNamespace
+        from trendradar.report.daily_v2 import build_daily_report_v2
+        from trendradar.report.dashboard import render_current_dashboard_html, _event_radar
+        from trendradar.dr.formatter import _deterministic_brief
+        ai = SimpleNamespace(
+            report_style="environment", success=True, overview="近期动态",
+            overview_stats={"label_counts": {"sentiment_heavy": 2}, "background_count": 2},
+            high_heat_unverified=[{"topic": "电竞场馆发生火灾，警方通报"},
+                                  {"topic": "某明星恋情"}, {"topic": "上海道路停车新政"}],
+            sentiment_heavy=[{"topic": "BLG粉丝争议"}, {"topic": "社区投诉情绪聚集"}],
+            background_notes=["EDG发文道歉", "道路建设背景"],
+        )
+        model = build_daily_report_v2(ai, {"stats": []})
+        self.assertEqual(model.suppressed_count, 3)
+        self.assertEqual(model.radar["suppressed"], 3)
+        self.assertEqual(_event_radar(ai)["suppressed"], 3)
+        self.assertIn("另有 3 个非重点项", _deterministic_brief(ai))
+        html = render_current_dashboard_html(ai, {}, datetime(2026, 11, 16), "current",
+            rss_items=[{"word": "上海", "count": 2, "titles": [
+                {"title": "上海EDG.M赛程"}, {"title": "上海道路停车新政"}]}])
+        for title in ("电竞场馆发生火灾，警方通报", "BLG粉丝争议", "EDG发文道歉", "上海EDG.M赛程"):
+            self.assertNotIn(title, html)
+        self.assertIn("已抑制 3", html)
+        self.assertIn("上海道路停车新政", html)
+        examples = [s for group in model.suppressed for s in group.examples]
+        self.assertEqual(set(examples), {"某明星恋情", "社区投诉情绪聚集", "道路建设背景"})
+
+    def test_appendix_removes_known_items_without_collapsing_a_capped_total(self):
+        from trendradar.report.daily_v2 import _build_raw_appendix
+        result = _build_raw_appendix([{"word": "上海", "count": 10, "titles": [
+            {"title": "上海EDG.M赛程"}, {"title": "上海道路停车新政"}]}])
+        self.assertEqual(result.groups[0]["count"], 9)
 
     def test_cr_urgent_exclusion_is_audited_but_never_creates_diagnostic_push(self):
         from dataclasses import replace
