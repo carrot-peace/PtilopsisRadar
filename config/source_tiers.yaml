@@ -77,6 +77,38 @@ platforms:
 # RSS 订阅（id 对应 config.yaml rss.feeds）
 # ───────────────────────────────────────────────────────────────
 rss_feeds:
+  # 两个入口属于同一发布者，均按待核实社交线索处理。
+  lilaoshi-telegram:
+    tier: D
+    role: "social_account"
+  lilaoshi-x:
+    tier: D
+    role: "social_account"
+  zaobao-telegram:
+    tier: B
+    role: "media_account"
+  zaobao-x:
+    tier: B
+    role: "media_account"
+  thepaper-x:
+    tier: C
+    role: "media_account"
+  ecns-x:
+    tier: C
+    role: "media_account"
+  peoples-daily-zh-x:
+    tier: C
+    role: "media_account"
+  xinhua-x:
+    tier: C
+    role: "media_account"
+  bbc-chinese-x:
+    tier: B
+    role: "media_account"
+  dw-chinese-x:
+    tier: B
+    role: "media_account"
+
   # A —— AI 公司/研究机构官方源
   openai-news:
     tier: A
