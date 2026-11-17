@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from trendradar.esports import esports_item
+
 from trendradar.cr.artifacts import (
     CRArtifactConfig,
     CRArtifactPaths,
@@ -87,6 +89,7 @@ class CRPipelineConfig:
     scoring: CRScoringProfile | None = None
     decision: CRDecisionPolicy | None = None
     render: CRPipelineRenderConfig = field(default_factory=CRPipelineRenderConfig)
+    exclude_esports: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +198,16 @@ def build_cr_pipeline_from_primitives(
     ]
 
     # 4. Decide.
+    preference_labels = {
+        c.candidate_id: ["reader_preference:exclude_esports"]
+        for c in candidates
+        if config.exclude_esports and esports_item(
+            c.display_title, (item.title for item in c.source_items)
+        )
+    }
     decisions = decide_cr_candidates(
-        score_results, policy=config.decision
+        score_results, policy=config.decision,
+        suppress_labels_by_candidate_id=preference_labels,
     )
 
     # 5. Bind.

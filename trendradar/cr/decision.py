@@ -236,6 +236,10 @@ def count_high_score_suppressed(
     """
     count = 0
     for d in decisions:
+        # A reader opting out is not an operator alarm. Do not create a
+        # suppression-only push for a high-heat excluded topic.
+        if any(label.startswith("reader_preference:") for label in d.suppress_labels):
+            continue
         if d.level == DECISION_SUPPRESS and d.total_score >= urgent_threshold:
             count += 1
     return count

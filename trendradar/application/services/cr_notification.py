@@ -6,6 +6,8 @@ import sys
 from dataclasses import dataclass, replace
 from typing import Any, Mapping, Optional, Sequence
 
+from trendradar.reader_preferences import exclude_esports
+
 
 @dataclass(frozen=True, slots=True)
 class CRNotificationRequest:
@@ -261,6 +263,7 @@ class CRNotificationService:
                 pipeline_config=CRPipelineConfig(
                     cluster=_pipeline_cluster_cfg,
                     scoring=_pipeline_scoring_cfg,
+                    exclude_esports=exclude_esports(),
                 ),
                 dispatch_sink=_dispatch_sink,
                 dispatch_mode=_cr_mode,

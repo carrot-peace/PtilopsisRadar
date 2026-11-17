@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from trendradar.application.run_state import AnalysisRequest
+from trendradar.reader_preferences import filter_reader_stats
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,9 +52,9 @@ class AnalysisService:
             quiet=quiet,
         )
         return AnalysisSelection(
-            stats=stats,
+            stats=filter_reader_stats(stats),
             total_titles=total_titles,
-            rss_items=request.rss_items,
+            rss_items=filter_reader_stats(request.rss_items),
             filter_method="keyword",
             fell_back=filter_method == "ai",
         )
@@ -89,10 +90,10 @@ class AnalysisService:
         )
         rss_items = ai_rss_stats or request.rss_items
         return AnalysisSelection(
-            stats=stats,
+            stats=filter_reader_stats(stats),
             total_titles=sum(
                 len(titles) for titles in request.results.values()
             ),
-            rss_items=rss_items,
+            rss_items=filter_reader_stats(rss_items),
             filter_method="ai",
         )

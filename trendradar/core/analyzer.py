@@ -12,6 +12,8 @@ from typing import Dict, List, Tuple, Optional, Callable
 
 from trendradar.core.frequency import matches_word_groups, _word_matches
 from trendradar.utils.time import DEFAULT_TIMEZONE
+from trendradar.esports import esports_item
+from trendradar.reader_preferences import exclude_esports
 
 
 def calculate_news_weight(
@@ -160,6 +162,7 @@ def count_word_frequency(
         的标题，每条生成一个独立的合成组（topic），统一排在最后，便于 AI 逐事件成 topic、
         cooldown 按 topic_key 去重。低热未归类仍丢弃，避免退化成新闻聚合。
     """
+    exclude_esports_enabled = exclude_esports()
     # 默认权重配置
     if weight_config is None:
         weight_config = {
@@ -264,6 +267,9 @@ def count_word_frequency(
             processed_titles[source_id] = {}
 
         for title, title_data in titles_data.items():
+            # Reader preference precedes both keyword groups and catch-all.
+            if exclude_esports_enabled and esports_item(title):
+                continue
             if title in processed_titles.get(source_id, {}):
                 continue
 
@@ -688,6 +694,7 @@ def count_rss_frequency(
 
     if not rss_items:
         return [], 0
+    exclude_esports_enabled = exclude_esports()
 
     # 如果没有配置词组，创建一个包含所有条目的虚拟词组
     if not word_groups:
@@ -723,6 +730,8 @@ def count_rss_frequency(
 
     for item in rss_items:
         title = item.get("title", "")
+        if exclude_esports_enabled and esports_item(title):
+            continue
         url = item.get("url", "")
 
         # 去重
