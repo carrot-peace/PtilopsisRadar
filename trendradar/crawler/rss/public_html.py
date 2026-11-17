@@ -154,8 +154,9 @@ def parse_x_public_html(content, url):
     decoder = json.JSONDecoder(); items = {}
     for script in doc.root.find(tag="script"):
         text = "".join(c for c in script.children if isinstance(c, str))
-        if "GraphQLRequestStream.Completed" not in text:
-            continue
+        # Request-stream event kinds may be symbolic or numeric (kind:1).
+        # Validate decoded posts below instead of depending on an enum label
+        # that need not appear in the server-rendered HTML.
         # Decode JSON string literals only. Never eval the site's JavaScript.
         for match in re.finditer(r"\bvalue\s*:\s*", text):
             try:

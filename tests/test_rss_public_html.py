@@ -38,7 +38,44 @@ def x_page(posts):
     return '<script>({kind:"GraphQLRequestStream.Completed",value:' + json.dumps(json.dumps(payload)) + '});</script>'
 
 
+def x_numeric_stream(posts):
+    """Sanitized current request-stream envelope; no legacy event name."""
+    payload = {"data": {"user": {"result": {"timeline": {
+        "instructions": [{"entries": [{"content": {"itemContent": {
+            "tweet_results": {"result": post}
+        }}} for post in posts]}]
+    }}}}}
+    return ('<script>($R=>$R[21].next($R[23]={kind:1,requestId:2,key:"profile-query",'
+            'value:' + json.dumps(json.dumps(payload)) +
+            '}))($R["tsr"]);document.currentScript.remove()</script>')
+
+
 class TestPublicParsers(unittest.TestCase):
+    def test_x_numeric_stream_decodes_posts_without_symbolic_event_name(self):
+        main = tweet('43', text='当前消息\n后续正文')
+        main['quoted_tweet_results'] = {'result': tweet('99', text='不独立采集的引用')}
+        page = x_numeric_stream([tweet('1', millis=1600000000000), main, main,
+                                 tweet('44', owner='another')])
+        self.assertNotIn('GraphQLRequestStream.Completed', page)
+        items = parse_x_public_html(page, 'https://x.com/example')
+        self.assertEqual([item.guid for item in items],
+                         ['https://x.com/example/status/43', 'https://x.com/example/status/1'])
+        self.assertEqual(items[0].summary, '当前消息\n后续正文')
+        self.assertEqual(items[0].published_at, '2026-10-28T12:00:00+00:00')
+
+    def test_x_numeric_stream_without_valid_own_posts_is_still_a_failure(self):
+        undated = tweet(); undated['details'].pop('created_at_ms')
+        for posts in ([], [tweet(owner='another')], [undated]):
+            with self.subTest(posts=posts), self.assertRaises(ValueError):
+                parse_x_public_html(x_numeric_stream(posts), 'https://x.com/example')
+
+    def test_x_only_decodes_json_literals_and_never_executes_script_values(self):
+        for page in ('<script>({kind:1,value:makePayload()});</script>',
+                     '<script>({kind:1,value:"not-json"});</script>',
+                     '<script>({kind:1,value:' + json.dumps(json.dumps({'unrelated': True})) + '});</script>'):
+            with self.subTest(page=page), self.assertRaises(ValueError):
+                parse_x_public_html(page, 'https://x.com/example')
+
     def test_telegram_uses_canonical_ids_unescapes_and_preserves_origin(self):
         page = telegram([(2, '女子被殴打<br>警方介入 &amp; 跟进<a href="https://x.com/example/status/9">查看原文</a>', '2026-10-28T16:00:00+08:00')])
         items, cursor = parse_telegram_html(page, "https://t.me/s/example")
@@ -178,6 +215,15 @@ class TestPublicFetcher(unittest.TestCase):
         result = fetcher.fetch_all()
         self.assertEqual(result.failed_ids, ['example'])
         self.assertNotIn('example', result.items)
+
+    def test_x_numeric_stream_is_a_successful_feed_with_body_and_original_date(self):
+        feed = RSSFeedConfig('example', 'Example', 'https://x.com/example', source_type='x_public_html')
+        fetcher = self.make_fetcher(); fetcher.feeds = [feed]
+        fetcher.session.get = Mock(return_value=self.response(x_numeric_stream([tweet()])))
+        result = fetcher.fetch_all()
+        self.assertEqual(result.failed_ids, [])
+        self.assertEqual(result.items['example'][0].summary, '男子持刀伤人')
+        self.assertEqual(result.items['example'][0].published_at, '2026-10-28T12:00:00+00:00')
 
     def test_rejects_wrong_origin_before_request(self):
         fetcher = self.make_fetcher(); fetcher.session.get = Mock()
